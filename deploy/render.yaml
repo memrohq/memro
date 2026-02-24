@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: memro-backend
+    runtime: docker
+    dockerfilePath: ./memro-core/backend/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: memro-db
+          property: connectionString
+      - key: QDRANT_URL
+        value: http://memro-qdrant:6333
+      - key: OPENAI_API_KEY
+        sync: false   # set manually in Render dashboard
+      - key: ALLOWED_ORIGINS
+        sync: false   # set to your frontend domain
+      - key: DB_MAX_CONNECTIONS
+        value: "20"
+      - key: RUST_LOG
+        value: info
+
+databases:
+  - name: memro-db
+    databaseName: memro
+    user: memro
+    plan: free
