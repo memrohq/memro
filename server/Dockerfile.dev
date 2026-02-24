@@ -1,0 +1,11 @@
+FROM rust:latest
+
+WORKDIR /usr/src/app
+
+# Install cargo-watch for hot reloading (similar to air in Go)
+RUN cargo install cargo-watch
+
+COPY . .
+
+# We'll use cargo watch in the docker-compose command instead of a fixed CMD here
+CMD ["cargo", "watch", "-x", "run"]

@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>memro.co - The High-Performance Memory Layer Built for AI Agents</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+        }
+
+        .gradient-text {
+            background: linear-gradient(135deg, #0066CC 0%, #0052A3 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+    </style>
+</head>
+
+<body class="bg-white">
+    <!-- Navigation -->
+    <nav class="border-b border-slate-200 bg-white/80 backdrop-blur-sm sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 bg-blue-600 flex items-center justify-center">
+                    <span class="text-white font-bold text-lg">M</span>
+                </div>
+                <span class="text-xl font-bold text-slate-900">memro.co</span>
+            </div>
+            <div class="flex items-center gap-8">
+                <a href="#features" class="text-sm font-medium text-slate-600 hover:text-slate-900">Features</a>
+                <a href="#pricing" class="text-sm font-medium text-slate-600 hover:text-slate-900">Pricing</a>
+                <a href="#docs" class="text-sm font-medium text-slate-600 hover:text-slate-900">Docs</a>
+                <a href="https://github.com/memro-co"
+                    class="text-sm font-medium text-slate-600 hover:text-slate-900">GitHub</a>
+                <a href="http://localhost:5174"
+                    class="px-4 py-2 bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition-colors">
+                    Infrastructure Explorer
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="max-w-7xl mx-auto px-6 pt-20 pb-24">
+        <div class="text-center max-w-4xl mx-auto">
+            <div class="flex items-center justify-center gap-3 mb-6">
+                <span
+                    class="px-3 py-1 bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold uppercase tracking-wider">
+                    Open Protocol
+                </span>
+                <span
+                    class="px-3 py-1 bg-green-50 border border-green-200 text-green-700 text-xs font-bold uppercase tracking-wider">
+                    Production Ready
+                </span>
+            </div>
+
+            <h1 class="text-6xl font-black text-slate-900 mb-6 leading-tight">
+                The High-Performance<br />
+                <span class="gradient-text">Memory Layer</span><br />
+                Built for AI Agents
+            </h1>
+
+            <p class="text-xl text-slate-600 mb-10 max-w-2xl mx-auto">
+                Open-source memory infrastructure that gives AI agents continuity of self.
+                Install with Docker, scale with managed cloud.
+            </p>
+
+            <div class="flex items-center justify-center gap-4">
+                <a href="#quickstart"
+                    class="px-8 py-4 bg-blue-600 text-white font-bold hover:bg-blue-700 transition-colors">
+                    Self-Host with Docker
+                </a>
+                <a href="#pricing"
+                    class="px-8 py-4 border-2 border-slate-900 text-slate-900 font-bold hover:bg-slate-900 hover:text-white transition-colors">
+                    Try Managed Cloud
+                </a>
+            </div>
+
+            <!-- Stats -->
+            <div class="grid grid-cols-3 gap-8 mt-16 pt-16 border-t border-slate-200">
+                <div>
+                    <div class="text-4xl font-black text-blue-600 mb-2">&lt;5ms</div>
+                    <div class="text-sm text-slate-600 font-medium">Persistence Latency</div>
+                </div>
+                <div>
+                    <div class="text-4xl font-black text-blue-600 mb-2">100%</div>
+                    <div class="text-sm text-slate-600 font-medium">Data Portability</div>
+                </div>
+                <div>
+                    <div class="text-4xl font-black text-blue-600 mb-2">0</div>
+                    <div class="text-sm text-slate-600 font-medium">Vendor Lock-in</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Problem/Solution -->
+    <section class="bg-slate-50 py-24">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="grid grid-cols-2 gap-16 items-center">
+                <div>
+                    <span class="text-sm font-bold text-blue-600 uppercase tracking-wider mb-4 block">The Problem</span>
+                    <h2 class="text-4xl font-black text-slate-900 mb-6">
+                        AI agents are stateless
+                    </h2>
+                    <p class="text-lg text-slate-600 mb-6">
+                        Every conversation starts from zero. Agents can't remember who they are, what they've learned,
+                        or what they've done.
+                    </p>
+                    <p class="text-lg text-slate-600">
+                        Building memory infrastructure from scratch takes months. Operating it reliably takes more.
+                    </p>
+                </div>
+                <div class="bg-white p-8 border border-slate-200 font-mono text-sm">
+                    <div class="text-red-600 mb-4">// Without memro.co</div>
+                    <div class="text-slate-400 mb-2">agent.remember("user prefers brevity")</div>
+                    <div class="text-slate-400 mb-2">agent.recall("user preferences")</div>
+                    <div class="text-red-600 mb-6">→ null // memory lost</div>
+
+                    <div class="text-green-600 mb-4">// With memro.co</div>
+                    <div class="text-slate-900 mb-2">agent.remember("user prefers brevity")</div>
+                    <div class="text-slate-900 mb-2">agent.recall("user preferences")</div>
+                    <div class="text-green-600">→ "user prefers brevity" // persisted</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features" class="py-24">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="text-center mb-16">
+                <h2 class="text-4xl font-black text-slate-900 mb-4">Infrastructure Primitives</h2>
+                <p class="text-lg text-slate-600">Everything agents need for persistent memory. Nothing they don't.</p>
+            </div>
+
+            <div class="grid grid-cols-3 gap-8">
+                <!-- Identity -->
+                <div class="border border-slate-200 p-8 hover:border-blue-600 transition-colors">
+                    <div class="w-12 h-12 bg-blue-600 flex items-center justify-center mb-6">
+                        <span class="text-white text-2xl">🔑</span>
+                    </div>
+                    <h3 class="text-xl font-bold text-slate-900 mb-3">Cryptographic Identity</h3>
+                    <p class="text-slate-600 mb-4">Ed25519 identity generation. Public key = Agent ID. Private key =
+                        sovereignty.</p>
+                    <ul class="text-sm text-slate-600 space-y-2">
+                        <li>• Self-owned identities</li>
+                        <li>• Key rotation</li>
+                        <li>• Export/delete</li>
+                    </ul>
+                </div>
+
+                <!-- Memory -->
+                <div class="border border-slate-200 p-8 hover:border-blue-600 transition-colors">
+                    <div class="w-12 h-12 bg-blue-600 flex items-center justify-center mb-6">
+                        <span class="text-white text-2xl">💾</span>
+                    </div>
+                    <h3 class="text-xl font-bold text-slate-900 mb-3">Long-Term Memory</h3>
+                    <p class="text-slate-600 mb-4">Append-only storage. Episodic, semantic, and profile memory types.
+                    </p>
+                    <ul class="text-sm text-slate-600 space-y-2">
+                        <li>• Time-aware recall</li>
+                        <li>• Visibility controls</li>
+                        <li>• Full portability</li>
+                    </ul>
+                </div>
+
+                <!-- Recall -->
+                <div class="border border-slate-200 p-8 hover:border-blue-600 transition-colors">
+                    <div class="w-12 h-12 bg-blue-600 flex items-center justify-center mb-6">
+                        <span class="text-white text-2xl">🔍</span>
+                    </div>
+                    <h3 class="text-xl font-bold text-slate-900 mb-3">Semantic Recall</h3>
+                    <p class="text-slate-600 mb-4">Vector-based similarity search. Find memories by meaning, not
+                        keywords.</p>
+                    <ul class="text-sm text-slate-600 space-y-2">
+                        <li>• &lt;50ms latency</li>
+                        <li>• Filtered queries</li>
+                        <li>• Recent + semantic</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Open Protocol -->
+    <section class="bg-blue-600 text-white py-24">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="grid grid-cols-2 gap-16 items-center">
+                <div>
+                    <h2 class="text-4xl font-black mb-6">Open Protocol.<br />No Lock-in.</h2>
+                    <p class="text-lg text-blue-100 mb-8">
+                        The protocol is free. Self-host with Docker. Export your data anytime.
+                        We make money by operating the infrastructure reliably, not by owning your agents.
+                    </p>
+                    <div class="space-y-4">
+                        <div class="flex items-start gap-3">
+                            <div class="w-6 h-6 bg-white/20 flex items-center justify-center mt-1">✓</div>
+                            <div>
+                                <div class="font-bold mb-1">Self-Hostable</div>
+                                <div class="text-blue-100 text-sm">Run on your infrastructure with Docker Compose</div>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <div class="w-6 h-6 bg-white/20 flex items-center justify-center mt-1">✓</div>
+                            <div>
+                                <div class="font-bold mb-1">Full Export</div>
+                                <div class="text-blue-100 text-sm">Download all agent data as JSON/CSV</div>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <div class="w-6 h-6 bg-white/20 flex items-center justify-center mt-1">✓</div>
+                            <div>
+                                <div class="font-bold mb-1">Verifiable Deletion</div>
+                                <div class="text-blue-100 text-sm">Cryptographic proof of data removal</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-slate-900 p-8 font-mono text-sm">
+                    <div class="text-green-400 mb-4"># Quick Start (5 minutes)</div>
+                    <div class="text-slate-300 mb-2">$ git clone https://github.com/memro-co/memro</div>
+                    <div class="text-slate-300 mb-2">$ cd memro</div>
+                    <div class="text-slate-300 mb-2">$ docker-compose up -d</div>
+                    <div class="text-green-400 mb-6">✓ memro.co running on localhost:8081</div>
+
+                    <div class="text-green-400 mb-4"># Python SDK</div>
+                    <div class="text-slate-300 mb-2">from memro import Agent</div>
+                    <div class="text-slate-300 mb-2">agent = Agent.create()</div>
+                    <div class="text-slate-300 mb-2">agent.remember("First memory")</div>
+                    <div class="text-slate-300">agent.recall(limit=10)</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing -->
+    <section id="pricing" class="py-24">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="text-center mb-16">
+                <h2 class="text-4xl font-black text-slate-900 mb-4">Simple, Honest Pricing</h2>
+                <p class="text-lg text-slate-600">The protocol is free. Pay for operational excellence.</p>
+            </div>
+
+            <div class="grid grid-cols-4 gap-6">
+                <!-- Free -->
+                <div class="border-2 border-slate-200 p-8">
+                    <div class="text-sm font-bold text-slate-600 uppercase tracking-wider mb-2">Self-Hosted</div>
+                    <div class="text-4xl font-black text-slate-900 mb-6">$0</div>
+                    <ul class="space-y-3 text-sm text-slate-600 mb-8">
+                        <li>✓ Full protocol access</li>
+                        <li>✓ Unlimited agents</li>
+                        <li>✓ Your infrastructure</li>
+                        <li>✓ Community support</li>
+                    </ul>
+                    <a href="#quickstart"
+                        class="block w-full py-3 border-2 border-slate-900 text-slate-900 font-bold text-center hover:bg-slate-900 hover:text-white transition-colors">
+                        Get Started
+                    </a>
+                </div>
+
+                <!-- Starter -->
+                <div class="border-2 border-slate-200 p-8">
+                    <div class="text-sm font-bold text-slate-600 uppercase tracking-wider mb-2">Starter</div>
+                    <div class="text-4xl font-black text-slate-900 mb-6">$399<span
+                            class="text-lg text-slate-600">/mo</span></div>
+                    <ul class="space-y-3 text-sm text-slate-600 mb-8">
+                        <li>✓ Managed infrastructure</li>
+                        <li>✓ Automated backups</li>
+                        <li>✓ 10x free tier limits</li>
+                        <li>✓ Email support</li>
+                    </ul>
+                    <a href="#"
+                        class="block w-full py-3 bg-blue-600 text-white font-bold text-center hover:bg-blue-700 transition-colors">
+                        Start Trial
+                    </a>
+                </div>
+
+                <!-- Performance -->
+                <div class="border-2 border-blue-600 p-8 relative">
+                    <div
+                        class="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-blue-600 text-white text-xs font-bold">
+                        POPULAR
+                    </div>
+                    <div class="text-sm font-bold text-blue-600 uppercase tracking-wider mb-2">Performance</div>
+                    <div class="text-4xl font-black text-slate-900 mb-6">$1,499<span
+                            class="text-lg text-slate-600">/mo</span></div>
+                    <ul class="space-y-3 text-sm text-slate-600 mb-8">
+                        <li>✓ Higher QPS</li>
+                        <li>✓ &lt;50ms recall latency</li>
+                        <li>✓ Priority workers</li>
+                        <li>✓ Slack support</li>
+                    </ul>
+                    <a href="#"
+                        class="block w-full py-3 bg-blue-600 text-white font-bold text-center hover:bg-blue-700 transition-colors">
+                        Start Trial
+                    </a>
+                </div>
+
+                <!-- Enterprise -->
+                <div class="border-2 border-slate-200 p-8">
+                    <div class="text-sm font-bold text-slate-600 uppercase tracking-wider mb-2">Enterprise</div>
+                    <div class="text-4xl font-black text-slate-900 mb-6">Custom</div>
+                    <ul class="space-y-3 text-sm text-slate-600 mb-8">
+                        <li>✓ Encrypted-at-rest</li>
+                        <li>✓ Private shards</li>
+                        <li>✓ Audit logs</li>
+                        <li>✓ SLA guarantees</li>
+                    </ul>
+                    <a href="#"
+                        class="block w-full py-3 border-2 border-slate-900 text-slate-900 font-bold text-center hover:bg-slate-900 hover:text-white transition-colors">
+                        Contact Sales
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-200 py-12">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="grid grid-cols-4 gap-8 mb-8">
+                <div>
+                    <div class="font-bold text-slate-900 mb-4">Product</div>
+                    <ul class="space-y-2 text-sm text-slate-600">
+                        <li><a href="#features">Features</a></li>
+                        <li><a href="#pricing">Pricing</a></li>
+                        <li><a href="http://localhost:5174">Infrastructure Explorer</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="font-bold text-slate-900 mb-4">Developers</div>
+                    <ul class="space-y-2 text-sm text-slate-600">
+                        <li><a href="#docs">Documentation</a></li>
+                        <li><a href="#">API Reference</a></li>
+                        <li><a href="#">Python SDK</a></li>
+                        <li><a href="#">JavaScript SDK</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="font-bold text-slate-900 mb-4">Company</div>
+                    <ul class="space-y-2 text-sm text-slate-600">
+                        <li><a href="#">About</a></li>
+                        <li><a href="#">Blog</a></li>
+                        <li><a href="#">Pricing Philosophy</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <div class="font-bold text-slate-900 mb-4">Legal</div>
+                    <ul class="space-y-2 text-sm text-slate-600">
+                        <li><a href="#">Privacy</a></li>
+                        <li><a href="#">Terms</a></li>
+                        <li><a href="#">Security</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="pt-8 border-t border-slate-200 flex justify-between items-center">
+                <div class="text-sm text-slate-600">© 2026 memro.co. Open protocol. No lock-in.</div>
+                <div class="flex gap-4">
+                    <a href="#" class="text-slate-600 hover:text-slate-900">GitHub</a>
+                    <a href="#" class="text-slate-600 hover:text-slate-900">Twitter</a>
+                    <a href="#" class="text-slate-600 hover:text-slate-900">Discord</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+</body>
+
+</html>

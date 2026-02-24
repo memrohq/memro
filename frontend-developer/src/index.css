@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply bg-[#f6f7f8] text-[#0f172a] font-sans antialiased min-h-screen flex flex-col;
+    background-image:
+      linear-gradient(to right, rgba(19, 109, 236, 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(19, 109, 236, 0.05) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+}
+
+@theme {
+  --color-primary: #136dec;
+  --color-background-light: #f6f7f8;
+  --color-background-dark: #101822;
+  --color-blueprint-border: #136dec;
+  --font-display: "Space Grotesk", sans-serif;
+  --radius-default: 0px;
+}
+
+.blueprint-grid {
+  background-image:
+    linear-gradient(to right, rgba(19, 109, 236, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(19, 109, 236, 0.05) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #136dec;
+}
+
+.blueprint-outline {
+  border: 1px solid #136dec;
+}
+
+.blueprint-outline-half {
+  border: 0.5px solid rgba(19, 109, 236, 0.4);
+}
+
+.divider-b {
+  border-bottom: 1px solid #136dec;
+}
+
+.divider-t {
+  border-top: 1px solid #136dec;
+}
+
+.divider-r {
+  border-right: 1px solid #136dec;
+}
+
+.divider-l {
+  border-left: 1px solid #136dec;
+}

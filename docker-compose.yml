@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8081:8080"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-memro}:${POSTGRES_PASSWORD:-memro}@db:5432/${POSTGRES_DB:-memro}
+      - QDRANT_URL=http://qdrant:6333
+      - RUST_LOG=${RUST_LOG:-debug}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:5174,http://localhost:3000}
+      - DB_MAX_CONNECTIONS=${DB_MAX_CONNECTIONS:-20}
+    volumes:
+      - ./backend:/usr/src/app
+      - cargo_cache:/usr/local/cargo/registry
+    depends_on:
+      db:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-memro}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-memro}
+      - POSTGRES_DB=${POSTGRES_DB:-memro}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-memro}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6343:6333"
+      - "6344:6334"
+    volumes:
+      - qdrant_data:/var/lib/qdrant/storage
+
+  frontend-developer:
+    build:
+      context: ./frontend-developer
+    ports:
+      - "5174:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  cargo_cache:

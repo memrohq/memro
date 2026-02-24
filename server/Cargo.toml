@@ -1,0 +1,29 @@
+[package]
+name = "ax_memro"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.7", features = ["macros", "multipart"] }
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlx = { version = "0.7", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono"] }
+qdrant-client = "1.10"
+ed25519-dalek = { version = "2.2", features = ["rand_core"] }
+
+hex = "0.4"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+http = "1.0"
+rand = "0.8"
+async-trait = "0.1"
+anyhow = "1.0"
+reqwest = { version = "0.11", features = ["json", "multipart"] }
+tokio-util = { version = "0.7", features = ["io"] }
+base64 = "0.21"
+mime_guess = "2.0"
