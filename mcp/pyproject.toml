@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "memro-mcp"
+version = "0.1.0"
+description = "MCP server for memro — gives AI agents persistent memory via Claude, Cursor, and any MCP client"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "memro Team", email = "sdk@memro.co"}
+]
+keywords = ["ai", "agents", "memory", "mcp", "claude", "cursor", "memro"]
+
+dependencies = [
+    "mcp>=1.0.0",
+    "memro>=0.1.0",
+    "python-dotenv",
+    "starlette",
+    "uvicorn",
+    "uvloop",
+    "neo4j",
+]
+
+[project.scripts]
+memro-mcp = "memro_mcp:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.urls]
+Homepage = "https://memro.co"
+Repository = "https://github.com/memro-co/memro-mcp"

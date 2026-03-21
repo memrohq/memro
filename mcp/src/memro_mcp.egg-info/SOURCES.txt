@@ -1,0 +1,10 @@
+README.md
+pyproject.toml
+src/memro_mcp/__init__.py
+src/memro_mcp/server.py
+src/memro_mcp.egg-info/PKG-INFO
+src/memro_mcp.egg-info/SOURCES.txt
+src/memro_mcp.egg-info/dependency_links.txt
+src/memro_mcp.egg-info/entry_points.txt
+src/memro_mcp.egg-info/requires.txt
+src/memro_mcp.egg-info/top_level.txt
