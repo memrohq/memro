@@ -1,19 +1,17 @@
 use crate::ports::CryptoService;
-use ed25519_dalek::{SigningKey, Signature, VerifyingKey, Verifier};
-use rand::rngs::OsRng;
+use ed25519_dalek::{Signature, VerifyingKey, Verifier};
 
 pub struct Ed25519CryptoService;
 
 impl CryptoService for Ed25519CryptoService {
-    fn generate_keypair(&self) -> (String, String) {
-        let mut csprng = OsRng;
-        let signing_key = SigningKey::generate(&mut csprng);
-        let verifying_key = signing_key.verifying_key();
-        
-        (
-            hex::encode(verifying_key.to_bytes()),
-            hex::encode(signing_key.to_bytes()),
-        )
+    fn validate_public_key(&self, public_key: &str) -> bool {
+        let pub_key_bytes = match hex::decode(public_key) {
+            Ok(b) if b.len() == 32 => b,
+            _ => return false,
+        };
+        let mut pub_key_array = [0u8; 32];
+        pub_key_array.copy_from_slice(&pub_key_bytes);
+        VerifyingKey::from_bytes(&pub_key_array).is_ok()
     }
 
     fn verify_signature(&self, public_key: &str, message: &[u8], signature: &str) -> bool {

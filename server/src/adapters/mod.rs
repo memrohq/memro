@@ -1,3 +1,4 @@
+pub mod email;
 pub mod crypto;
 pub mod postgres;
 pub mod api;

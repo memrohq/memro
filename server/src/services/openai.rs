@@ -25,12 +25,6 @@ struct EmbeddingData {
     embedding: Vec<f32>,
 }
 
-#[derive(Debug, Serialize)]
-struct TranscriptionRequest {
-    model: String,
-    file: String,
-}
-
 impl OpenAIService {
     pub fn new(api_key: String) -> Self {
         let model = std::env::var("EMBEDDING_MODEL")

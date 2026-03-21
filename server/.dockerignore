@@ -1,0 +1,11 @@
+target/
+**/*.rs.bk
+.DS_Store
+.git/
+.gitignore
+.dockerignore
+Dockerfile
+Dockerfile.dev
+data/
+*.tar.gz
+memro.tar.gz

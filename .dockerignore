@@ -1,0 +1,24 @@
+# Rust
+backend/target/
+target/
+
+# Node/Frontend
+**/node_modules/
+**/dist/
+**/build/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Docker
+docker-compose.override.yml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Archives
+*.tar.gz
+memro.tar.gz

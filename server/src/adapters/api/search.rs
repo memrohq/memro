@@ -1,103 +1,74 @@
 use axum::{
     extract::{Query, State},
-    http::StatusCode,
+    http::{StatusCode, HeaderMap},
     Json,
+    Extension,
 };
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use crate::adapters::api::AppState;
+use memro_spec::{SearchQuery, SearchResponse};
 
-use super::AppState;
-
-#[derive(Debug, Deserialize)]
-pub struct SearchQuery {
-    pub agent_id: String,
-    pub query: String,
-    #[serde(default = "default_limit")]
-    pub limit: usize,
-    pub memory_type: Option<String>,
-}
-
-fn default_limit() -> usize {
-    10
-}
-
-#[derive(Debug, Serialize)]
-pub struct SearchResult {
-    pub memory_id: String,
-    pub content: String,
-    pub score: f32,
-    pub memory_type: String,
-    pub created_at: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SearchResponse {
-    pub results: Vec<SearchResult>,
-    pub latency_ms: u64,
-    pub total: usize,
-}
-
-/// Semantic search endpoint
-/// GET /search?agent_id=xxx&query=xxx&limit=10
+/// Hybrid search endpoint (optimized for parallel execution)
+/// GET /search?agent_id=xxx&query=xxx&limit=10&mode=hybrid
+/// 
+/// Optimization: Runs semantic + keyword search concurrently, merges results with deduplication
 pub async fn search_memories(
     State(state): State<Arc<AppState>>,
-    Query(params): Query<SearchQuery>,
+    Extension(agent): Extension<super::middleware::AuthenticatedAgent>,
+    headers: HeaderMap,
+    Query(mut params): Query<SearchQuery>,
 ) -> Result<Json<SearchResponse>, (StatusCode, String)> {
     let start = std::time::Instant::now();
-
-    // Get OpenAI API key
-    let openai_key = std::env::var("OPENAI_API_KEY")
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "OPENAI_API_KEY not set".to_string()))?;
-    
-    let openai = crate::services::OpenAIService::new(openai_key);
-
-    // Generate embedding for search query
-    let query_embedding = openai.embed_text(&params.query).await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to generate embedding: {}", e)))?;
-
-    // Search vector store
-    let memory_ids = state.vector_store
-        .search_similar(&params.agent_id, query_embedding, params.limit)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Vector search failed: {}", e)))?;
-
-    // Fetch memory details from database
-    let mut results = Vec::new();
-    
-    for (idx, memory_id) in memory_ids.iter().enumerate() {
-        // Query memory from database
-        let memory = sqlx::query!(
-            r#"
-            SELECT id, content, memory_type, created_at
-            FROM memories
-            WHERE id = $1 AND agent_id = $2
-            "#,
-            memory_id,
-            params.agent_id
-        )
-        .fetch_optional(&state.db_pool)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
-
-        if let Some(mem) = memory {
-            // Calculate score based on position (higher is better)
-            let score = 1.0 - (idx as f32 / params.limit as f32);
-            
-            results.push(SearchResult {
-                memory_id: mem.id.to_string(),
-                content: mem.content,
-                score,
-                memory_type: mem.memory_type,
-                created_at: mem.created_at.to_rfc3339(),
-            });
-        }
+    let ip = super::rate_limit::client_ip(&headers);
+    if !state.rate_limiter.check_and_increment(&ip) {
+        super::metrics::RATE_LIMIT_HITS.inc();
+        return Err((StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded".to_string()));
     }
 
-    let latency = start.elapsed();
+    // Input validation
+    if params.query.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "query cannot be empty".to_string()));
+    }
+    if params.query.len() > 500 {
+        return Err((StatusCode::BAD_REQUEST, "query exceeds 500 character limit".to_string()));
+    }
+    if params.agent_id.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "agent_id is required".to_string()));
+    }
+    params.limit = params.limit.min(50);
 
-    Ok(Json(SearchResponse {
-        total: results.len(),
-        results,
+    // P6 Optimization: Full query result caching layer
+    let cache_key = format!("query_res:{}:{}:{}:{:?}:{}", 
+        params.agent_id, params.query, params.limit, params.memory_type, params.mode);
+    if let Some(cached_response) = state.query_result_cache.get(&cache_key).await {
+        super::metrics::SEARCH_CACHE_HITS.inc();
+        return Ok(Json(cached_response));
+    }
+    super::metrics::SEARCH_CACHE_MISSES.inc();
+
+    // Delegate to the Memory Engine (Separation of Core vs Engine)
+    let engine_response = state.memory_engine
+        .search(&params, &agent.tenant_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Memory Engine search failed: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Search operation failed".to_string())
+        })?;
+
+    let latency = start.elapsed();
+    super::metrics::SEARCHES_TOTAL.inc();
+    super::audit(&state.db_pool, &agent.id, &agent.tenant_id, "memory.search", None, Some(&ip)).await;
+
+    // Build the final response (preserving existing structure)
+    let response = SearchResponse {
+        total: engine_response.total,
+        results: engine_response.results,
+        mode: params.mode,
         latency_ms: latency.as_millis() as u64,
-    }))
+    };
+
+    // P6: Cache the full response
+    state.query_result_cache.set(cache_key, response.clone()).await;
+
+    Ok(Json(response))
 }

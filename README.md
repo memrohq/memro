@@ -1,6 +1,6 @@
 # memro.co
 
-**The High-Performance Memory Layer Built for AI Agents**
+**Memro gives AI agents memory that evolves and reasons over time.**
 
 Open-source memory infrastructure that gives AI agents continuity of self. Install with Docker, scale with managed cloud.
 
@@ -11,11 +11,11 @@ Open-source memory infrastructure that gives AI agents continuity of self. Insta
 
 ## What is memro.co?
 
-memro.co is **infrastructure for persistent AI agents**. It provides three core primitives:
+memro.co is the **cognitive runtime for persistent AI agents**. It provides:
 
-1. **Cryptographic Identity** - Ed25519 identity generation (public key = Agent ID)
-2. **Long-Term Memory** - Append-only storage with episodic, semantic, and profile types
-3. **Semantic Recall** - Vector-based similarity search (<50ms latency)
+1. **Persistent Memory** - Episodic, semantic, and profile memory that evolves over time.
+2. **Reasoning Graph** - Multi-hop causal reasoning over your agent's entire history.
+3. **Automatic Evolution** - Intelligent consolidation of narrative logs into factual cores.
 
 ### Why memro.co?
 

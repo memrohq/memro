@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   backend:
@@ -6,17 +5,27 @@ services:
       context: ./backend
       dockerfile: Dockerfile.dev
     ports:
-      - "8081:8080"
+      - "8081:8081"
     env_file:
       - .env
     environment:
       - DATABASE_URL=postgres://${POSTGRES_USER:-memro}:${POSTGRES_PASSWORD:-memro}@db:5432/${POSTGRES_DB:-memro}
-      - QDRANT_URL=http://qdrant:6333
+      - QDRANT_URL=http://qdrant:6334
+      - QDRANT_API_KEY=${QDRANT_API_KEY:-memro_qdrant_secret}
       - RUST_LOG=${RUST_LOG:-debug}
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:5174,http://localhost:3000}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:5174,http://localhost:3000,http://localhost:5173}
       - DB_MAX_CONNECTIONS=${DB_MAX_CONNECTIONS:-20}
+      - EMAIL_HOST=${EMAIL_HOST}
+      - EMAIL_PORT=${EMAIL_PORT}
+      - EMAIL_HOST_USER=${EMAIL_HOST_USER}
+      - EMAIL_HOST_PASSWORD=${EMAIL_HOST_PASSWORD}
+      - RATE_LIMIT_MAX=${RATE_LIMIT_MAX:-200}
+      - RATE_LIMIT_WINDOW_SECONDS=${RATE_LIMIT_WINDOW_SECONDS:-60}
+      - MIGRATE_ON_STARTUP=${MIGRATE_ON_STARTUP:-true}
     volumes:
-      - ./backend:/usr/src/app
+      - ./backend:/usr/src/memrohq/memro-core/backend
+      - ../memro-spec:/usr/src/memrohq/memro-spec
+      - ../memro-engine:/usr/src/memrohq/memro-engine
       - cargo_cache:/usr/local/cargo/registry
     depends_on:
       db:
@@ -30,6 +39,7 @@ services:
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-memro}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-memro}
+      - POSTGRES_DB=${POSTGRES_DB:-memro}
       - POSTGRES_DB=${POSTGRES_DB:-memro}
     ports:
       - "5432:5432"
@@ -48,12 +58,14 @@ services:
       - "6344:6334"
     volumes:
       - qdrant_data:/var/lib/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY:-memro_qdrant_secret}
 
-  frontend-developer:
+  frontend:
     build:
-      context: ./frontend-developer
+      context: ./frontend
     ports:
-      - "5174:80"
+      - "5173:80"
     depends_on:
       - backend
     restart: unless-stopped

@@ -1,6 +1,6 @@
 FROM rust:latest
 
-WORKDIR /usr/src/app
+WORKDIR /usr/src/memrohq/memro-core/backend
 
 # Install cargo-watch for hot reloading (similar to air in Go)
 RUN cargo install cargo-watch

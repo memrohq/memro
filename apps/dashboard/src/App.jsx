@@ -1,34 +1,105 @@
 import { useState, useEffect } from "react";
+import nacl from "tweetnacl";
+import { decodeUTF8 } from "tweetnacl-util";
+import Login from "./components/Login";
 
-const API_BASE = "http://localhost:8081";
+const toHex = (bytes) => Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+const fromHex = (hex) => {
+  if (!hex || typeof hex !== 'string' || hex.length % 2 !== 0) return new Uint8Array(0);
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    const val = parseInt(hex.slice(i, i + 2), 16);
+    if (isNaN(val)) return new Uint8Array(0);
+    bytes[i / 2] = val;
+  }
+  return bytes;
+};
+
+const getAuthHeaders = (agentId, privateKeyHex, bodyStr, sessionToken) => {
+  if (sessionToken) {
+    return {
+      "Authorization": `Bearer ${sessionToken}`,
+      "Content-Type": "application/json"
+    };
+  }
+
+  const privateKeyBytes = fromHex(privateKeyHex);
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const payload = new TextEncoder().encode(timestamp + bodyStr);
+
+  if (privateKeyBytes.length === 32) {
+    // If we only have the seed, expand it to the full secret key tweetnacl expects
+    const expanded = nacl.sign.keyPair.fromSeed(privateKeyBytes).secretKey;
+    const signature = nacl.sign.detached(payload, expanded);
+    return {
+      "X-Agent-Id": agentId,
+      "X-Signature": toHex(signature),
+      "X-Timestamp": timestamp,
+      "Content-Type": "application/json"
+    };
+  }
+  
+  if (privateKeyBytes.length !== 64) {
+    throw new Error(`Invalid private key length: ${privateKeyBytes.length} bytes (expected 64)`);
+  }
+
+  const signature = nacl.sign.detached(payload, privateKeyBytes);
+  return {
+    "X-Agent-Id": agentId,
+    "X-Signature": toHex(signature),
+    "X-Timestamp": timestamp,
+    "Content-Type": "application/json"
+  };
+};
 
 const App = () => {
+  const [sessionToken, setSessionToken] = useState(() => localStorage.getItem("memro_session_token") || null);
+  const [apiBaseUrl, setApiBaseUrl] = useState(() => localStorage.getItem("memro_api_base") || import.meta.env.VITE_API_BASE_URL || "/api");
+  const [settingsApiUrl, setSettingsApiUrl] = useState(() => localStorage.getItem("memro_api_base") || import.meta.env.VITE_API_BASE_URL || "/api");
   const [did, setDid] = useState(() => localStorage.getItem("memro_did") || "NOT_INITIALIZED");
   const [status, setStatus] = useState("DISCONNECTED");
+  const [dbStatus, setDbStatus] = useState("UNKNOWN");
+  const [vStoreStatus, setVStoreStatus] = useState("UNKNOWN");
   const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
   const [memories, setMemories] = useState([]);
   const [activeView, setActiveView] = useState("memory");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showNotificationsModal, setShowNotificationsModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
+  const [restoreForm, setRestoreForm] = useState({ did: "", pk: "" });
   const [newMemory, setNewMemory] = useState({ content: "", type: "episodic", visibility: "private" });
   const [notifications, setNotifications] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [uploadingFile, setUploadingFile] = useState(false);
 
   useEffect(() => {
     const checkHealth = async () => {
       try {
-        const res = await fetch(`${API_BASE}/health`);
-        if (res.ok) setStatus("CONNECTED");
+        const res = await fetch(`${apiBaseUrl}/health`);
+        if (res.ok) {
+          setStatus("CONNECTED");
+          const data = await res.json();
+          setDbStatus(data.db || "error");
+          setVStoreStatus(data.vector_store || "unavailable");
+        } else {
+          setStatus("OFFLINE");
+          setDbStatus("error");
+          setVStoreStatus("unavailable");
+        }
       } catch (e) {
         setStatus("OFFLINE");
+        setDbStatus("error");
+        setVStoreStatus("unavailable");
       }
     };
     checkHealth();
     const interval = setInterval(checkHealth, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [apiBaseUrl]);
 
   useEffect(() => {
     if (did !== "NOT_INITIALIZED") {
@@ -36,9 +107,11 @@ const App = () => {
     }
   }, [did]);
 
-  const fetchMemories = async () => {
+  const fetchMemories = async (agentId = did) => {
     try {
-      const res = await fetch(`${API_BASE}/memory/${did}`);
+      const pk = localStorage.getItem("memro_pk");
+      const headers = getAuthHeaders(agentId, pk, "", sessionToken);
+      const res = await fetch(`${apiBaseUrl}/memory/agent/${agentId}`, { headers });
       if (res.ok) {
         const data = await res.json();
         setMemories(data);
@@ -49,14 +122,93 @@ const App = () => {
     }
   };
 
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (did === "NOT_INITIALIZED") return alert("Initialize Identity first.");
+
+    setUploadingFile(true);
+    try {
+      const formData = new FormData();
+      const isImage = file.type.startsWith('image/');
+      const isPdf = file.type === 'application/pdf';
+
+      if (!isImage && !isPdf) {
+        addNotification("Unsupported File", "Only images and PDFs are currently supported.");
+        return;
+      }
+
+      const endpoint = isImage ? "/upload/image" : "/upload/document";
+      const fieldName = isImage ? "image" : "document";
+      formData.append(fieldName, file);
+
+      const headers = sessionToken ? { "Authorization": `Bearer ${sessionToken}` } : { "X-Agent-Id": did };
+
+      const res = await fetch(`${apiBaseUrl}${endpoint}`, {
+        method: "POST",
+        headers,
+        body: formData
+      });
+
+      if (res.ok) {
+        addNotification("Upload Success", `Deeply indexed ${file.name}`);
+        addAuditLog("FILE_UPLOAD", `Uploaded and processed ${file.name}`);
+        fetchMemories();
+      } else {
+        const err = await res.text();
+        addNotification("Upload Error", err);
+      }
+    } catch (e) {
+      addNotification("Error", "Multimodal ingestion failed");
+    } finally {
+      setUploadingFile(false);
+      event.target.value = ''; // Reset input
+    }
+  };
+
+  const handleSearch = async (e) => {
+    e.preventDefault();
+    if (!searchQuery) return fetchMemories();
+    setIsSearching(true);
+    try {
+      const pk = localStorage.getItem("memro_pk");
+      const headers = sessionToken ? { "Authorization": `Bearer ${sessionToken}` } : getAuthHeaders(did, pk, "");
+      const res = await fetch(`${apiBaseUrl}/search?agent_id=${did}&query=${encodeURIComponent(searchQuery)}`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        const resultsAsMemories = (data.results || []).map(r => ({
+          id: r.id || r.memory_id || Math.random().toString(36).slice(2),
+          content: r.content || "",
+          memory_type: r.memory_type || "episodic",
+          score: r.score,
+          created_at: r.created_at || new Date().toISOString()
+        }));
+        setMemories(resultsAsMemories);
+        addAuditLog("SEARCH", `Searched for: ${searchQuery}`);
+      }
+    } catch (e) {
+      console.error("Search failed", e);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
   const generateKey = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/identity`, { method: "POST" });
+      const keyPair = nacl.sign.keyPair();
+      const publicKey = toHex(keyPair.publicKey);
+      const privateKey = toHex(keyPair.secretKey);
+      
+      const res = await fetch(`${apiBaseUrl}/identity`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ public_key: publicKey })
+      });
       const data = await res.json();
       setDid(data.agent_id);
       localStorage.setItem("memro_did", data.agent_id);
-      localStorage.setItem("memro_pk", data.private_key);
+      localStorage.setItem("memro_pk", privateKey);
       addNotification("Identity Generated", `Agent ID: ${data.agent_id.slice(0, 12)}...`);
       addAuditLog("IDENTITY_CREATE", `Generated new identity`);
     } catch (e) {
@@ -66,20 +218,53 @@ const App = () => {
     }
   };
 
+  const handleRestoreIdentity = (e) => {
+    e.preventDefault();
+    const { did: inputDid, pk: inputPk } = restoreForm;
+    
+    // Basic validation
+    if (!inputDid || inputDid.length < 10) {
+      return addNotification("Error", "Invalid Agent ID format");
+    }
+    if (!inputPk || (inputPk.length !== 64 && inputPk.length !== 128)) {
+      return addNotification("Error", "Invalid Private Key format (must be hex)");
+    }
+    
+    try {
+      // Test the key by running fromHex
+      fromHex(inputPk);
+    } catch {
+      return addNotification("Error", "Private Key must be valid hex");
+    }
+
+    localStorage.setItem("memro_did", inputDid);
+    localStorage.setItem("memro_pk", inputPk);
+    setDid(inputDid);
+    setShowRestoreModal(false);
+    setRestoreForm({ did: "", pk: "" });
+    addNotification("Identity Restored", `Agent ID: ${inputDid.slice(0, 12)}...`);
+    addAuditLog("IDENTITY_RESTORE", `Restored existing identity`);
+    fetchMemories(inputDid);
+  };
+
   const handleCreateMemory = async (e) => {
     e.preventDefault();
     if (did === "NOT_INITIALIZED") return alert("Initialize Identity first.");
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/memory`, {
+      const body = {
+        agent_id: did,
+        content: newMemory.content,
+        memory_type: newMemory.type,
+        visibility: newMemory.visibility
+      };
+      const bodyStr = JSON.stringify(body);
+      const headers = getAuthHeaders(did, localStorage.getItem("memro_pk"), bodyStr, sessionToken);
+      
+      const res = await fetch(`${apiBaseUrl}/memory`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          agent_id: did,
-          content: newMemory.content,
-          memory_type: newMemory.type,
-          visibility: newMemory.visibility
-        })
+        headers,
+        body: bodyStr
       });
       if (res.ok) {
         setShowCreateModal(false);
@@ -133,6 +318,29 @@ const App = () => {
     addAuditLog("DATA_EXPORT", "Exported all agent data");
   };
 
+  const wipeIdentity = () => {
+    if (!confirm("Wipe local credentials? You will need to regenerate an identity.")) return;
+    localStorage.removeItem("memro_did");
+    localStorage.removeItem("memro_pk");
+    localStorage.removeItem("memro_session_token");
+    setSessionToken(null);
+    setDid("NOT_INITIALIZED");
+    setMemories([]);
+    addNotification("Wiped", "Local credentials cleared");
+  };
+
+  const handleLogout = async () => {
+    if (sessionToken) {
+      try {
+        await fetch(`${apiBaseUrl}/auth/logout`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${sessionToken}` }
+        });
+      } catch (e) {}
+    }
+    wipeIdentity();
+  };
+
   const deleteAllData = () => {
     if (!confirm("Are you sure? This will delete ALL data and cannot be undone.")) return;
     localStorage.clear();
@@ -142,6 +350,34 @@ const App = () => {
     setNotifications([]);
     addNotification("Data Deleted", "All local data cleared");
   };
+
+  const saveSettings = () => {
+    try {
+      new URL(settingsApiUrl);
+    } catch {
+      return addNotification("Error", "Invalid API Endpoint URL format");
+    }
+    localStorage.setItem("memro_api_base", settingsApiUrl);
+    setApiBaseUrl(settingsApiUrl);
+    setShowSettingsModal(false);
+    addNotification("Settings Saved", `API Endpoint updated`);
+  };
+
+  if (!sessionToken) {
+    return <Login 
+      apiBaseUrl={apiBaseUrl} 
+      onLoginSuccess={(token, agentId, pk, userId, email) => {
+        localStorage.setItem("memro_session_token", token);
+        if (agentId) {
+          localStorage.setItem("memro_did", agentId);
+          setDid(agentId);
+        }
+        if (pk) localStorage.setItem("memro_pk", pk);
+        setSessionToken(token);
+        addNotification("Login Successful", `Welcome to Memro, ${email}!`);
+      }} 
+    />;
+  }
 
   return (
     <div className="flex flex-col min-h-screen text-[#0f172a] font-display">
@@ -239,21 +475,20 @@ const App = () => {
                   <span className="text-[10px] text-slate-600 font-mono">API: {status}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="size-2 rounded-full bg-green-500"></div>
-                  <span className="text-[10px] text-slate-600 font-mono">Postgres: ONLINE</span>
+                  <div className={`size-2 rounded-full ${dbStatus === 'ok' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                  <span className="text-[10px] text-slate-600 font-mono">Postgres: {dbStatus === 'ok' ? 'ONLINE' : 'OFFLINE'}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="size-2 rounded-full bg-yellow-500"></div>
-                  <span className="text-[10px] text-slate-600 font-mono">Qdrant: FALLBACK</span>
+                  <div className={`size-2 rounded-full ${vStoreStatus === 'ok' ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+                  <span className="text-[10px] text-slate-600 font-mono">Qdrant: {vStoreStatus === 'ok' ? 'ONLINE' : 'FALLBACK'}</span>
                 </div>
               </div>
             </div>
-            <div className="px-3">
+            <div className="px-3 flex flex-col gap-2">
               <button
-                onClick={generateKey}
-                disabled={did !== "NOT_INITIALIZED" || loading}
-                className="w-full h-10 bg-primary text-white font-bold uppercase text-[10px] tracking-widest hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                {loading ? "INITIALIZING..." : did === "NOT_INITIALIZED" ? "GENERATE IDENTITY" : "IDENTITY ACTIVE"}
+                onClick={handleLogout}
+                className="w-full h-10 border border-red-500/50 text-red-500 font-bold uppercase text-[10px] tracking-widest hover:bg-red-500/10 transition-colors">
+                SIGN OUT
               </button>
             </div>
             <div className="px-3 pb-4">
@@ -294,9 +529,10 @@ const App = () => {
                           'Export, backup, and delete your data'}
                 </p>
               </div>
-              <div className="flex flex-col items-end gap-4 font-mono">
+                <div className="flex flex-col items-end gap-4 font-mono">
                 <div className="flex gap-2">
                   <span className="text-[10px] text-primary uppercase">STATUS: {status}</span>
+                  <button onClick={wipeIdentity} className="text-[10px] text-red-500 uppercase hover:underline">Wipe Identity</button>
                   {activeView === 'memory' && <span className="text-[10px] text-primary uppercase">RECORDS: {memories.length}</span>}
                   {activeView === 'logs' && <span className="text-[10px] text-primary uppercase">LOGS: {auditLogs.length}</span>}
                 </div>
@@ -325,11 +561,15 @@ const App = () => {
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-slate-600">PostgreSQL</span>
-                      <span className="text-xs font-bold text-green-600">ONLINE</span>
+                      <span className={`text-xs font-bold ${dbStatus === 'ok' ? 'text-green-600' : 'text-red-600'}`}>
+                        {dbStatus === 'ok' ? 'ONLINE' : 'OFFLINE'}
+                      </span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-slate-600">Qdrant Vector DB</span>
-                      <span className="text-xs font-bold text-yellow-600">FALLBACK</span>
+                      <span className={`text-xs font-bold ${vStoreStatus === 'ok' ? 'text-green-600' : 'text-yellow-600'}`}>
+                        {vStoreStatus === 'ok' ? 'ONLINE' : 'FALLBACK'}
+                      </span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-xs text-slate-600">Uptime</span>
@@ -380,39 +620,79 @@ const App = () => {
 
             {/* Memory View */}
             {activeView === 'memory' && (
-              <table className="w-full border-collapse font-mono text-xs">
-                <thead>
-                  <tr className="border-b-2 border-primary">
-                    <th className="text-left py-3 px-4 text-primary font-bold uppercase tracking-wider">Fragment ID</th>
-                    <th className="text-left py-3 px-4 text-primary font-bold uppercase tracking-wider">Content Hash</th>
-                    <th className="text-left py-3 px-4 text-primary font-bold uppercase tracking-wider">Primitive</th>
-                    <th className="text-left py-3 px-4 text-primary font-bold uppercase tracking-wider">Visibility</th>
-                    <th className="text-left py-3 px-4 text-primary font-bold uppercase tracking-wider">Created At</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {memories.map((mem) => (
-                    <tr key={mem.id} className="border-b border-primary/20 hover:bg-primary/5 transition-colors">
-                      <td className="py-3 px-4 text-primary font-bold">{mem.id.slice(0, 8)}...</td>
-                      <td className="py-3 px-4 text-slate-600">{mem.content.slice(0, 40)}...</td>
-                      <td className="py-3 px-4">
-                        <span className="px-2 py-1 bg-primary/10 text-primary text-[10px] font-bold uppercase">
-                          {mem.memory_type}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-slate-600 capitalize">{mem.visibility}</td>
-                      <td className="py-3 px-4 text-slate-500">{new Date(mem.created_at).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                  {memories.length === 0 && (
-                    <tr>
-                      <td colSpan="5" className="py-12 text-center text-slate-400 italic">
-                        No memory fragments detected. Awaiting agent activity.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+              <div className="flex flex-col h-full">
+                <div className="mb-6 flex gap-4">
+                  <form onSubmit={handleSearch} className="flex-1 flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Semantic Search / Memory Recall..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="flex-1 bg-white border border-primary/30 px-4 py-2 font-mono text-xs focus:outline-none focus:border-primary shadow-inner"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSearching}
+                      className="px-6 bg-primary text-white font-bold uppercase text-[10px] tracking-widest hover:bg-primary/90 transition-colors">
+                      {isSearching ? "SEARCHING..." : "RECALL"}
+                    </button>
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => { setSearchQuery(""); fetchMemories(); }}
+                        className="px-4 border border-primary/30 text-primary font-bold uppercase text-[10px] tracking-widest hover:bg-primary/10">
+                        CLEAR
+                      </button>
+                    )}
+                  </form>
+                </div>
+
+                <div className="flex-1 overflow-auto">
+                  <table className="w-full border-collapse font-mono text-xs">
+                    <thead>
+                      <tr className="border-b-2 border-primary">
+                        <th className="text-left py-3 px-4 text-primary font-bold uppercase tracking-wider">Fragment ID</th>
+                        <th className="text-left py-3 px-4 text-primary font-bold uppercase tracking-wider">Content Hash</th>
+                        <th className="text-left py-3 px-4 text-primary font-bold uppercase tracking-wider">Primitive</th>
+                        <th className="text-left py-3 px-4 text-primary font-bold uppercase tracking-wider">Score / Visibility</th>
+                        <th className="text-left py-3 px-4 text-primary font-bold uppercase tracking-wider">Created At</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {memories.map((mem) => (
+                        <tr key={mem.id} className="border-b border-primary/20 hover:bg-primary/5 transition-colors">
+                          <td className="py-3 px-4 text-primary font-bold">
+                            <div className="flex items-center gap-2">
+                              <span className="material-symbols-outlined text-[16px]">
+                                {mem.content.startsWith("[IMAGE ANALYSIS]") ? "image" : 
+                                 mem.content.startsWith("[DOC CHUNK]") ? "description" : "notes"}
+                              </span>
+                              {(mem.id || "").slice(0, 8)}...
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-slate-600">{(mem.content || "").slice(0, 80)}...</td>
+                          <td className="py-3 px-4">
+                            <span className="px-2 py-1 bg-primary/10 text-primary text-[10px] font-bold uppercase">
+                              {mem.memory_type || "episodic"}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-bold text-primary">
+                            {mem.score ? (mem.score * 100).toFixed(0) + "% MATCH" : (mem.visibility || "PRIVATE").toUpperCase()}
+                          </td>
+                          <td className="py-3 px-4 text-slate-500">{mem.created_at ? new Date(mem.created_at).toLocaleDateString() : 'N/A'}</td>
+                        </tr>
+                      ))}
+                      {memories.length === 0 && (
+                        <tr>
+                          <td colSpan="5" className="py-20 text-center text-slate-400">
+                            {searchQuery ? "No matches found for this query" : "No memory fragments found"}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             )}
 
             {/* Identity View */}
@@ -450,6 +730,12 @@ const App = () => {
                       disabled={did !== "NOT_INITIALIZED"}
                       className="w-full py-3 bg-primary text-white font-bold text-xs uppercase tracking-wider hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                       Generate New Identity
+                    </button>
+                    <button
+                      onClick={() => setShowRestoreModal(true)}
+                      disabled={did !== "NOT_INITIALIZED"}
+                      className="w-full py-3 border-2 border-primary text-primary font-bold text-xs uppercase tracking-wider hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                      Restore Existing Identity
                     </button>
                     <button
                       onClick={() => {
@@ -634,6 +920,22 @@ const App = () => {
                   </select>
                 </div>
               </div>
+              
+              <div className="border-t-2 border-primary/10 pt-6">
+                <label className="text-xs font-bold text-primary uppercase mb-2 block">Multimodal Ingestion (Image/PDF)</label>
+                <div className="flex items-center justify-center w-full">
+                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-primary/30 border-dashed cursor-pointer hover:bg-primary/5 transition-colors">
+                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                      <span className="material-symbols-outlined text-primary mb-2">upload_file</span>
+                      <p className="text-[10px] text-primary font-bold uppercase tracking-widest">
+                        {uploadingFile ? "INGESTING..." : "UPLOAD MULTIMODAL SOURCE"}
+                      </p>
+                    </div>
+                    <input type="file" className="hidden" onChange={handleFileUpload} disabled={uploadingFile} />
+                  </label>
+                </div>
+              </div>
+
               <div className="flex gap-4">
                 <button
                   type="submit"
@@ -653,19 +955,72 @@ const App = () => {
         </div>
       )}
 
+      {/* Restore Identity Modal */}
+      {showRestoreModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowRestoreModal(false)}>
+          <div className="bg-white border-2 border-primary w-full max-w-2xl p-8" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-2xl font-black text-primary uppercase mb-2">Restore Identity</h3>
+            <p className="text-sm text-slate-500 font-mono mb-6">Enter your existing Agent ID and Private Key to resume your session.</p>
+            <form onSubmit={handleRestoreIdentity} className="space-y-6">
+              <div>
+                <label className="text-xs font-bold text-primary uppercase mb-2 block">Agent ID (DID)</label>
+                <input
+                  type="text"
+                  value={restoreForm.did}
+                  onChange={(e) => setRestoreForm({ ...restoreForm, did: e.target.value })}
+                  placeholder="e.g. 8e24b47823fc..."
+                  className="w-full bg-slate-50 border border-primary/30 p-3 font-mono text-xs focus:outline-none focus:border-primary shadow-inner"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-primary uppercase mb-2 block">Private Key (Hex)</label>
+                <input
+                  type="password"
+                  value={restoreForm.pk}
+                  onChange={(e) => setRestoreForm({ ...restoreForm, pk: e.target.value })}
+                  placeholder="Paste 64 or 128 character hex seed/key"
+                  className="w-full bg-slate-50 border border-primary/30 p-3 font-mono text-xs focus:outline-none focus:border-primary shadow-inner"
+                  required
+                />
+              </div>
+
+              <div className="flex gap-4 pt-4">
+                <button
+                  type="submit"
+                  className="flex-1 py-4 bg-primary text-white font-bold uppercase tracking-widest hover:bg-primary/90 transition-colors">
+                  RESTORE SESSION
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowRestoreModal(false)}
+                  className="px-8 border border-primary text-primary font-bold uppercase tracking-widest hover:bg-primary/10 transition-colors">
+                  CANCEL
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Settings Modal */}
       {showSettingsModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowSettingsModal(false)}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => {
+          setShowSettingsModal(false);
+          setSettingsApiUrl(apiBaseUrl); // Reset to current on close
+        }}>
           <div className="bg-white border-2 border-primary w-full max-w-2xl p-8" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-2xl font-black text-primary uppercase mb-6">Settings</h3>
             <div className="space-y-6">
               <div>
                 <label className="text-xs font-bold text-primary uppercase mb-2 block">API Endpoint</label>
                 <input
-                  type="text"
-                  value={API_BASE}
-                  disabled
-                  className="w-full border-2 border-primary/30 p-3 font-mono text-sm bg-slate-50"
+                  type="url"
+                  value={settingsApiUrl}
+                  onChange={(e) => setSettingsApiUrl(e.target.value)}
+                  className="w-full border-2 border-primary/30 p-3 font-mono text-sm focus:border-primary outline-none"
+                  placeholder="e.g. http://localhost:8081"
                 />
               </div>
               <div>
@@ -684,11 +1039,21 @@ const App = () => {
                   <option value="dark">Dark (Coming Soon)</option>
                 </select>
               </div>
-              <button
-                onClick={() => setShowSettingsModal(false)}
-                className="w-full py-3 bg-primary text-white font-bold text-xs uppercase tracking-widest hover:bg-primary/90 transition-colors">
-                Close
-              </button>
+              <div className="flex gap-4 pt-4">
+                <button
+                  onClick={saveSettings}
+                  className="flex-1 py-3 bg-primary text-white font-bold text-xs uppercase tracking-widest hover:bg-primary/90 transition-colors">
+                  APPLY CHANGES
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSettingsModal(false);
+                    setSettingsApiUrl(apiBaseUrl); // Reset
+                  }}
+                  className="px-8 py-3 border border-primary text-primary font-bold text-xs uppercase tracking-widest hover:bg-primary/10 transition-colors">
+                  CANCEL
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -1,4 +1,4 @@
-use crate::ports::EmbeddingService;
+use memro_spec::EmbeddingService;
 use anyhow::Result;
 use async_trait::async_trait;
 use rand::Rng;
