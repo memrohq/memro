@@ -1,0 +1,11 @@
+{
+  "id": "memro-mcp",
+  "name": "Memro MCP Client",
+  "version": "0.1.0",
+  "description": "Lightweight Memro MCP client plugin for Acode",
+  "main": "index.js",
+  "engines": {
+    "acode": "*"
+  },
+  "permissions": ["storage", "http", "https"]
+}
