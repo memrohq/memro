@@ -1,0 +1,296 @@
+Metadata-Version: 2.4
+Name: memro
+Version: 0.1.0
+Summary: Official Python SDK for the memro protocol - AI agent memory infrastructure
+Author-email: memro Team <sdk@memro.co>
+License: MIT
+Project-URL: Homepage, https://memro.co
+Project-URL: Documentation, https://docs.memro.co/sdk/python
+Project-URL: Repository, https://github.com/memro-co/memro-sdk-python
+Project-URL: Issues, https://github.com/memro-co/memro-sdk-python/issues
+Keywords: ai,agents,memory,vector-database,embeddings
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: pynacl>=1.5.0
+Requires-Dist: requests>=2.31.0
+Requires-Dist: pydantic>=2.0.0
+Provides-Extra: langchain
+Requires-Dist: langchain-core>=0.1.0; extra == "langchain"
+Provides-Extra: mcp
+Requires-Dist: mcp>=1.0.0; extra == "mcp"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+Requires-Dist: mypy>=1.0.0; extra == "dev"
+
+# memro Python SDK
+
+Official Python SDK for the memro protocol - AI agent memory infrastructure.
+
+## Installation
+
+```bash
+pip install memro
+```
+
+**From source:**
+```bash
+git clone https://github.com/memro-co/memro-sdk-python
+cd memro-sdk-python
+pip install -e .
+```
+
+## Quick Start
+
+```python
+from memro import Agent
+
+# Create a new agent identity
+agent = Agent.create()
+print(f"Agent ID: {agent.agent_id}")
+
+# Store a memory
+agent.remember("User prefers Python over JavaScript", type="profile")
+
+# Recall memories semantically
+results = agent.recall("what does the user prefer?", limit=5)
+for memory in results:
+    print(f"[{memory.score:.2f}] {memory.content}")
+
+# Get recent memories
+recent = agent.get_recent(limit=10, type="episodic")
+for memory in recent:
+    print(f"• {memory.content}")
+
+# Export all data
+export_data = agent.export()
+print(f"Exported {len(export_data['memories'])} memories")
+```
+
+## Features
+
+- ✅ **Cryptographic Identity**: ed25519 key generation and management
+- ✅ **Memory Storage**: Create and manage episodic, semantic, procedural, and profile memories
+- ✅ **Semantic Search**: Vector-based similarity search
+- ✅ **Request Signing**: Automatic signature generation for authenticated requests
+- ✅ **Data Export**: Full data portability
+- ✅ **Type Hints**: Full typing support for IDE autocomplete
+
+## Configuration
+
+### Connect to memro server
+
+```python
+from memro import Agent, MemroClient
+
+# Connect to custom server
+client = MemroClient(base_url="https://api.memro.co")
+agent = Agent.create(client=client)
+
+# Or use environment variable
+# export MEMRO_BASE_URL=https://api.memro.co
+agent = Agent.create()
+```
+
+### Load existing identity
+
+```python
+# From file
+agent = Agent.from_file("agent_identity.json")
+
+# From environment variables
+# export MEMRO_AGENT_ID=...
+# export MEMRO_PRIVATE_KEY=...
+agent = Agent.from_env()
+
+# From dict
+identity = {
+    "agent_id": "5bd80dd5...",
+    "private_key": "x1y2z3..."
+}
+agent = Agent.from_dict(identity)
+```
+
+## API Reference
+
+### Agent
+
+#### `Agent.create(client=None)`
+Create a new agent identity.
+
+#### `Agent.from_file(path)`
+Load agent from JSON file.
+
+#### `Agent.from_env()`
+Load agent from environment variables.
+
+#### `agent.remember(content, type="episodic", visibility="private", metadata=None)`
+Store a new memory.
+
+**Parameters:**
+- `content` (str): Memory content (max 10,000 chars)
+- `type` (str): Memory type - "episodic", "semantic", "procedural", or "profile"
+- `visibility` (str): "private", "shared", or "public"
+- `metadata` (dict): Optional metadata
+
+**Returns:** `Memory` object
+
+#### `agent.recall(query, limit=10, type=None, min_score=None)`
+Search memories semantically.
+
+**Parameters:**
+- `query` (str): Search query
+- `limit` (int): Max results (default: 10, max: 100)
+- `type` (str): Filter by memory type
+- `min_score` (float): Minimum similarity score (0-1)
+
+**Returns:** List of `SearchResult` objects
+
+#### `agent.get_recent(limit=10, type=None, visibility=None)`
+Get recent memories without semantic search.
+
+**Parameters:**
+- `limit` (int): Max results
+- `type` (str): Filter by memory type
+- `visibility` (str): Filter by visibility
+
+**Returns:** List of `Memory` objects
+
+#### `agent.delete_memory(memory_id)`
+Delete a specific memory.
+
+**Returns:** `DeletionProof` object
+
+#### `agent.export(format="json")`
+Export all agent data.
+
+**Returns:** Dict with all memories and metadata
+
+#### `agent.save(path)`
+Save agent identity to file.
+
+### Memory
+
+```python
+class Memory:
+    id: str
+    agent_id: str
+    content: str
+    type: str
+    visibility: str
+    created_at: datetime
+    metadata: dict
+```
+
+### SearchResult
+
+```python
+class SearchResult:
+    memory: Memory
+    score: float
+    rank: int
+```
+
+## Examples
+
+### Profile Memory
+
+```python
+agent.remember("User timezone is UTC+5:30", type="profile")
+agent.remember("User prefers dark mode", type="profile")
+
+# Search profile
+preferences = agent.recall("user preferences", type="profile")
+```
+
+### Episodic Memory
+
+```python
+agent.remember("User asked about deployment at 10:30 AM", type="episodic")
+agent.remember("Fixed bug in authentication flow", type="episodic")
+
+# Get recent conversations
+recent = agent.get_recent(type="episodic", limit=20)
+```
+
+### Semantic Memory
+
+```python
+agent.remember("Docker Compose orchestrates multi-container apps", type="semantic")
+agent.remember("Kubernetes is a container orchestration platform", type="semantic")
+
+# Search knowledge
+knowledge = agent.recall("container orchestration", type="semantic")
+```
+
+### Procedural Memory
+
+```python
+agent.remember(
+    "To deploy: 1) Build image 2) Push to registry 3) Update manifest",
+    type="procedural"
+)
+
+# Search procedures
+deploy_steps = agent.recall("how to deploy", type="procedural")
+```
+
+## Development
+
+```bash
+# Clone repository
+git clone https://github.com/memro-co/memro-sdk-python
+cd memro-sdk-python
+
+# Install dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Run linter
+ruff check .
+
+# Format code
+black .
+```
+
+## Requirements
+
+- Python 3.8+
+- Dependencies:
+  - `pynacl` - ed25519 signatures
+  - `requests` - HTTP client
+  - `pydantic` - Data validation
+
+## License
+
+MIT License - see LICENSE file
+
+## Links
+
+- **Documentation**: https://docs.memro.co/sdk/python
+- **Protocol Spec**: https://github.com/memro-co/memro-spec
+- **Issues**: https://github.com/memro-co/memro-sdk-python/issues
+- **PyPI**: https://pypi.org/project/memro/
+
+## Contributing
+
+Contributions welcome! Please read CONTRIBUTING.md first.
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
