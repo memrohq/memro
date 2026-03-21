@@ -1,0 +1,165 @@
+{
+  "timestamp": "2026-03-18T01:20:35.947624",
+  "agent_id": "ab7a24f744520625fb44fda13e3c5e7704cd80e15806cf4b1eada850fc9d79ca",
+  "test": "p1_hybrid_search_comparison",
+  "test_count": 5,
+  "results": [
+    {
+      "query": "What are my recent projects?",
+      "intent": "Temporal + specific domain",
+      "results": {
+        "semantic": {
+          "count": 0,
+          "keyword_matches": 0,
+          "keyword_match_rate": 0,
+          "avg_score": 0,
+          "latency_ms": 74.39804077148438,
+          "top_score": 0
+        },
+        "keyword": {
+          "count": 0,
+          "keyword_matches": 0,
+          "keyword_match_rate": 0,
+          "avg_score": 0,
+          "latency_ms": 33.68210792541504,
+          "top_score": 0
+        },
+        "hybrid": {
+          "count": 0,
+          "keyword_matches": 0,
+          "keyword_match_rate": 0,
+          "avg_score": 0,
+          "latency_ms": 23.595094680786133,
+          "top_score": 0
+        }
+      }
+    },
+    {
+      "query": "Tell me about my family members",
+      "intent": "Entity lookup (person names)",
+      "results": {
+        "semantic": {
+          "count": 0,
+          "keyword_matches": 0,
+          "keyword_match_rate": 0,
+          "avg_score": 0,
+          "latency_ms": 11.41810417175293,
+          "top_score": 0
+        },
+        "keyword": {
+          "count": 0,
+          "keyword_matches": 0,
+          "keyword_match_rate": 0,
+          "avg_score": 0,
+          "latency_ms": 18.603086471557617,
+          "top_score": 0
+        },
+        "hybrid": {
+          "count": 0,
+          "keyword_matches": 0,
+          "keyword_match_rate": 0,
+          "avg_score": 0,
+          "latency_ms": 19.17290687561035,
+          "top_score": 0
+        }
+      }
+    },
+    {
+      "query": "How do I prefer to communicate?",
+      "intent": "Preference/personality",
+      "results": {
+        "semantic": {
+          "count": 0,
+          "keyword_matches": 0,
+          "keyword_match_rate": 0,
+          "avg_score": 0,
+          "latency_ms": 5.960941314697266,
+          "top_score": 0
+        },
+        "keyword": {
+          "count": 0,
+          "keyword_matches": 0,
+          "keyword_match_rate": 0,
+          "avg_score": 0,
+          "latency_ms": 20.19476890563965,
+          "top_score": 0
+        },
+        "hybrid": {
+          "count": 0,
+          "keyword_matches": 0,
+          "keyword_match_rate": 0,
+          "avg_score": 0,
+          "latency_ms": 19.70195770263672,
+          "top_score": 0
+        }
+      }
+    },
+    {
+      "query": "What skills do I have in Python?",
+      "intent": "Technology + capability",
+      "results": {
+        "semantic": {
+          "count": 0,
+          "keyword_matches": 0,
+          "keyword_match_rate": 0,
+          "avg_score": 0,
+          "latency_ms": 6.39796257019043,
+          "top_score": 0
+        },
+        "keyword": {
+          "count": 0,
+          "keyword_matches": 0,
+          "keyword_match_rate": 0,
+          "avg_score": 0,
+          "latency_ms": 18.86272430419922,
+          "top_score": 0
+        },
+        "hybrid": {
+          "count": 0,
+          "keyword_matches": 0,
+          "keyword_match_rate": 0,
+          "avg_score": 0,
+          "latency_ms": 19.170045852661133,
+          "top_score": 0
+        }
+      }
+    },
+    {
+      "query": "Which cities have I visited?",
+      "intent": "Location history",
+      "results": {
+        "semantic": {
+          "count": 0,
+          "keyword_matches": 0,
+          "keyword_match_rate": 0,
+          "avg_score": 0,
+          "latency_ms": 5.9070587158203125,
+          "top_score": 0
+        },
+        "keyword": {
+          "count": 0,
+          "keyword_matches": 0,
+          "keyword_match_rate": 0,
+          "avg_score": 0,
+          "latency_ms": 21.784067153930664,
+          "top_score": 0
+        },
+        "hybrid": {
+          "count": 0,
+          "keyword_matches": 0,
+          "keyword_match_rate": 0,
+          "avg_score": 0,
+          "latency_ms": 20.64681053161621,
+          "top_score": 0
+        }
+      }
+    }
+  ],
+  "summary": {
+    "avg_hybrid_keyword_match_rate": 0.0,
+    "avg_semantic_keyword_match_rate": 0.0,
+    "avg_hybrid_latency_ms": 20.45736312866211,
+    "avg_semantic_latency_ms": 20.816421508789062,
+    "improvement_percent": 0.0
+  }
+}

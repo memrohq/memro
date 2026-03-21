@@ -1,0 +1,27 @@
+[
+  {
+    "test_type": "system_health",
+    "agent_creation_ms": 25.999069213867188,
+    "basic_recall_ms": 9.62519645690918,
+    "status": "healthy"
+  },
+  {
+    "test_type": "concurrent_queries",
+    "total_queries": 50,
+    "successful_queries": 50,
+    "total_time_seconds": 0.15476489067077637,
+    "queries_per_second": 323.0706898915627,
+    "avg_latency_ms": 14.268054962158203,
+    "min_latency_ms": 7.385015487670898,
+    "max_latency_ms": 24.941205978393555,
+    "p95_latency_ms": 23.04704189300537
+  },
+  {
+    "test_type": "memory_throughput",
+    "target_memories": 50,
+    "created_memories": 50,
+    "total_time_seconds": 0.15681791305541992,
+    "memories_per_second": 318.8411261558483,
+    "success_rate": 100.0
+  }
+]
