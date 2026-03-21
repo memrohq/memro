@@ -1,0 +1,524 @@
+openapi: 3.0.3
+info:
+  title: memro Protocol API
+  description: |
+    Open protocol for AI agent memory infrastructure.
+    
+    ## Authentication
+    Mutating operations require ed25519 signature verification.
+    
+    ## Base URL
+    - Development: `http://localhost:8081`
+    - Production: `https://api.memro.co`
+  version: 1.0.0
+  contact:
+    email: api@memro.co
+  license:
+    name: CC0 1.0 Universal
+    url: https://creativecommons.org/publicdomain/zero/1.0/
+
+servers:
+  - url: http://localhost:8081
+    description: Local development
+  - url: https://api.memro.co
+    description: Production
+
+tags:
+  - name: Identity
+    description: Agent identity management
+  - name: Memory
+    description: Memory creation and retrieval
+  - name: Recall
+    description: Semantic search and recall
+  - name: Export
+    description: Data export and portability
+
+paths:
+  /identity:
+    post:
+      tags:
+        - Identity
+      summary: Create new agent identity
+      description: Generates a new ed25519 key pair and agent ID
+      operationId: createIdentity
+      responses:
+        '201':
+          description: Identity created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Identity'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /identity/{agent_id}:
+    get:
+      tags:
+        - Identity
+      summary: Get agent identity
+      description: Retrieve public key for an agent
+      operationId: getIdentity
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-f0-9]{64}$'
+      responses:
+        '200':
+          description: Identity found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicIdentity'
+        '404':
+          description: Identity not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      tags:
+        - Identity
+      summary: Delete agent identity
+      description: Marks identity as deleted (requires signature)
+      operationId: deleteIdentity
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignedRequest'
+      responses:
+        '200':
+          description: Identity deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletionProof'
+        '401':
+          description: Invalid signature
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /memory:
+    post:
+      tags:
+        - Memory
+      summary: Create new memory
+      description: Store a new memory for an agent (requires signature)
+      operationId: createMemory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMemoryRequest'
+      responses:
+        '201':
+          description: Memory created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Memory'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Invalid signature
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /memory/{agent_id}:
+    get:
+      tags:
+        - Memory
+      summary: Get agent memories
+      description: Retrieve recent memories for an agent
+      operationId: getMemories
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            maximum: 100
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [episodic, semantic, procedural, profile]
+        - name: visibility
+          in: query
+          schema:
+            type: string
+            enum: [private, shared, public]
+      responses:
+        '200':
+          description: Memories retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  memories:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Memory'
+                  total:
+                    type: integer
+
+  /memory/{memory_id}:
+    delete:
+      tags:
+        - Memory
+      summary: Delete a memory
+      description: Delete a specific memory (requires signature)
+      operationId: deleteMemory
+      parameters:
+        - name: memory_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignedRequest'
+      responses:
+        '200':
+          description: Memory deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletionProof'
+
+  /search:
+    get:
+      tags:
+        - Recall
+      summary: Semantic search
+      description: Search memories by semantic similarity
+      operationId: searchMemories
+      parameters:
+        - name: agent_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            maximum: 100
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [episodic, semantic, procedural, profile]
+        - name: min_score
+          in: query
+          schema:
+            type: number
+            format: float
+            minimum: 0
+            maximum: 1
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResults'
+
+  /upload:
+    post:
+      tags:
+        - Memory
+      summary: Upload file as memory
+      description: Upload a file and create memory from its content
+      operationId: uploadFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                agent_id:
+                  type: string
+                type:
+                  type: string
+                  enum: [episodic, semantic, procedural, profile]
+                signature:
+                  type: string
+      responses:
+        '201':
+          description: File uploaded and memory created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Memory'
+
+  /export/{agent_id}:
+    get:
+      tags:
+        - Export
+      summary: Export all agent data
+      description: Export all memories and metadata as JSON
+      operationId: exportData
+      parameters:
+        - name: agent_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, csv]
+            default: json
+      responses:
+        '200':
+          description: Data exported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportData'
+
+  /health:
+    get:
+      tags:
+        - System
+      summary: Health check
+      description: Check if the service is healthy
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  version:
+                    type: string
+                    example: 1.0.0
+
+components:
+  schemas:
+    Identity:
+      type: object
+      required:
+        - agent_id
+        - public_key
+        - private_key
+      properties:
+        agent_id:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: SHA-256 hash of public key
+        public_key:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: ed25519 public key (hex)
+        private_key:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: ed25519 private key (hex) - KEEP SECRET
+
+    PublicIdentity:
+      type: object
+      required:
+        - agent_id
+        - public_key
+      properties:
+        agent_id:
+          type: string
+        public_key:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Memory:
+      type: object
+      required:
+        - id
+        - agent_id
+        - content
+        - type
+        - visibility
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        agent_id:
+          type: string
+        content:
+          type: string
+          maxLength: 10000
+        type:
+          type: string
+          enum: [episodic, semantic, procedural, profile]
+        visibility:
+          type: string
+          enum: [private, shared, public]
+        created_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties: true
+
+    CreateMemoryRequest:
+      type: object
+      required:
+        - agent_id
+        - content
+        - type
+        - timestamp
+        - signature
+      properties:
+        agent_id:
+          type: string
+        content:
+          type: string
+          maxLength: 10000
+        type:
+          type: string
+          enum: [episodic, semantic, procedural, profile]
+        visibility:
+          type: string
+          enum: [private, shared, public]
+          default: private
+        metadata:
+          type: object
+        timestamp:
+          type: string
+          format: date-time
+        signature:
+          type: string
+          description: ed25519 signature of request
+
+    SignedRequest:
+      type: object
+      required:
+        - agent_id
+        - timestamp
+        - signature
+      properties:
+        agent_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        signature:
+          type: string
+
+    SearchResults:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              memory:
+                $ref: '#/components/schemas/Memory'
+              score:
+                type: number
+                format: float
+                minimum: 0
+                maximum: 1
+              rank:
+                type: integer
+        total:
+          type: integer
+        query:
+          type: string
+        took_ms:
+          type: integer
+
+    DeletionProof:
+      type: object
+      properties:
+        id:
+          type: string
+        deleted_at:
+          type: string
+          format: date-time
+        proof:
+          type: string
+          description: Cryptographic proof of deletion
+        signature:
+          type: string
+
+    ExportData:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        exported_at:
+          type: string
+          format: date-time
+        memories:
+          type: array
+          items:
+            $ref: '#/components/schemas/Memory'
+        identity:
+          $ref: '#/components/schemas/PublicIdentity'
+
+    Error:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        code:
+          type: integer
