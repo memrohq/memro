@@ -1,6 +1,6 @@
 use axum::{
-    extract::State,
-    http::StatusCode,
+    extract::{State, Extension},
+    http::{StatusCode, HeaderMap},
     Json,
 };
 use axum::extract::multipart::Multipart;
@@ -9,7 +9,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 use sqlx::Row;
 
-use crate::services::{ContentExtractor, FileStorage, OpenAIService};
+use crate::services::{ContentExtractor, FileStorage};
 use super::AppState;
 
 #[derive(Debug, Serialize)]
@@ -32,15 +32,20 @@ pub struct CreateMemoryWithFileRequest {
 /// Upload file endpoint
 /// POST /upload
 /// Accepts multipart/form-data with file
+/// Auth: X-Agent-Id + X-Signature (over X-Agent-Id bytes) + X-Timestamp
 pub async fn upload_file(
     State(state): State<Arc<AppState>>,
+    Extension(agent): Extension<super::middleware::AuthenticatedAgent>,
+    headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Result<Json<UploadResponse>, (StatusCode, String)> {
-    // Get OpenAI API key from environment
-    let openai_key = std::env::var("OPENAI_API_KEY")
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "OPENAI_API_KEY not set".to_string()))?;
-    
-    let openai = OpenAIService::new(openai_key);
+    let ip = super::rate_limit::client_ip(&headers);
+    if !state.rate_limiter.check_and_increment(&ip) {
+        super::metrics::RATE_LIMIT_HITS.inc();
+        return Err((StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded".to_string()));
+    }
+    let authed_agent_id = agent.id;
+
     let storage = FileStorage::new()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Storage init failed: {}", e)))?;
     let extractor = ContentExtractor::new();
@@ -78,6 +83,11 @@ pub async fn upload_file(
         return Err((StatusCode::BAD_REQUEST, "agent_id is required".to_string()));
     }
 
+    // Ensure the multipart agent_id matches the authenticated identity
+    if agent_id != authed_agent_id {
+        return Err((StatusCode::FORBIDDEN, "agent_id in form does not match authenticated identity".to_string()));
+    }
+
     // Detect file type
     let file_type = ContentExtractor::detect_file_type(&file_name);
     let file_size = file_data.len() as i64;
@@ -86,17 +96,8 @@ pub async fn upload_file(
     let file_path = storage.store(&file_name, file_data).await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Storage failed: {}", e)))?;
 
-    // Extract text content
-    let extracted_text = match file_type.as_str() {
-        "audio" => {
-            // Use Whisper for audio transcription
-            openai.transcribe_audio(&file_path).await.ok()
-        }
-        _ => {
-            // Use content extractor for other types
-            extractor.extract(&file_path, &file_type).await.ok()
-        }
-    };
+    // Extract text content using the unified provider
+    let extracted_text = extractor.extract(&file_path, &file_type, &state.embedding_provider).await.ok();
 
     // Store file metadata in database
     let file_id = Uuid::new_v4();
@@ -106,12 +107,13 @@ pub async fn upload_file(
 
     sqlx::query(
         r#"
-        INSERT INTO files (id, agent_id, file_name, file_type, file_path, file_size, mime_type, extracted_text)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO files (id, agent_id, tenant_id, file_name, file_type, file_path, file_size, mime_type, extracted_text)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         "#
     )
     .bind(&file_id)
     .bind(&agent_id)
+    .bind(&agent.tenant_id)
     .bind(&file_name)
     .bind(&file_type)
     .bind(&file_path)
@@ -121,6 +123,8 @@ pub async fn upload_file(
     .execute(&state.db_pool)
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+
+    super::audit(&state.db_pool, &authed_agent_id, &agent.tenant_id, "file.upload", Some(&file_id.to_string()), Some(&ip)).await;
 
     Ok(Json(UploadResponse {
         file_id: file_id.to_string(),
@@ -135,8 +139,24 @@ pub async fn upload_file(
 /// POST /memory/from-file
 pub async fn create_memory_from_file(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<CreateMemoryWithFileRequest>,
+    Extension(agent): Extension<super::middleware::AuthenticatedAgent>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let ip = super::rate_limit::client_ip(&headers);
+    if !state.rate_limiter.check_and_increment(&ip) {
+        super::metrics::RATE_LIMIT_HITS.inc();
+        return Err((StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded".to_string()));
+    }
+    let caller_id = agent.id;
+
+    let req: CreateMemoryWithFileRequest = serde_json::from_slice(&body)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid JSON: {}", e)))?;
+
+    if caller_id != req.agent_id {
+        return Err((StatusCode::FORBIDDEN, "agent_id does not match authenticated identity".to_string()));
+    }
+
     // Get file metadata
     let file_id_uuid = Uuid::parse_str(&req.file_id)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid file_id: {}", e)))?;
@@ -166,12 +186,13 @@ pub async fn create_memory_from_file(
     
     sqlx::query(
         r#"
-        INSERT INTO memories (id, agent_id, content, memory_type, visibility, file_id)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO memories (id, agent_id, tenant_id, content, memory_type, visibility, file_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#
     )
     .bind(&memory_id)
     .bind(&req.agent_id)
+    .bind(&agent.tenant_id)
     .bind(&content)
     .bind(&req.memory_type)
     .bind(&req.visibility)
@@ -184,10 +205,13 @@ pub async fn create_memory_from_file(
     if let Err(e) = state.embedding_queue.queue_memory(
         memory_id,
         req.agent_id.clone(),
+        agent.tenant_id,
         content.clone(),
     ).await {
         tracing::error!("Failed to queue file memory for embedding: {}", e);
     }
+
+    super::audit(&state.db_pool, &req.agent_id, &agent.tenant_id, "memory.from_file", Some(&memory_id.to_string()), Some(&ip)).await;
 
     Ok(Json(serde_json::json!({
         "memory_id": memory_id.to_string(),

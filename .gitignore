@@ -35,6 +35,8 @@ venv/
 # Docker / Local data
 data/
 cargo_cache/
+docker-compose.stage.yml
+docker-compose.prod.yml
 
 # Logs
 *.log
