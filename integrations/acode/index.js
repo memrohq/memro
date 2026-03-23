@@ -176,7 +176,7 @@ Only use this when the user asks to create or scaffold a project.`;
             if (!localStorage.getItem('memro-ai-ip') && bu && bu.startsWith('http')) {
                 try {
                     const url = new URL(bu);
-                    currentBackendUrl = `http://${url.hostname}:8000/v1/chat/completions`;
+                    currentBackendUrl = `http://${url.hostname}:8001/v1/chat/completions`;
                 } catch(e) {}
             }
             injectIcon();
