@@ -35,17 +35,34 @@
                 display: flex; flex-direction: column; gap: 12px; background: #121212;
             }
             .memro-input-area {
-                padding: 15px 20px 25px 20px; background: #1a1a1a !important;
-                display: flex; gap: 10px; align-items: center; border-top: 1px solid #222;
+                padding: 15px 18px 25px 18px; 
+                background: #1a1a1a !important;
+                display: flex !important; 
+                gap: 10px !important; 
+                align-items: flex-end !important; 
+                border-top: 1px solid #222 !important;
+                width: 100% !important;
+                box-sizing: border-box !important;
             }
-            .memro-textarea {
-                flex: 1; background: #2a2a2a !important; color: #fff !important; border: 1px solid #444 !important;
-                padding: 12px 16px; border-radius: 25px; outline: none; resize: none;
-                font-size: 14px; max-height: 100px;
-                appearance: none !important; -webkit-appearance: none !important;
+            textarea.memro-textarea {
+                flex: 1 !important; 
+                width: 100% !important;
+                min-width: 0 !important;
+                background-color: #2a2a2a !important; 
+                color: #ffffff !important; 
+                border: 1px solid #444 !important;
+                padding: 12px 16px !important; 
+                border-radius: 25px !important; 
+                outline: none !important; 
+                resize: none !important;
+                font-size: 14px !important; 
+                max-height: 100px !important;
+                appearance: none !important; 
+                -webkit-appearance: none !important;
+                box-sizing: border-box !important;
             }
-            .memro-textarea::placeholder {
-                color: #888;
+            textarea.memro-textarea::placeholder {
+                color: #888 !important;
                 background: transparent !important;
             }
             .memro-msg { padding: 10px 14px; border-radius: 18px; font-size: 14px; max-width: 85%; }
