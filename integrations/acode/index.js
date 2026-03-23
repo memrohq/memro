@@ -2,10 +2,7 @@
  * Memro AI - Project Scaffolder Edition
  * AI-driven project creation via local Qwen-Coder.
  * Fixed for Cross-Device (Mobile -> Laptop) connectivity.
- * Protocol Sanitizer: Prevents "http://http://" duplication.
- * UI FIX: Ensures "Set IP" prompt is clean (no "http" pre-filled).
- * IP SHIFT: Adjusted default to new laptop IP 192.168.0.111.
- * FETCH BYPASS: Now using XMLHttpRequest for wider WebView compatibility.
+ * STREAMING READY: Now supports real-time token streaming with typewriter effect.
  */
 
 (function() {
@@ -50,6 +47,7 @@ Only use this when the user asks to create or scaffold a project.`;
             .memro-msg { padding: 10px 14px; border-radius: 18px; font-size: 14px; max-width: 85%; line-height: 1.4; word-wrap: break-word; }
             .memro-msg.user { background: #2563eb; color: white; align-self: flex-end; }
             .memro-msg.ai { background: #2a2a2a; color: #eee; align-self: flex-start; border: 1px solid #333; }
+            .memro-msg.ai.thinking { opacity: 0.6; italic; }
         `;
         document.head.appendChild(style);
     };
@@ -79,7 +77,7 @@ Only use this when the user asks to create or scaffold a project.`;
                 <div class="memro-bottom-sheet">
                     <div style="height:24px; display:flex; justify-content:center; align-items:center;"><div style="width:40px; height:4px; background:#444; border-radius:2px;"></div></div>
                     <div style="padding:0 20px 10px; display:flex; justify-content:space-between; align-items:center;">
-                        <span style="font-weight:600; color:#fff;">🧠 Memro AI Scaffolder</span>
+                        <span style="font-weight:600; color:#fff;">🧠 Memro AI (TURBO)</span>
                         <div>
                            <span id="m-config" style="color:#3b82f6; font-size:12px; margin-right:15px; cursor:pointer;">Set IP</span>
                            <span style="color:#888; font-size:28px; cursor:pointer;" onclick="this.closest('.page').hide()">&times;</span>
@@ -104,6 +102,7 @@ Only use this when the user asks to create or scaffold a project.`;
             if (role === 'ai') m.innerHTML = text.replace(/\n/g, '<br/>');
             else m.innerText = text;
             log.appendChild(m); log.scrollTop = log.scrollHeight;
+            if (role === 'ai') m.id = 'latest-ai-msg';
             return m;
         };
 
@@ -126,40 +125,58 @@ Only use this when the user asks to create or scaffold a project.`;
             input.value = ''; input.style.height = 'auto';
             addMsg('user', val);
             const aiMsg = addMsg('ai', 'Thinking...');
+            aiMsg.classList.add('thinking');
 
-            // LEGACY XHR WRAPPER (to bypass modern fetch restrictions)
-            const xhrRequest = (url, body) => {
-                return new Promise((resolve, reject) => {
-                    const xhr = new XMLHttpRequest();
-                    xhr.open('POST', url, true);
-                    xhr.setRequestHeader('Content-Type', 'application/json');
-                    xhr.onreadystatechange = () => {
-                        if (xhr.readyState === 4) {
-                            if (xhr.status >= 200 && xhr.status < 300) {
-                                resolve(JSON.parse(xhr.responseText));
-                            } else {
-                                reject(new Error(`XHR Fail: ${xhr.status} ${xhr.statusText}`));
-                            }
-                        }
-                    };
-                    xhr.onerror = () => reject(new Error("XHR Network Failure"));
-                    xhr.send(JSON.stringify(body));
-                });
-            };
+            let fullContent = "";
 
             try {
-                const data = await xhrRequest(currentBackendUrl, {
-                    messages: [
-                        { role: 'system', content: SYSTEM_PROMPT },
-                        { role: 'user', content: val }
-                    ],
-                    temperature: 0.2
+                // SWITCH TO FETCH WITH STREAMING SUPPORT
+                const response = await fetch(currentBackendUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        messages: [
+                            { role: 'system', content: SYSTEM_PROMPT },
+                            { role: 'user', content: val }
+                        ],
+                        temperature: 0.2,
+                        stream: true // ENABLE STREAMING
+                    })
                 });
-                
-                const content = data.choices[0].message.content;
-                aiMsg.innerText = content;
 
-                const jsonMatch = content.match(/\{[\s\S]*"action":\s*"scaffold"[\s\S]*\}/);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                aiMsg.innerText = ""; // Clear "Thinking..."
+                aiMsg.classList.remove('thinking');
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const dataStr = line.replace('data: ', '').trim();
+                            if (dataStr === "[DONE]") continue;
+                            try {
+                                const json = JSON.parse(dataStr);
+                                const token = json.choices[0].delta.content || "";
+                                fullContent += token;
+                                // TYPEWRITER UPDATE
+                                aiMsg.innerHTML = fullContent.replace(/\n/g, '<br/>');
+                                log.scrollTop = log.scrollHeight;
+                            } catch(e) {}
+                        }
+                    }
+                }
+
+                // Check for scaffolding actions at the end
+                const jsonMatch = fullContent.match(/\{[\s\S]*"action":\s*"scaffold"[\s\S]*\}/);
                 if (jsonMatch) {
                     try {
                         const action = JSON.parse(jsonMatch[0]);
@@ -171,10 +188,9 @@ Only use this when the user asks to create or scaffold a project.`;
                     } catch(e) { console.error("Action Parse Error", e); }
                 }
             } catch (err) {
-                aiMsg.innerHTML = `<b>Connection Failed (XHR).</b><br/>Reason: ${err.message}<br/>Attempted: ${currentBackendUrl}<br/><br/><button id="re-fix" style="background:#3b82f6; color:#fff; border:none; padding:10px 15px; border-radius:5px; width:100%;">Fix Connection (Set IP)</button>`;
-                console.error("XHR Error:", err);
-                const rf = log.querySelector('#re-fix');
-                if (rf) rf.onclick = updateIP;
+                aiMsg.classList.remove('thinking');
+                aiMsg.innerHTML = `<b>Connection Failed (Stream).</b><br/>Reason: ${err.message}<br/>Attempted: ${currentBackendUrl}`;
+                console.error("Stream Error:", err);
             }
         };
         initialized = true;
