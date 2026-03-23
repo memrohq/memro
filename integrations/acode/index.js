@@ -4,11 +4,12 @@
  * Fixed for Cross-Device (Mobile -> Laptop) connectivity.
  * Protocol Sanitizer: Prevents "http://http://" duplication.
  * UI FIX: Ensures "Set IP" prompt is clean (no "http" pre-filled).
+ * IP SHIFT: Adjusted default to new laptop IP 192.168.0.111.
  */
 
 (function() {
     const PLUGIN_ID = 'memro-mcp';
-    const DEFAULT_IP = '192.168.0.100';
+    const DEFAULT_IP = '192.168.0.111'; // CHANGED FROM .100 TO .111
     const PORT = '8001';
     const PATH = '/v1/chat/completions';
     
