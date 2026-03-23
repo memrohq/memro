@@ -2,7 +2,8 @@
  * Memro AI - Project Scaffolder Edition
  * AI-driven project creation via local Qwen-Coder.
  * Fixed for Cross-Device (Mobile -> Laptop) connectivity.
- * URL CORRUPTION FIX: Robustly extracts ONLY the IP address.
+ * Protocol Sanitizer: Prevents "http://http://" duplication.
+ * UI FIX: Ensures "Set IP" prompt is clean (no "http" pre-filled).
  */
 
 (function() {
@@ -13,14 +14,19 @@
     
     // Function to build a clean URL given any input (IP or Full URL)
     const buildFullUrl = (input) => {
-        if (!input) return `http://${DEFAULT_IP}:${PORT}${PATH}`;
-        // Extract only the hostname/IP (strips http, ports, paths)
+        if (!input || input.trim() === "" || input.trim().toLowerCase() === "http" || input.trim().toLowerCase() === "https") {
+            return `http://${DEFAULT_IP}:${PORT}${PATH}`;
+        }
+        
+        // Extract only the hostname/IP
+        // Strips protocol, port, path, and double-protocols
         let clean = input.trim()
             .replace(/^https?:\/\//i, '')
+            .replace(/^https?:\/\//i, '') // Double pass for double-http
             .split('/')[0]
             .split(':')[0];
         
-        if (!clean || clean.length < 3) clean = DEFAULT_IP;
+        if (!clean || clean.length < 3 || clean.toLowerCase() === "http") clean = DEFAULT_IP;
         return `http://${clean}:${PORT}${PATH}`;
     };
 
@@ -108,12 +114,16 @@ Only use this when the user asks to create or scaffold a project.`;
         };
 
         const updateIP = async () => {
-            // Only show the HOSTNAME in the prompt (e.g. 192.168.0.100)
-            const currentHost = currentBackendUrl.split('//')[1]?.split(':')[0] || DEFAULT_IP;
+            // Robustly extract just the current hostname for the prompt's default value
+            let currentHost = currentBackendUrl.split('//')[1]?.split(':')[0] || DEFAULT_IP;
+            if (currentHost.toLowerCase() === "http") currentHost = DEFAULT_IP; 
+
             let val = await acode.prompt("Enter Laptop IP", currentHost, "text");
             if (val) {
                 currentBackendUrl = buildFullUrl(val);
-                localStorage.setItem('memro-ai-ip', val); // Save only the IP part
+                // Save ONLY the clean part (IP or hostname) for next time
+                const cleanIp = val.trim().replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
+                localStorage.setItem('memro-ai-ip', cleanIp);
                 acode.alert("Backend Updated", `Now using: ${currentBackendUrl}`);
             }
         };
