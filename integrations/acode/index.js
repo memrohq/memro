@@ -5,11 +5,12 @@
  * Protocol Sanitizer: Prevents "http://http://" duplication.
  * UI FIX: Ensures "Set IP" prompt is clean (no "http" pre-filled).
  * IP SHIFT: Adjusted default to new laptop IP 192.168.0.111.
+ * VERBOSE ERROR: Now reports exact error reason (e.g., TypeError).
  */
 
 (function() {
     const PLUGIN_ID = 'memro-mcp';
-    const DEFAULT_IP = '192.168.0.111'; // CHANGED FROM .100 TO .111
+    const DEFAULT_IP = '192.168.0.111';
     const PORT = '8001';
     const PATH = '/v1/chat/completions';
     
@@ -18,20 +19,15 @@
         if (!input || input.trim() === "" || input.trim().toLowerCase() === "http" || input.trim().toLowerCase() === "https") {
             return `http://${DEFAULT_IP}:${PORT}${PATH}`;
         }
-        
-        // Extract only the hostname/IP
-        // Strips protocol, port, path, and double-protocols
         let clean = input.trim()
             .replace(/^https?:\/\//i, '')
-            .replace(/^https?:\/\//i, '') // Double pass for double-http
+            .replace(/^https?:\/\//i, '') 
             .split('/')[0]
             .split(':')[0];
-        
         if (!clean || clean.length < 3 || clean.toLowerCase() === "http") clean = DEFAULT_IP;
         return `http://${clean}:${PORT}${PATH}`;
     };
 
-    // Initialize with sanitization
     let currentBackendUrl = buildFullUrl(localStorage.getItem('memro-ai-ip'));
     let pageRef = null;
     let initialized = false;
@@ -42,7 +38,6 @@ Format:
 {"action": "scaffold", "files": [{"path": "filename.ext", "content": "..."}]}
 Only use this when the user asks to create or scaffold a project.`;
 
-    // --- Styles ---
     const injectStyles = () => {
         if (document.getElementById('memro-styles')) return;
         const style = document.createElement('style');
@@ -59,14 +54,12 @@ Only use this when the user asks to create or scaffold a project.`;
         document.head.appendChild(style);
     };
 
-    // --- Acode FS Bridge ---
     const scaffoldFiles = async (files) => {
         try {
             const fs = acode.require('fsOperation');
             const projectManager = acode.require('projectManager');
             const currentProject = projectManager.getCurrentProject();
             if (!currentProject) throw new Error("No active project found.");
-            
             const rootUrl = currentProject.url;
             for (const file of files) {
                 const fileUrl = rootUrl.endsWith('/') ? rootUrl + file.path : rootUrl + '/' + file.path;
@@ -115,14 +108,11 @@ Only use this when the user asks to create or scaffold a project.`;
         };
 
         const updateIP = async () => {
-            // Robustly extract just the current hostname for the prompt's default value
             let currentHost = currentBackendUrl.split('//')[1]?.split(':')[0] || DEFAULT_IP;
             if (currentHost.toLowerCase() === "http") currentHost = DEFAULT_IP; 
-
             let val = await acode.prompt("Enter Laptop IP", currentHost, "text");
             if (val) {
                 currentBackendUrl = buildFullUrl(val);
-                // Save ONLY the clean part (IP or hostname) for next time
                 const cleanIp = val.trim().replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
                 localStorage.setItem('memro-ai-ip', cleanIp);
                 acode.alert("Backend Updated", `Now using: ${currentBackendUrl}`);
@@ -140,7 +130,12 @@ Only use this when the user asks to create or scaffold a project.`;
             try {
                 const response = await fetch(currentBackendUrl, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    mode: 'cors',
+                    credentials: 'omit',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
                     body: JSON.stringify({
                         messages: [
                             { role: 'system', content: SYSTEM_PROMPT },
@@ -149,6 +144,11 @@ Only use this when the user asks to create or scaffold a project.`;
                         temperature: 0.2
                     })
                 });
+                
+                if (!response.ok) {
+                    throw new Error(`Server Error: ${response.status} ${response.statusText}`);
+                }
+                
                 const data = await response.json();
                 const content = data.choices[0].message.content;
                 aiMsg.innerText = content;
@@ -165,7 +165,9 @@ Only use this when the user asks to create or scaffold a project.`;
                     } catch(e) { console.error("Action Parse Error", e); }
                 }
             } catch (err) {
-                aiMsg.innerHTML = `<b>Error: Cannot connect.</b><br/>Attempted: ${currentBackendUrl}<br/><br/><button id="re-fix" style="background:#3b82f6; color:#fff; border:none; padding:10px 15px; border-radius:5px; width:100%;">Fix Connection (Set IP)</button>`;
+                // VERBOSE ERROR LOGGING
+                aiMsg.innerHTML = `<b>Connection Failed.</b><br/>Reason: ${err.message}<br/>Attempted: ${currentBackendUrl}<br/><br/><button id="re-fix" style="background:#3b82f6; color:#fff; border:none; padding:10px 15px; border-radius:5px; width:100%;">Fix Connection (Set IP)</button>`;
+                console.error("Fetch Error:", err);
                 const rf = log.querySelector('#re-fix');
                 if (rf) rf.onclick = updateIP;
             }
@@ -178,14 +180,12 @@ Only use this when the user asks to create or scaffold a project.`;
     if (typeof acode !== 'undefined') {
         acode.setPluginInit(PLUGIN_ID, (bu, $page) => {
             pageRef = $page;
-            // Auto-detect if not user-set
             if (!localStorage.getItem('memro-ai-ip') && bu && bu.startsWith('http')) {
                 try {
                     const url = new URL(bu);
                     currentBackendUrl = buildFullUrl(url.hostname);
                 } catch(e) {}
             }
-            // Sidebar manual injection (sniper)
             setInterval(() => {
                 const id = 'm-side-btn';
                 if (document.getElementById(id)) return;
@@ -201,7 +201,6 @@ Only use this when the user asks to create or scaffold a project.`;
                     }
                 }
             }, 1000);
-            
             try { 
                 const cmd = acode.require("commands");
                 if (cmd) cmd.addCommand({ name: "memro:open", description: "Open Memro AI", exec: openChat });
