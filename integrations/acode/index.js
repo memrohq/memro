@@ -35,13 +35,14 @@
                 display: flex; flex-direction: column; gap: 12px; background: #121212;
             }
             .memro-input-area {
-                padding: 15px 20px 25px 20px; background: #1a1a1a;
+                padding: 15px 20px 25px 20px; background: #1a1a1a !important;
                 display: flex; gap: 10px; align-items: center; border-top: 1px solid #222;
             }
             .memro-textarea {
-                flex: 1; background: #2a2a2a; color: #fff; border: 1px solid #333;
+                flex: 1; background: #2a2a2a !important; color: #fff !important; border: 1px solid #444 !important;
                 padding: 12px 16px; border-radius: 25px; outline: none; resize: none;
                 font-size: 14px; max-height: 100px;
+                appearance: none !important; -webkit-appearance: none !important;
             }
             .memro-textarea::placeholder {
                 color: #888;
