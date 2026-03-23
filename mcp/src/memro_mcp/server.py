@@ -22,6 +22,7 @@ from starlette.requests import Request
 from starlette.routing import Route, Mount
 from starlette.responses import Response, JSONResponse
 import uvicorn
+from memro_mcp.webhook_handler import process_webhook_event
 
 try:
     import uvloop
@@ -315,6 +316,11 @@ async def list_tools() -> list[Tool]:
                 "required": ["resource"],
             },
         ),
+        Tool(
+            name="get_system_status",
+            description="Check the health and status of the Memro MCP server and its connections.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
         *get_supermemory_tools()
     ]
 
@@ -345,7 +351,7 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
             # Return structured list for DevTools
             serializable = [
                 {
-                    "id": r.id,
+                    "id": r.memory_id,
                     "content": r.content,
                     "type": r.memory_type,
                     "score": r.score,
@@ -579,6 +585,14 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
             
             return CallToolResult(content=[TextContent(type="text", text=f"Handoff completed for {resource}.")])
 
+        elif name == "get_system_status":
+            return CallToolResult(content=[TextContent(type="text", text=json.dumps({
+                "status": "online",
+                "version": "0.1.0",
+                "engine": "CoordinationEngine active",
+                "mcp_version": "1.0.0"
+            }))])
+
         elif name in ["recall_multi_session", "get_memory_chain", "find_contradictions", "analyze_conflicts"]:
             # These are legacy aliases or in-prog, handle gracefully
             msg = f"Tool '{name}' is being merged into the newer MEE toolset. Please use 'mee_reason', 'search_temporal', or 'get_timeline' for best results."
@@ -678,7 +692,14 @@ async def handle_messages(scope, receive, send):
     await sse.handle_post_message(scope, receive, send)
 
 async def handle_webhook(request):
-    return Response(content="ok", status_code=200)
+    agent_id = request.path_params.get("agent_id")
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    
+    result = process_webhook_event(agent_id, payload)
+    return JSONResponse(result)
 
 # Final App Assembly
 _base_app = Starlette(

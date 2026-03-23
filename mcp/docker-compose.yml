@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: memro-mcp
+    ports:
+      - "8084:8080"
+    environment:
+      - MCP_TRANSPORT=sse
+      - MCP_PORT=8080
+      - MCP_WORKERS=1
+      - MEMRO_BASE_URL=http://host.docker.internal:8081
+      - NEO4J_URI=bolt://host.docker.internal:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=memro_graph_secret
+      - PYTHONUNBUFFERED=1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

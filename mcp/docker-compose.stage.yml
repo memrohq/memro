@@ -14,6 +14,9 @@ services:
       - MCP_PORT=8080
       - MCP_WORKERS=1 # Must be 1 for SSE session persistence (unless using sticky sessions)
       - MEMRO_BASE_URL=http://host.docker.internal:8090
+      - NEO4J_URI=bolt://host.docker.internal:7697
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=memro_graph_secret
       - PYTHONUNBUFFERED=1
     deploy:
       resources:

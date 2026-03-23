@@ -18,7 +18,7 @@ async def test_graph_reasoning():
             
             # 2. Query the Knowledge Graph for complex relations
             print("[Graph] Querying: 'Who does Alice collaborate with?'")
-            result = await session.call_tool("query_graph", {"query": "Find collaborators of Alice"})
+            result = await session.call_tool("mee_reason", {"query": "Find collaborators of Alice"})
             
             # Since this is a POC stub, we expect our simulated results
             print(f"[Graph] Result:\n{result.content[0].text}")
