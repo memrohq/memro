@@ -2,15 +2,30 @@
  * Memro AI - Project Scaffolder Edition
  * AI-driven project creation via local Qwen-Coder.
  * Fixed for Cross-Device (Mobile -> Laptop) connectivity.
- * Protocol Sanitizer: Prevents "http://http://" duplication.
+ * URL CORRUPTION FIX: Robustly extracts ONLY the IP address.
  */
 
 (function() {
     const PLUGIN_ID = 'memro-mcp';
-    const DEFAULT_URL = 'http://192.168.0.100:8001/v1/chat/completions';
+    const DEFAULT_IP = '192.168.0.100';
+    const PORT = '8001';
+    const PATH = '/v1/chat/completions';
     
-    // Persistent IP management
-    let currentBackendUrl = localStorage.getItem('memro-ai-ip') || DEFAULT_URL;
+    // Function to build a clean URL given any input (IP or Full URL)
+    const buildFullUrl = (input) => {
+        if (!input) return `http://${DEFAULT_IP}:${PORT}${PATH}`;
+        // Extract only the hostname/IP (strips http, ports, paths)
+        let clean = input.trim()
+            .replace(/^https?:\/\//i, '')
+            .split('/')[0]
+            .split(':')[0];
+        
+        if (!clean || clean.length < 3) clean = DEFAULT_IP;
+        return `http://${clean}:${PORT}${PATH}`;
+    };
+
+    // Initialize with sanitization
+    let currentBackendUrl = buildFullUrl(localStorage.getItem('memro-ai-ip'));
     let pageRef = null;
     let initialized = false;
 
@@ -52,10 +67,7 @@ Only use this when the user asks to create or scaffold a project.`;
             }
             acode.require('sidebar').refresh();
             return true;
-        } catch (e) {
-            console.error("Scaffold Error:", e);
-            return false;
-        }
+        } catch (e) { console.error("Scaffold Error", e); return false; }
     };
 
     const buildUI = (page) => {
@@ -96,14 +108,13 @@ Only use this when the user asks to create or scaffold a project.`;
         };
 
         const updateIP = async () => {
-            const currentIp = currentBackendUrl.split('//')[1]?.split(':')[0] || '192.168.0.100';
-            let newIp = await acode.prompt("Enter Laptop IP", currentIp, "text");
-            if (newIp) {
-                // Aggressive Sanitization
-                newIp = newIp.trim().replace(/^https?:\/\//i, '');
-                currentBackendUrl = `http://${newIp}:8001/v1/chat/completions`;
-                localStorage.setItem('memro-ai-ip', currentBackendUrl);
-                acode.alert("Backend Updated", `Connecting to: ${currentBackendUrl}`);
+            // Only show the HOSTNAME in the prompt (e.g. 192.168.0.100)
+            const currentHost = currentBackendUrl.split('//')[1]?.split(':')[0] || DEFAULT_IP;
+            let val = await acode.prompt("Enter Laptop IP", currentHost, "text");
+            if (val) {
+                currentBackendUrl = buildFullUrl(val);
+                localStorage.setItem('memro-ai-ip', val); // Save only the IP part
+                acode.alert("Backend Updated", `Now using: ${currentBackendUrl}`);
             }
         };
 
@@ -156,24 +167,22 @@ Only use this when the user asks to create or scaffold a project.`;
     if (typeof acode !== 'undefined') {
         acode.setPluginInit(PLUGIN_ID, (bu, $page) => {
             pageRef = $page;
-            // Auto-detect backend IP if not already set by user
+            // Auto-detect if not user-set
             if (!localStorage.getItem('memro-ai-ip') && bu && bu.startsWith('http')) {
                 try {
                     const url = new URL(bu);
-                    let hostname = url.hostname;
-                    hostname = hostname.replace(/^https?:\/\//i, ''); // Extra sanity check
-                    currentBackendUrl = `http://${hostname}:8001/v1/chat/completions`;
+                    currentBackendUrl = buildFullUrl(url.hostname);
                 } catch(e) {}
             }
-            
             // Sidebar manual injection (sniper)
             setInterval(() => {
-                if (document.getElementById('m-side-btn')) return;
+                const id = 'm-side-btn';
+                if (document.getElementById(id)) return;
                 const pz = document.querySelector('.icon.extension') || document.querySelector('.puzzle');
                 if (pz) {
                     const par = pz.closest('div, li, aside, nav');
                     if (par && par.parentElement) {
-                        const btn = document.createElement('div'); btn.id = 'm-side-btn';
+                        const btn = document.createElement('div'); btn.id = id;
                         btn.style.cssText = 'width:100%;height:45px;display:flex;align-items:center;justify-content:center;cursor:pointer;';
                         btn.innerHTML = `<span style="font-size:22px;">🧠</span>`;
                         btn.onclick = (e) => { e.stopPropagation(); openChat(); };
