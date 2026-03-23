@@ -2,6 +2,7 @@
  * Memro AI - Project Scaffolder Edition
  * AI-driven project creation via local Qwen-Coder.
  * Fixed for Cross-Device (Mobile -> Laptop) connectivity.
+ * Protocol Sanitizer: Prevents "http://http://" duplication.
  */
 
 (function() {
@@ -96,11 +97,13 @@ Only use this when the user asks to create or scaffold a project.`;
 
         const updateIP = async () => {
             const currentIp = currentBackendUrl.split('//')[1]?.split(':')[0] || '192.168.0.100';
-            const newIp = await acode.prompt("Enter Laptop IP Address", currentIp, "text");
+            let newIp = await acode.prompt("Enter Laptop IP", currentIp, "text");
             if (newIp) {
-                currentBackendUrl = `http://${newIp.trim()}:8000/v1/chat/completions`;
+                // Aggressive Sanitization
+                newIp = newIp.trim().replace(/^https?:\/\//i, '');
+                currentBackendUrl = `http://${newIp}:8001/v1/chat/completions`;
                 localStorage.setItem('memro-ai-ip', currentBackendUrl);
-                acode.alert("Backend Updated", `Now connecting to: ${currentBackendUrl}`);
+                acode.alert("Backend Updated", `Connecting to: ${currentBackendUrl}`);
             }
         };
 
@@ -133,14 +136,14 @@ Only use this when the user asks to create or scaffold a project.`;
                     try {
                         const action = JSON.parse(jsonMatch[0]);
                         if (action.files) {
-                            aiMsg.innerHTML += "<br/><br/><b>[System] Scaffolding project...</b>";
+                            aiMsg.innerHTML += "<br/><br/><b>[System] Scaffolding...</b>";
                             const success = await scaffoldFiles(action.files);
-                            aiMsg.innerHTML += success ? "<br/>✅ Project created successfully!" : "<br/>❌ Error writing files.";
+                            aiMsg.innerHTML += success ? "<br/>✅ Project created!" : "<br/>❌ Error writing files.";
                         }
                     } catch(e) { console.error("Action Parse Error", e); }
                 }
             } catch (err) {
-                aiMsg.innerHTML = `<b>Error: Cannot connect to Laptop.</b><br/>Attempted: ${currentBackendUrl}<br/><br/><button id="re-fix" style="background:#3b82f6; color:#fff; border:none; padding:10px 15px; border-radius:5px; width:100%;">Fix Connection (Set IP)</button>`;
+                aiMsg.innerHTML = `<b>Error: Cannot connect.</b><br/>Attempted: ${currentBackendUrl}<br/><br/><button id="re-fix" style="background:#3b82f6; color:#fff; border:none; padding:10px 15px; border-radius:5px; width:100%;">Fix Connection (Set IP)</button>`;
                 const rf = log.querySelector('#re-fix');
                 if (rf) rf.onclick = updateIP;
             }
@@ -150,36 +153,35 @@ Only use this when the user asks to create or scaffold a project.`;
 
     const openChat = () => { if (pageRef) { buildUI(pageRef); pageRef.show(); } };
 
-    const injectIcon = () => {
-        const id = 'm-side-btn';
-        if (document.getElementById(id)) return;
-        const sniper = setInterval(() => {
-            if (document.getElementById(id)) { clearInterval(sniper); return; }
-            const pz = document.querySelector('.icon.extension') || document.querySelector('.puzzle');
-            if (pz) {
-                const par = pz.closest('div, li, aside, nav');
-                if (par && par.parentElement) {
-                    const btn = document.createElement('div'); btn.id = id;
-                    btn.style.cssText = 'width:100%;height:45px;display:flex;align-items:center;justify-content:center;cursor:pointer;';
-                    btn.innerHTML = `<span style="font-size:22px;">🧠</span>`;
-                    btn.onclick = (e) => { e.stopPropagation(); openChat(); };
-                    par.parentElement.prepend(btn);
-                    clearInterval(sniper);
-                }
-            }
-        }, 1000);
-    };
-
     if (typeof acode !== 'undefined') {
         acode.setPluginInit(PLUGIN_ID, (bu, $page) => {
             pageRef = $page;
+            // Auto-detect backend IP if not already set by user
             if (!localStorage.getItem('memro-ai-ip') && bu && bu.startsWith('http')) {
                 try {
                     const url = new URL(bu);
-                    currentBackendUrl = `http://${url.hostname}:8001/v1/chat/completions`;
+                    let hostname = url.hostname;
+                    hostname = hostname.replace(/^https?:\/\//i, ''); // Extra sanity check
+                    currentBackendUrl = `http://${hostname}:8001/v1/chat/completions`;
                 } catch(e) {}
             }
-            injectIcon();
+            
+            // Sidebar manual injection (sniper)
+            setInterval(() => {
+                if (document.getElementById('m-side-btn')) return;
+                const pz = document.querySelector('.icon.extension') || document.querySelector('.puzzle');
+                if (pz) {
+                    const par = pz.closest('div, li, aside, nav');
+                    if (par && par.parentElement) {
+                        const btn = document.createElement('div'); btn.id = 'm-side-btn';
+                        btn.style.cssText = 'width:100%;height:45px;display:flex;align-items:center;justify-content:center;cursor:pointer;';
+                        btn.innerHTML = `<span style="font-size:22px;">🧠</span>`;
+                        btn.onclick = (e) => { e.stopPropagation(); openChat(); };
+                        par.parentElement.prepend(btn);
+                    }
+                }
+            }, 1000);
+            
             try { 
                 const cmd = acode.require("commands");
                 if (cmd) cmd.addCommand({ name: "memro:open", description: "Open Memro AI", exec: openChat });
