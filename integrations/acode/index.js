@@ -1,11 +1,15 @@
 /**
  * Memro AI - Project Scaffolder Edition
  * AI-driven project creation via local Qwen-Coder.
+ * Fixed for Cross-Device (Mobile -> Laptop) connectivity.
  */
 
 (function() {
     const PLUGIN_ID = 'memro-mcp';
-    let currentBackendUrl = 'http://localhost:8000/v1/chat/completions';
+    const DEFAULT_URL = 'http://localhost:8000/v1/chat/completions';
+    
+    // Persistent IP management
+    let currentBackendUrl = localStorage.getItem('memro-ai-ip') || DEFAULT_URL;
     let pageRef = null;
     let initialized = false;
 
@@ -25,7 +29,7 @@ Only use this when the user asks to create or scaffold a project.`;
             .memro-bottom-sheet { background: #1a1a1a; border-top: 1px solid #333; border-radius: 20px 20px 0 0; height: 75%; display: flex; flex-direction: column; box-shadow: 0 -10px 40px rgba(0,0,0,0.5); animation: mSlideIn 0.3s ease-out; }
             @keyframes mSlideIn { from { transform: translateY(100%); } to { transform: translateY(0); } }
             .memro-log { flex: 1; overflow-y: auto; padding: 15px 20px; display: flex; flex-direction: column; gap: 12px; background: #121212; }
-            .memro-msg { padding: 10px 14px; border-radius: 18px; font-size: 14px; max-width: 85%; line-height: 1.4; }
+            .memro-msg { padding: 10px 14px; border-radius: 18px; font-size: 14px; max-width: 85%; line-height: 1.4; word-wrap: break-word; }
             .memro-msg.user { background: #2563eb; color: white; align-self: flex-end; }
             .memro-msg.ai { background: #2a2a2a; color: #eee; align-self: flex-start; border: 1px solid #333; }
         `;
@@ -43,7 +47,6 @@ Only use this when the user asks to create or scaffold a project.`;
             const rootUrl = currentProject.url;
             for (const file of files) {
                 const fileUrl = rootUrl.endsWith('/') ? rootUrl + file.path : rootUrl + '/' + file.path;
-                // Simple write (assumes dirs exist or root-level for now)
                 await fs(fileUrl).writeFile(file.content);
             }
             acode.require('sidebar').refresh();
@@ -63,8 +66,11 @@ Only use this when the user asks to create or scaffold a project.`;
                 <div class="memro-bottom-sheet">
                     <div style="height:24px; display:flex; justify-content:center; align-items:center;"><div style="width:40px; height:4px; background:#444; border-radius:2px;"></div></div>
                     <div style="padding:0 20px 10px; display:flex; justify-content:space-between; align-items:center;">
-                        <span style="font-weight:600; color:#fff;">🧠 Memro AI Project Scaffolder</span>
-                        <span style="color:#888; font-size:28px; cursor:pointer;" onclick="this.closest('.page').hide()">&times;</span>
+                        <span style="font-weight:600; color:#fff;">🧠 Memro AI Scaffolder</span>
+                        <div>
+                           <span id="m-config" style="color:#3b82f6; font-size:12px; margin-right:15px; cursor:pointer;">Set IP</span>
+                           <span style="color:#888; font-size:28px; cursor:pointer;" onclick="this.closest('.page').hide()">&times;</span>
+                        </div>
                     </div>
                     <div id="m-log" class="memro-log"></div>
                     <div style="padding:15px 18px 25px; background:#1a1a1a !important; display:flex !important; gap:10px !important; align-items:flex-end !important; border-top:1px solid #222 !important; width:100% !important; box-sizing:border-box !important;">
@@ -78,12 +84,27 @@ Only use this when the user asks to create or scaffold a project.`;
         const log = page.querySelector('#m-log');
         const input = page.querySelector('#m-in');
         const send = page.querySelector('#m-send');
+        const configBtn = page.querySelector('#m-config');
 
         const addMsg = (role, text) => {
-            const m = document.createElement('div'); m.className = `memro-msg ${role}`; m.innerText = text;
+            const m = document.createElement('div'); m.className = `memro-msg ${role}`;
+            if (role === 'ai') m.innerHTML = text.replace(/\n/g, '<br/>');
+            else m.innerText = text;
             log.appendChild(m); log.scrollTop = log.scrollHeight;
             return m;
         };
+
+        const updateIP = async () => {
+            const currentIp = currentBackendUrl.split('//')[1]?.split(':')[0] || '192.168.0.100';
+            const newIp = await acode.prompt("Enter Laptop IP Address", currentIp, "text");
+            if (newIp) {
+                currentBackendUrl = `http://${newIp.trim()}:8000/v1/chat/completions`;
+                localStorage.setItem('memro-ai-ip', currentBackendUrl);
+                acode.alert("Backend Updated", `Now connecting to: ${currentBackendUrl}`);
+            }
+        };
+
+        configBtn.onclick = updateIP;
 
         send.onclick = async () => {
             const val = input.value.trim(); if (!val) return;
@@ -107,20 +128,21 @@ Only use this when the user asks to create or scaffold a project.`;
                 const content = data.choices[0].message.content;
                 aiMsg.innerText = content;
 
-                // Check for JSON actions
                 const jsonMatch = content.match(/\{[\s\S]*"action":\s*"scaffold"[\s\S]*\}/);
                 if (jsonMatch) {
                     try {
                         const action = JSON.parse(jsonMatch[0]);
                         if (action.files) {
-                            aiMsg.innerText += "\n\n[System] Scaffolding project...";
+                            aiMsg.innerHTML += "<br/><br/><b>[System] Scaffolding project...</b>";
                             const success = await scaffoldFiles(action.files);
-                            aiMsg.innerText += success ? "\n✅ Project created successfully!" : "\n❌ Error writing files.";
+                            aiMsg.innerHTML += success ? "<br/>✅ Project created successfully!" : "<br/>❌ Error writing files.";
                         }
                     } catch(e) { console.error("Action Parse Error", e); }
                 }
             } catch (err) {
-                aiMsg.innerText = `Error: Could not connect to Memro Model Server at ${currentBackendUrl}. Ensure it is running on your laptop.`;
+                aiMsg.innerHTML = `<b>Error: Cannot connect to Laptop.</b><br/>Attempted: ${currentBackendUrl}<br/><br/><button id="re-fix" style="background:#3b82f6; color:#fff; border:none; padding:10px 15px; border-radius:5px; width:100%;">Fix Connection (Set IP)</button>`;
+                const rf = log.querySelector('#re-fix');
+                if (rf) rf.onclick = updateIP;
             }
         };
         initialized = true;
@@ -128,36 +150,36 @@ Only use this when the user asks to create or scaffold a project.`;
 
     const openChat = () => { if (pageRef) { buildUI(pageRef); pageRef.show(); } };
 
-    // --- Sidebar + Commands ---
+    const injectIcon = () => {
+        const id = 'm-side-btn';
+        if (document.getElementById(id)) return;
+        const sniper = setInterval(() => {
+            if (document.getElementById(id)) { clearInterval(sniper); return; }
+            const pz = document.querySelector('.icon.extension') || document.querySelector('.puzzle');
+            if (pz) {
+                const par = pz.closest('div, li, aside, nav');
+                if (par && par.parentElement) {
+                    const btn = document.createElement('div'); btn.id = id;
+                    btn.style.cssText = 'width:100%;height:45px;display:flex;align-items:center;justify-content:center;cursor:pointer;';
+                    btn.innerHTML = `<span style="font-size:22px;">🧠</span>`;
+                    btn.onclick = (e) => { e.stopPropagation(); openChat(); };
+                    par.parentElement.prepend(btn);
+                    clearInterval(sniper);
+                }
+            }
+        }, 1000);
+    };
+
     if (typeof acode !== 'undefined') {
         acode.setPluginInit(PLUGIN_ID, (bu, $page) => {
             pageRef = $page;
-            
-            // Auto-detect backend IP from the plugin's serve URL
-            if (bu && bu.startsWith('http')) {
+            if (!localStorage.getItem('memro-ai-ip') && bu && bu.startsWith('http')) {
                 try {
                     const url = new URL(bu);
                     currentBackendUrl = `http://${url.hostname}:8000/v1/chat/completions`;
-                    console.log("Memro AI: Auto-detected Backend:", currentBackendUrl);
-                } catch(e) { console.error("URL Parse Error", e); }
+                } catch(e) {}
             }
-
-            // Sidebar manual injection (sniper)
-            setInterval(() => {
-                if (document.getElementById('m-side-btn')) return;
-                const pz = document.querySelector('.icon.extension') || document.querySelector('.puzzle');
-                if (pz) {
-                    const par = pz.closest('div, li, aside, nav');
-                    if (par && par.parentElement) {
-                        const btn = document.createElement('div'); btn.id = 'm-side-btn';
-                        btn.style.cssText = 'width:100%;height:45px;display:flex;align-items:center;justify-content:center;cursor:pointer;';
-                        btn.innerHTML = `<span style="font-size:22px;">🧠</span>`;
-                        btn.onclick = (e) => { e.stopPropagation(); openChat(); };
-                        par.parentElement.prepend(btn);
-                    }
-                }
-            }, 1000);
-            
+            injectIcon();
             try { 
                 const cmd = acode.require("commands");
                 if (cmd) cmd.addCommand({ name: "memro:open", description: "Open Memro AI", exec: openChat });
