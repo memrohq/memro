@@ -87,9 +87,9 @@
                         <span id="memro-x" style="color:#888; font-size:28px; cursor:pointer;">&times;</span>
                     </div>
                     <div id="memro-chat-log" class="memro-chat-log"></div>
-                    <div class="memro-input-area">
-                        <textarea id="memro-in" class="memro-textarea" placeholder="Message Memro..." rows="1"></textarea>
-                        <button id="memro-send" style="background:#3b82f6; color:#fff; border:none; width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center;">➤</button>
+                    <div class="memro-input-area" style="padding:15px 18px 25px 18px !important; background:#1a1a1a !important; display:flex !important; gap:10px !important; align-items:flex-end !important; border-top:1px solid #222 !important; width:100% !important; box-sizing:border-box !important;">
+                        <textarea id="memro-in" class="memro-textarea" placeholder="Message Memro..." rows="1" style="flex:1 !important; width:100% !important; min-width:0 !important; background:#2a2a2a !important; color:#ffffff !important; border:1px solid #444 !important; padding:12px 16px !important; border-radius:25px !important; outline:none !important; resize:none !important; font-size:14px !important; max-height:100px !important; appearance:none !important; -webkit-appearance:none !important; box-sizing:border-box !important;"></textarea>
+                        <button id="memro-send" style="background:#3b82f6 !important; color:#fff !important; border:none !important; width:44px !important; height:44px !important; border-radius:50% !important; display:flex !important; align-items:center !important; justify-content:center !important; flex-shrink:0 !important;">➤</button>
                     </div>
                 </div>
             </div>
