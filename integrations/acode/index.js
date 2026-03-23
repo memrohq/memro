@@ -5,7 +5,7 @@
 
 (function() {
     const PLUGIN_ID = 'memro-mcp';
-    const BACKEND_URL = 'http://localhost:8000/v1/chat/completions';
+    let currentBackendUrl = 'http://localhost:8000/v1/chat/completions';
     let pageRef = null;
     let initialized = false;
 
@@ -92,7 +92,7 @@ Only use this when the user asks to create or scaffold a project.`;
             const aiMsg = addMsg('ai', 'Thinking...');
 
             try {
-                const response = await fetch(BACKEND_URL, {
+                const response = await fetch(currentBackendUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -120,7 +120,7 @@ Only use this when the user asks to create or scaffold a project.`;
                     } catch(e) { console.error("Action Parse Error", e); }
                 }
             } catch (err) {
-                aiMsg.innerText = "Error: Could not connect to Memro Model Server. Ensure it is running on port 8000.";
+                aiMsg.innerText = `Error: Could not connect to Memro Model Server at ${currentBackendUrl}. Ensure it is running on your laptop.`;
             }
         };
         initialized = true;
@@ -132,6 +132,16 @@ Only use this when the user asks to create or scaffold a project.`;
     if (typeof acode !== 'undefined') {
         acode.setPluginInit(PLUGIN_ID, (bu, $page) => {
             pageRef = $page;
+            
+            // Auto-detect backend IP from the plugin's serve URL
+            if (bu && bu.startsWith('http')) {
+                try {
+                    const url = new URL(bu);
+                    currentBackendUrl = `http://${url.hostname}:8000/v1/chat/completions`;
+                    console.log("Memro AI: Auto-detected Backend:", currentBackendUrl);
+                } catch(e) { console.error("URL Parse Error", e); }
+            }
+
             // Sidebar manual injection (sniper)
             setInterval(() => {
                 if (document.getElementById('m-side-btn')) return;
@@ -153,5 +163,6 @@ Only use this when the user asks to create or scaffold a project.`;
                 if (cmd) cmd.addCommand({ name: "memro:open", description: "Open Memro AI", exec: openChat });
             } catch(e) {}
         });
+        acode.setPluginUnmount(PLUGIN_ID, () => { if (pageRef) pageRef.hide(); });
     }
 })();
