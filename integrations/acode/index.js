@@ -43,6 +43,10 @@
                 padding: 12px 16px; border-radius: 25px; outline: none; resize: none;
                 font-size: 14px; max-height: 100px;
             }
+            .memro-textarea::placeholder {
+                color: #888;
+                background: transparent !important;
+            }
             .memro-msg { padding: 10px 14px; border-radius: 18px; font-size: 14px; max-width: 85%; }
             .memro-msg.user { background: #2563eb; color: white; align-self: flex-end; }
             .memro-msg.ai { background: #2a2a2a; color: #eee; align-self: flex-start; border: 1px solid #333; }
