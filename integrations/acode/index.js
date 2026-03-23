@@ -3,6 +3,8 @@
  * AI-driven project creation via local Qwen-Coder.
  * Fixed for Cross-Device (Mobile -> Laptop) connectivity.
  * STREAMING READY: Now supports real-time token streaming with typewriter effect.
+ * MARKDOWN FIX: Proper rendering for code blocks, headers, and unescaping newlines.
+ * SCAFFOLD FIX: Better error reporting for file system writes and project folder checks.
  */
 
 (function() {
@@ -11,7 +13,35 @@
     const PORT = '8001';
     const PATH = '/v1/chat/completions';
     
-    // Function to build a clean URL given any input (IP or Full URL)
+    // Minimal Markdown-ish Renderer for UI
+    const mdToHtml = (str) => {
+        if (!str) return "";
+        let html = str
+            .replace(/\\n/g, '\n') // Fix literal \n 
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+
+        // Code blocks: ```language ... ```
+        html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre style="background:#111; padding:10px; border-radius:8px; overflow-x:auto; border:1px solid #333; margin:10px 0; font-family:monospace; font-size:12px; color:#c9d1d9;"><code>$2</code></pre>');
+        
+        // Inline code: `code`
+        html = html.replace(/`([^`]+)`/g, '<code style="background:#333; padding:2px 4px; border-radius:4px; font-family:monospace;">$1</code>');
+        
+        // Headers: ### Header
+        html = html.replace(/^### (.*$)/gm, '<h3 style="color:#fff; margin-top:15px; margin-bottom:5px;">$1</h3>');
+        html = html.replace(/^## (.*$)/gm, '<h2 style="color:#fff; border-bottom:1px solid #333; padding-bottom:5px; margin-top:20px;">$1</h2>');
+        html = html.replace(/^# (.*$)/gm, '<h1 style="color:#fff; border-bottom:1px solid #333; padding-bottom:5px;">$1</h1>');
+        
+        // Bold: **text**
+        html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        
+        // Newlines to <br/>
+        html = html.replace(/\n/g, '<br/>');
+        
+        return html;
+    };
+
     const buildFullUrl = (input) => {
         if (!input || input.trim() === "" || input.trim().toLowerCase() === "http" || input.trim().toLowerCase() === "https") {
             return `http://${DEFAULT_IP}:${PORT}${PATH}`;
@@ -29,11 +59,12 @@
     let pageRef = null;
     let initialized = false;
 
-    const SYSTEM_PROMPT = `You are Memro AI, a coding assistant inside Acode.
-You can create projects by returning a JSON block at the END of your message.
+    const SYSTEM_PROMPT = `You are Memro AI, a coding assistant inside Acode on Android.
+You can create projects by returning a JSON block at the VERY END of your message.
 Format:
-{"action": "scaffold", "files": [{"path": "filename.ext", "content": "..."}]}
-Only use this when the user asks to create or scaffold a project.`;
+{"action": "scaffold", "files": [{"path": "main.py", "content": "print('hello')"}]}
+Ensure the paths are relative (no leading slash).
+ONLY return the JSON if asked to create or scaffold.`;
 
     const injectStyles = () => {
         if (document.getElementById('memro-styles')) return;
@@ -44,10 +75,11 @@ Only use this when the user asks to create or scaffold a project.`;
             .memro-bottom-sheet { background: #1a1a1a; border-top: 1px solid #333; border-radius: 20px 20px 0 0; height: 75%; display: flex; flex-direction: column; box-shadow: 0 -10px 40px rgba(0,0,0,0.5); animation: mSlideIn 0.3s ease-out; }
             @keyframes mSlideIn { from { transform: translateY(100%); } to { transform: translateY(0); } }
             .memro-log { flex: 1; overflow-y: auto; padding: 15px 20px; display: flex; flex-direction: column; gap: 12px; background: #121212; }
-            .memro-msg { padding: 10px 14px; border-radius: 18px; font-size: 14px; max-width: 85%; line-height: 1.4; word-wrap: break-word; }
+            .memro-msg { padding: 10px 14px; border-radius: 18px; font-size: 14px; max-width: 90%; line-height: 1.5; word-wrap: break-word; color: #d1d5db; }
             .memro-msg.user { background: #2563eb; color: white; align-self: flex-end; }
-            .memro-msg.ai { background: #2a2a2a; color: #eee; align-self: flex-start; border: 1px solid #333; }
-            .memro-msg.ai.thinking { opacity: 0.6; italic; }
+            .memro-msg.ai { background: #2a2a2a; align-self: flex-start; border: 1px solid #333; }
+            .memro-msg.ai.thinking { opacity: 0.6; font-style: italic; }
+            .memro-msg pre { white-space: pre-wrap; word-break: break-all; }
         `;
         document.head.appendChild(style);
     };
@@ -57,15 +89,21 @@ Only use this when the user asks to create or scaffold a project.`;
             const fs = acode.require('fsOperation');
             const projectManager = acode.require('projectManager');
             const currentProject = projectManager.getCurrentProject();
-            if (!currentProject) throw new Error("No active project found.");
+            if (!currentProject) throw new Error("No active folder open. Please open a folder first!");
+
             const rootUrl = currentProject.url;
             for (const file of files) {
-                const fileUrl = rootUrl.endsWith('/') ? rootUrl + file.path : rootUrl + '/' + file.path;
+                // Ensure no leading slash in path
+                let relPath = file.path.startsWith('/') ? file.path.substring(1) : file.path;
+                const fileUrl = rootUrl.endsWith('/') ? rootUrl + relPath : rootUrl + '/' + relPath;
                 await fs(fileUrl).writeFile(file.content);
             }
             acode.require('sidebar').refresh();
-            return true;
-        } catch (e) { console.error("Scaffold Error", e); return false; }
+            return { success: true };
+        } catch (e) { 
+            console.error("Scaffold Error", e); 
+            return { success: false, error: e.message }; 
+        }
     };
 
     const buildUI = (page) => {
@@ -99,10 +137,9 @@ Only use this when the user asks to create or scaffold a project.`;
 
         const addMsg = (role, text) => {
             const m = document.createElement('div'); m.className = `memro-msg ${role}`;
-            if (role === 'ai') m.innerHTML = text.replace(/\n/g, '<br/>');
+            if (role === 'ai') m.innerHTML = mdToHtml(text);
             else m.innerText = text;
             log.appendChild(m); log.scrollTop = log.scrollHeight;
-            if (role === 'ai') m.id = 'latest-ai-msg';
             return m;
         };
 
@@ -130,7 +167,6 @@ Only use this when the user asks to create or scaffold a project.`;
             let fullContent = "";
 
             try {
-                // SWITCH TO FETCH WITH STREAMING SUPPORT
                 const response = await fetch(currentBackendUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -140,13 +176,13 @@ Only use this when the user asks to create or scaffold a project.`;
                             { role: 'user', content: val }
                         ],
                         temperature: 0.2,
-                        stream: true // ENABLE STREAMING
+                        stream: true
                     })
                 });
 
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 
-                aiMsg.innerText = ""; // Clear "Thinking..."
+                aiMsg.innerText = "";
                 aiMsg.classList.remove('thinking');
 
                 const reader = response.body.getReader();
@@ -167,23 +203,25 @@ Only use this when the user asks to create or scaffold a project.`;
                                 const json = JSON.parse(dataStr);
                                 const token = json.choices[0].delta.content || "";
                                 fullContent += token;
-                                // TYPEWRITER UPDATE
-                                aiMsg.innerHTML = fullContent.replace(/\n/g, '<br/>');
+                                aiMsg.innerHTML = mdToHtml(fullContent);
                                 log.scrollTop = log.scrollHeight;
                             } catch(e) {}
                         }
                     }
                 }
 
-                // Check for scaffolding actions at the end
                 const jsonMatch = fullContent.match(/\{[\s\S]*"action":\s*"scaffold"[\s\S]*\}/);
                 if (jsonMatch) {
                     try {
                         const action = JSON.parse(jsonMatch[0]);
                         if (action.files) {
-                            aiMsg.innerHTML += "<br/><br/><b>[System] Scaffolding...</b>";
-                            const success = await scaffoldFiles(action.files);
-                            aiMsg.innerHTML += success ? "<br/>✅ Project created!" : "<br/>❌ Error writing files.";
+                            aiMsg.innerHTML += "<br/><br/><b style='color:#3b82f6;'>⚙️ [System] Scaffolding files...</b>";
+                            const result = await scaffoldFiles(action.files);
+                            if (result.success) {
+                                aiMsg.innerHTML += "<br/>✅ <b style='color:#10b981;'>Project created successfully in your current folder!</b>";
+                            } else {
+                                aiMsg.innerHTML += `<br/>❌ <b style='color:#ef4444;'>Failed to write files: ${result.error}</b>`;
+                            }
                         }
                     } catch(e) { console.error("Action Parse Error", e); }
                 }
