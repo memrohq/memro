@@ -6,7 +6,7 @@
 
 (function() {
     const PLUGIN_ID = 'memro-mcp';
-    const DEFAULT_URL = 'http://localhost:8000/v1/chat/completions';
+    const DEFAULT_URL = 'http://192.168.0.100:8001/v1/chat/completions';
     
     // Persistent IP management
     let currentBackendUrl = localStorage.getItem('memro-ai-ip') || DEFAULT_URL;
