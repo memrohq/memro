@@ -5,7 +5,7 @@
  * Protocol Sanitizer: Prevents "http://http://" duplication.
  * UI FIX: Ensures "Set IP" prompt is clean (no "http" pre-filled).
  * IP SHIFT: Adjusted default to new laptop IP 192.168.0.111.
- * VERBOSE ERROR: Now reports exact error reason (e.g., TypeError).
+ * FETCH BYPASS: Now using XMLHttpRequest for wider WebView compatibility.
  */
 
 (function() {
@@ -127,29 +127,35 @@ Only use this when the user asks to create or scaffold a project.`;
             addMsg('user', val);
             const aiMsg = addMsg('ai', 'Thinking...');
 
+            // LEGACY XHR WRAPPER (to bypass modern fetch restrictions)
+            const xhrRequest = (url, body) => {
+                return new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', url, true);
+                    xhr.setRequestHeader('Content-Type', 'application/json');
+                    xhr.onreadystatechange = () => {
+                        if (xhr.readyState === 4) {
+                            if (xhr.status >= 200 && xhr.status < 300) {
+                                resolve(JSON.parse(xhr.responseText));
+                            } else {
+                                reject(new Error(`XHR Fail: ${xhr.status} ${xhr.statusText}`));
+                            }
+                        }
+                    };
+                    xhr.onerror = () => reject(new Error("XHR Network Failure"));
+                    xhr.send(JSON.stringify(body));
+                });
+            };
+
             try {
-                const response = await fetch(currentBackendUrl, {
-                    method: 'POST',
-                    mode: 'cors',
-                    credentials: 'omit',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        messages: [
-                            { role: 'system', content: SYSTEM_PROMPT },
-                            { role: 'user', content: val }
-                        ],
-                        temperature: 0.2
-                    })
+                const data = await xhrRequest(currentBackendUrl, {
+                    messages: [
+                        { role: 'system', content: SYSTEM_PROMPT },
+                        { role: 'user', content: val }
+                    ],
+                    temperature: 0.2
                 });
                 
-                if (!response.ok) {
-                    throw new Error(`Server Error: ${response.status} ${response.statusText}`);
-                }
-                
-                const data = await response.json();
                 const content = data.choices[0].message.content;
                 aiMsg.innerText = content;
 
@@ -165,9 +171,8 @@ Only use this when the user asks to create or scaffold a project.`;
                     } catch(e) { console.error("Action Parse Error", e); }
                 }
             } catch (err) {
-                // VERBOSE ERROR LOGGING
-                aiMsg.innerHTML = `<b>Connection Failed.</b><br/>Reason: ${err.message}<br/>Attempted: ${currentBackendUrl}<br/><br/><button id="re-fix" style="background:#3b82f6; color:#fff; border:none; padding:10px 15px; border-radius:5px; width:100%;">Fix Connection (Set IP)</button>`;
-                console.error("Fetch Error:", err);
+                aiMsg.innerHTML = `<b>Connection Failed (XHR).</b><br/>Reason: ${err.message}<br/>Attempted: ${currentBackendUrl}<br/><br/><button id="re-fix" style="background:#3b82f6; color:#fff; border:none; padding:10px 15px; border-radius:5px; width:100%;">Fix Connection (Set IP)</button>`;
+                console.error("XHR Error:", err);
                 const rf = log.querySelector('#re-fix');
                 if (rf) rf.onclick = updateIP;
             }
