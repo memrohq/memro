@@ -4,7 +4,7 @@
  * Fixed for Cross-Device (Mobile -> Laptop) connectivity.
  * STREAMING READY: Now supports real-time token streaming with typewriter effect.
  * MARKDOWN FIX: Proper rendering for code blocks, headers, and unescaping newlines.
- * SCAFFOLD FIX: Better error reporting for file system writes and project folder checks.
+ * RECURSIVE FOLDERS: Now automatically creates directories for any file path!
  */
 
 (function() {
@@ -13,32 +13,20 @@
     const PORT = '8001';
     const PATH = '/v1/chat/completions';
     
-    // Minimal Markdown-ish Renderer for UI
     const mdToHtml = (str) => {
         if (!str) return "";
         let html = str
-            .replace(/\\n/g, '\n') // Fix literal \n 
+            .replace(/\\n/g, '\n')
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
-
-        // Code blocks: ```language ... ```
         html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre style="background:#111; padding:10px; border-radius:8px; overflow-x:auto; border:1px solid #333; margin:10px 0; font-family:monospace; font-size:12px; color:#c9d1d9;"><code>$2</code></pre>');
-        
-        // Inline code: `code`
         html = html.replace(/`([^`]+)`/g, '<code style="background:#333; padding:2px 4px; border-radius:4px; font-family:monospace;">$1</code>');
-        
-        // Headers: ### Header
         html = html.replace(/^### (.*$)/gm, '<h3 style="color:#fff; margin-top:15px; margin-bottom:5px;">$1</h3>');
         html = html.replace(/^## (.*$)/gm, '<h2 style="color:#fff; border-bottom:1px solid #333; padding-bottom:5px; margin-top:20px;">$1</h2>');
         html = html.replace(/^# (.*$)/gm, '<h1 style="color:#fff; border-bottom:1px solid #333; padding-bottom:5px;">$1</h1>');
-        
-        // Bold: **text**
         html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-        
-        // Newlines to <br/>
         html = html.replace(/\n/g, '<br/>');
-        
         return html;
     };
 
@@ -46,11 +34,7 @@
         if (!input || input.trim() === "" || input.trim().toLowerCase() === "http" || input.trim().toLowerCase() === "https") {
             return `http://${DEFAULT_IP}:${PORT}${PATH}`;
         }
-        let clean = input.trim()
-            .replace(/^https?:\/\//i, '')
-            .replace(/^https?:\/\//i, '') 
-            .split('/')[0]
-            .split(':')[0];
+        let clean = input.trim().replace(/^https?:\/\//i, '').replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
         if (!clean || clean.length < 3 || clean.toLowerCase() === "http") clean = DEFAULT_IP;
         return `http://${clean}:${PORT}${PATH}`;
     };
@@ -60,11 +44,10 @@
     let initialized = false;
 
     const SYSTEM_PROMPT = `You are Memro AI, a coding assistant inside Acode on Android.
-You can create projects by returning a JSON block at the VERY END of your message.
-Format:
-{"action": "scaffold", "files": [{"path": "main.py", "content": "print('hello')"}]}
-Ensure the paths are relative (no leading slash).
-ONLY return the JSON if asked to create or scaffold.`;
+You can create projects by returning a JSON block at the VERY END.
+Format: {"action": "scaffold", "files": [{"path": "src/main.py", "content": "..."}]}
+Ensure paths are relative. You CAN use subdirectories like 'src/utils/tool.py'.
+ONLY return JSON if asked to create a project structure.`;
 
     const injectStyles = () => {
         if (document.getElementById('memro-styles')) return;
@@ -78,8 +61,6 @@ ONLY return the JSON if asked to create or scaffold.`;
             .memro-msg { padding: 10px 14px; border-radius: 18px; font-size: 14px; max-width: 90%; line-height: 1.5; word-wrap: break-word; color: #d1d5db; }
             .memro-msg.user { background: #2563eb; color: white; align-self: flex-end; }
             .memro-msg.ai { background: #2a2a2a; align-self: flex-start; border: 1px solid #333; }
-            .memro-msg.ai.thinking { opacity: 0.6; font-style: italic; }
-            .memro-msg pre { white-space: pre-wrap; word-break: break-all; }
         `;
         document.head.appendChild(style);
     };
@@ -92,10 +73,25 @@ ONLY return the JSON if asked to create or scaffold.`;
             if (!currentProject) throw new Error("No active folder open. Please open a folder first!");
 
             const rootUrl = currentProject.url;
+            
+            // Recursive directory creator
+            const ensureDir = async (folderUrl) => {
+                try {
+                    const stats = await fs(folderUrl).exists();
+                    if (!stats) await fs(folderUrl.substring(0, folderUrl.lastIndexOf('/'))).mkdir(folderUrl.split('/').pop());
+                } catch (e) { /* ignore if already exists */ }
+            };
+
             for (const file of files) {
-                // Ensure no leading slash in path
-                let relPath = file.path.startsWith('/') ? file.path.substring(1) : file.path;
-                const fileUrl = rootUrl.endsWith('/') ? rootUrl + relPath : rootUrl + '/' + relPath;
+                let parts = file.path.replace(/^\//,'').split('/');
+                let currentUrl = rootUrl;
+                // Create subfolders if needed
+                for (let i = 0; i < parts.length - 1; i++) {
+                    let folderName = parts[i];
+                    currentUrl = currentUrl.endsWith('/') ? currentUrl + folderName : currentUrl + '/' + folderName;
+                    await ensureDir(currentUrl);
+                }
+                const fileUrl = rootUrl.endsWith('/') ? rootUrl + file.path.replace(/^\//,'') : rootUrl + '/' + file.path.replace(/^\//,'');
                 await fs(fileUrl).writeFile(file.content);
             }
             acode.require('sidebar').refresh();
@@ -162,7 +158,6 @@ ONLY return the JSON if asked to create or scaffold.`;
             input.value = ''; input.style.height = 'auto';
             addMsg('user', val);
             const aiMsg = addMsg('ai', 'Thinking...');
-            aiMsg.classList.add('thinking');
 
             let fullContent = "";
 
@@ -183,7 +178,6 @@ ONLY return the JSON if asked to create or scaffold.`;
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 
                 aiMsg.innerText = "";
-                aiMsg.classList.remove('thinking');
 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -215,18 +209,17 @@ ONLY return the JSON if asked to create or scaffold.`;
                     try {
                         const action = JSON.parse(jsonMatch[0]);
                         if (action.files) {
-                            aiMsg.innerHTML += "<br/><br/><b style='color:#3b82f6;'>⚙️ [System] Scaffolding files...</b>";
+                            aiMsg.innerHTML += "<br/><br/><b style='color:#3b82f6;'>⚙️ [System] Creating folders & files...</b>";
                             const result = await scaffoldFiles(action.files);
                             if (result.success) {
-                                aiMsg.innerHTML += "<br/>✅ <b style='color:#10b981;'>Project created successfully in your current folder!</b>";
+                                aiMsg.innerHTML += "<br/>✅ <b style='color:#10b981;'>Project created successfully!</b>";
                             } else {
-                                aiMsg.innerHTML += `<br/>❌ <b style='color:#ef4444;'>Failed to write files: ${result.error}</b>`;
+                                aiMsg.innerHTML += `<br/>❌ <b style='color:#ef4444;'>Failed: ${result.error}</b>`;
                             }
                         }
                     } catch(e) { console.error("Action Parse Error", e); }
                 }
             } catch (err) {
-                aiMsg.classList.remove('thinking');
                 aiMsg.innerHTML = `<b>Connection Failed (Stream).</b><br/>Reason: ${err.message}<br/>Attempted: ${currentBackendUrl}`;
                 console.error("Stream Error:", err);
             }
