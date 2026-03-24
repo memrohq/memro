@@ -1,10 +1,9 @@
 (function() {
     const PLUGIN_ID = 'memro-mcp';
-    const DEFAULT_IP = '192.168.0.100';
+    const DEFAULT_IP = 'localhost';
     const PORT = '8001';
     const PATH = '/v1/chat/completions';
 
-    let activeReader = null;
     let isGenerating = false;
     let conversationHistory = [];
 
@@ -14,8 +13,18 @@
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
-            .replace(/\\n/g, '\n');
-        html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre style="background:#111; padding:10px; border-radius:8px; overflow-x:auto; border:1px solid #333; margin:10px 0; font-family:monospace; font-size:12px; color:#c9d1d9;"><code>$2</code></pre>');
+            .replace(/\\n/g, '\n')
+            .replace(/println¡¡¡/g, 'println!'); // Clean DeepSeek artifact
+        
+        // Code blocks with Copy button
+        html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
+            const id = 'code-' + Math.random().toString(36).substr(2, 9);
+            return `<div style="position:relative; margin:10px 0;">
+                <div style="position:absolute; right:8px; top:8px; background:#444; color:#fff; padding:2px 8px; border-radius:4px; font-size:10px; cursor:pointer;" onclick="memro_copy('${id}')">Copy</div>
+                <pre id="${id}" style="background:#111; padding:15px 10px 10px; border-radius:8px; overflow-x:auto; border:1px solid #333; font-family:monospace; font-size:12px; color:#c9d1d9;"><code>${code}</code></pre>
+            </div>`;
+        });
+        
         html = html.replace(/`([^`]+)`/g, '<code style="background:#333; padding:2px 4px; border-radius:4px; font-family:monospace;">$1</code>');
         html = html.replace(/^### (.*$)/gm, '<h3 style="color:#fff; margin-top:15px; margin-bottom:5px;">$1</h3>');
         html = html.replace(/^## (.*$)/gm, '<h2 style="color:#fff; border-bottom:1px solid #333; padding-bottom:5px; margin-top:20px;">$1</h2>');
@@ -25,6 +34,20 @@
         return html;
     };
 
+    window.memro_copy = (id) => {
+        const el = document.getElementById(id);
+        if (el) {
+            const text = el.innerText;
+            if (typeof cordova !== 'undefined' && cordova.plugins && cordova.plugins.clipboard) {
+                cordova.plugins.clipboard.copy(text);
+            } else {
+                const nav = navigator.clipboard;
+                if (nav) nav.writeText(text);
+            }
+            acode.require('toast')("Copied to clipboard");
+        }
+    };
+
     const buildFullUrl = (input) => {
         let clean = input?.trim().replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
         if (!clean || clean.length < 3) clean = DEFAULT_IP;
@@ -32,24 +55,121 @@
     };
 
     let currentBackendUrl = buildFullUrl(localStorage.getItem('memro-ai-ip'));
-    let contextFolderUrl = localStorage.getItem('memro-ai-folder-url') || null;
-    let contextFolderName = localStorage.getItem('memro-ai-folder-name') || "None";
-    let currentMode = localStorage.getItem('memro-ai-mode') || 'agent'; // 'agent' or 'chat'
+    let currentMode = localStorage.getItem('memro-ai-mode') || 'agent';
     let pageRef = null;
     let initialized = false;
 
-    const getSystemPrompt = () => `You are Memro AI, a friendly coding assistant for Acode on Android.
-CURRENT WORKSPACE: ${contextFolderName} (All paths must be relative to this folder)
+    const TOOLS = [
+        {
+            type: "function",
+            function: {
+                name: "scaffold",
+                description: "Create files",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        files: {
+                            type: "array",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    path: { type: "string" },
+                                    content: { type: "string" }
+                                }
+                            }
+                        }
+                    },
+                    required: ["files"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "multi_edit",
+                description: "Edit multiple files (simple string replace)",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        edits: {
+                            type: "array",
+                            items: {
+                                type: "object",
+                                properties: {
+                                    path: { type: "string" },
+                                    find: { type: "string" },
+                                    replace: { type: "string" }
+                                }
+                            }
+                        }
+                    },
+                    required: ["edits"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "ast_edit",
+                description: "Edit specific function/class by name",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        path: { type: "string" },
+                        target: { type: "string" },
+                        new_code: { type: "string" }
+                    },
+                    required: ["path", "target", "new_code"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "delete",
+                description: "Delete files",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        paths: {
+                            type: "array",
+                            items: { type: "string" }
+                        }
+                    },
+                    required: ["paths"]
+                }
+            }
+        }
+    ];
 
-CONVERSATION RULES:
-1. ALWAYS start your response with a brief, friendly greeting or explanation in plain text.
-2. NEVER send only a JSON block.
-3. Be clear about whether you are just talking or about to perform an action.
+    const getOpenFolderUrl = () => {
+        try {
+            const m = acode.require('openFolder');
+            const list = m?.addedFolder || m?.folders || [];
+            if (Array.isArray(list) && list.length > 0) return list[0].url;
+            if (list && typeof list === 'object') return Object.values(list)[0]?.url;
+            return null;
+        } catch(e) { return null; }
+    };
 
-ACTION RULES:
-- Action "scaffold": Create/edit files. {"action": "scaffold", "files": [{"path": "...", "content": "..."}]}
-- Action "delete": Delete files. {"action": "delete", "paths": ["..."]}
-- ONLY include JSON when actually performing the task. Put it at the VERY END.`;
+    const getSystemPrompt = () => {
+        const root = getOpenFolderUrl();
+        const rootName = root ? root.split('/').pop() : "None";
+        const modeTxt = currentMode === 'agent' 
+            ? "AGENT MODE: You MUST use tools (scaffold, multi_edit, ast_edit, delete) for all file actions. Always act on files. Never just say you can do it—DO IT."
+            : "CHAT MODE: Read-only. Text responses only.";
+            
+        return `You are Memro AI, a expert code assistant.
+${modeTxt}
+Current Workspace: ${rootName} (Root: ${root || 'Not set'})
+All file paths must be strictly relative to the Root. No leading slashes for relative paths.
+
+Rules:
+1. Be concise.
+2. In Agent mode, ALWAYS conclude your thought process by calling the appropriate tools.
+3. If you can't use tools, output a JSON block with "action" and parameters.
+4. For multi-file changes, prefer 'scaffold' or 'multi_edit'.`;
+    };
 
     const injectStyles = () => {
         if (document.getElementById('memro-styles')) return;
@@ -69,103 +189,64 @@ ACTION RULES:
         document.head.appendChild(style);
     };
 
-    const getFolders = () => {
-        try {
-            const m = acode.require('openFolder');
-            if (!m) return [];
-            const list = m.addedFolder || m.folders || m.list || [];
-            // Handle if list is an object instead of array
-            let arr = Array.isArray(list) ? list : Object.values(list || {});
-            
-            // Filter and map to standard {url, name} format
-            return arr.filter(f => f && (f.url || f.path || f.uri)).map(f => ({
-                url: f.url || f.path || f.uri,
-                name: f.name || f.label || (f.url || f.path || "").split('/').pop() || "Folder"
-            }));
-        } catch(e) { return []; }
-    };
-
-    const getOpenFolderUrl = () => {
-        try {
-            const folders = getFolders();
-            if (contextFolderUrl) {
-                const stillAdded = folders.some(f => f.url === contextFolderUrl);
-                if (stillAdded) return contextFolderUrl;
-            }
-            // Auto-detect: If no context set but exactly 1 folder open, use it
-            if (folders.length === 1) {
-                const f = folders[0];
-                contextFolderUrl = f.url;
-                contextFolderName = f.name;
-                localStorage.setItem('memro-ai-folder-url', contextFolderUrl);
-                localStorage.setItem('memro-ai-folder-name', contextFolderName);
-                return contextFolderUrl;
-            }
-            return null;
-        } catch(e) { return null; }
-    };
-
     const reloadSidebar = () => {
         try {
             const m = acode.require('openFolder');
             const url = getOpenFolderUrl();
+            if (!url) return;
             const folders = m?.addedFolder || m?.folders || [];
-            // Find the original folder object to call reload()
             let list = Array.isArray(folders) ? folders : Object.values(folders);
             const folder = list.find(f => f && (f.url === url || f.path === url));
             if (folder && typeof folder.reload === 'function') folder.reload();
         } catch(e) {}
     };
 
-    const scaffoldSingleFile = async (fs, rootUrl, file, onProgress) => {
-        const relPath = file.path.replace(/^\//,'');
-        const parts = relPath.split('/');
-        const fileName = parts.pop();
-        let currentUrl = rootUrl.replace(/\/$/, '');
-        for (const dirName of parts) {
-            const nextUrl = currentUrl + '/' + dirName;
-            try {
-                if (!(await fs(nextUrl).exists().catch(() => false))) {
-                    await fs(currentUrl).createDirectory(dirName);
-                    reloadSidebar();
-                    onProgress && onProgress(`📁 Created folder: ${dirName}`);
-                }
-            } catch(e) {}
-            currentUrl = nextUrl;
-        }
-        await fs(currentUrl + '/' + fileName).writeFile(file.content);
-        reloadSidebar();
-        onProgress && onProgress(`📄 Synced: ${relPath}`);
-    };
-
     const scaffoldFiles = async (files, onProgress) => {
-        try {
-            const fs = acode.require('fsOperation');
-            const rootUrl = getOpenFolderUrl();
-            if (!rootUrl) throw new Error("No workspace selected. Set one in the chat header first!");
-            for (const file of files) await scaffoldSingleFile(fs, rootUrl, file, onProgress);
-            return { success: true, count: files.length };
-        } catch(e) { return { success: false, error: e.message }; }
+        const fs = acode.require('fsOperation');
+        const root = getOpenFolderUrl(); if(!root) throw new Error("No open folder found in Acode.");
+        for (const f of files) {
+            const full = root + '/' + f.path.replace(/^\//,'');
+            await fs(full).writeFile(f.content);
+            onProgress && onProgress(`📄 Created/Updated: ${f.path}`);
+        }
+        reloadSidebar(); return { success: true };
     };
 
-    const deleteFiles = async (paths, onProgress) => {
-        try {
-            const fs = acode.require('fsOperation');
-            const rootUrl = getOpenFolderUrl();
-            if (!rootUrl) throw new Error("No workspace selected. Set one in the chat header first!");
-            const root = rootUrl.replace(/\/$/, '');
-            let deleted = 0;
-            for (const relPath of paths) {
-                const fullUrl = root + '/' + relPath.replace(/^\//,'');
-                if (await fs(fullUrl).exists().catch(() => false)) {
-                    await fs(fullUrl).delete();
-                    deleted++;
-                    onProgress && onProgress(`🗑️ Deleted: ${relPath}`);
-                    reloadSidebar();
-                }
-            }
-            return { success: true, count: deleted };
-        } catch(e) { return { success: false, error: e.message }; }
+    const applyMultiEdit = async (edits, onProgress) => {
+        const fs = acode.require('fsOperation');
+        const root = getOpenFolderUrl(); if(!root) throw new Error("No open folder found in Acode.");
+        for (const e of edits) {
+            const full = root + '/' + e.path.replace(/^\//,'');
+            let content = await fs(full).readFile();
+            content = content.replace(e.find, e.replace);
+            await fs(full).writeFile(content);
+            onProgress && onProgress(`📝 Edited: ${e.path}`);
+        }
+        reloadSidebar(); return { success: true };
+    };
+
+    const applyASTEdit = async (path, target, newCode, onProgress) => {
+        const fs = acode.require('fsOperation');
+        const root = getOpenFolderUrl(); if(!root) throw new Error("No open folder found in Acode.");
+        const full = root + '/' + path.replace(/^\//,'');
+        let content = await fs(full).readFile();
+        const regex = new RegExp(`(function\\s+${target}\\s*\\([^)]*\\)\\s*\\{[\\s\\S]*?\\})`, "m");
+        if (!regex.test(content)) throw new Error(`Could not find ${target} in ${path}`);
+        content = content.replace(regex, newCode);
+        await fs(full).writeFile(content);
+        onProgress && onProgress(`⚙️ Refactored: ${target}`);
+        reloadSidebar(); return { success: true };
+    };
+
+    const deletePaths = async (paths, onProgress) => {
+        const fs = acode.require('fsOperation');
+        const root = getOpenFolderUrl(); if(!root) throw new Error("No open folder found in Acode.");
+        for (const p of paths) {
+            const full = root + '/' + p.replace(/^\//,'');
+            await fs(full).delete();
+            onProgress && onProgress(`🗑️ Deleted: ${p}`);
+        }
+        reloadSidebar(); return { success: true };
     };
 
     const buildUI = (page) => {
@@ -176,25 +257,22 @@ ACTION RULES:
                 <div style="flex:1" onclick="this.parentElement.parentElement.hide()"></div>
                 <div class="memro-bottom-sheet">
                     <div style="height:24px; display:flex; justify-content:center; align-items:center;"><div style="width:40px; height:4px; background:#444; border-radius:2px;"></div></div>
-                    <div style="padding:0 20px 10px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
-                        <span style="font-weight:600; color:#fff; flex:1;">🧠 Memro AI</span>
+                    <div style="padding:0 20px 10px; display:flex; justify-content:space-between; align-items:center;">
+                        <span style="font-weight:600; color:#fff;">🧠 Memro Agent</span>
                         <div id="m-status" style="font-size:10px; color:#888;"></div>
-                        <div style="display:flex; gap:6px; align-items:center;">
-                            <div id="m-mode" style="background:#333; padding:2px 8px; border-radius:10px; font-size:10px; color:#fff; cursor:pointer; border:1px solid #444;" title="Switch Mode">
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <div id="m-clear" style="color:#ef4444; font-size:14px; cursor:pointer;" title="Clear History">🗑️</div>
+                            <div id="m-mode" style="background:#333; padding:2px 10px; border-radius:12px; font-size:11px; color:#fff; cursor:pointer;" title="Mode Toggle">
                                 ${currentMode === 'agent' ? '🤖 Agent' : '💬 Chat'}
                             </div>
-                            <div id="m-folder" style="color:${contextFolderName === "None" ? "#ef4444" : "#10b981"}; font-size:11px; cursor:pointer; max-width:85px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border:1px solid #444; padding:2px 8px; border-radius:10px; background:#1a1a1a;" title="Change Workspace">
-                                📂 ${contextFolderName}
-                            </div>
-                            <span id="m-config" style="color:#3b82f6; font-size:12px; cursor:pointer; padding:4px;">⚙️</span>
-                            <span style="color:#888; font-size:24px; cursor:pointer; line-height:1; padding:4px;" onclick="this.closest('.page').hide()">&times;</span>
+                            <span id="m-config" style="color:#3b82f6; font-size:14px; cursor:pointer;" title="Set IP">⚙️</span>
+                            <span style="color:#888; font-size:24px; cursor:pointer; line-height:1;" onclick="this.closest('.page').hide()">&times;</span>
                         </div>
                     </div>
                     <div id="m-log" class="memro-log"></div>
-                    <div style="padding:15px 18px 25px; background:#1a1a1a !important; display:flex !important; gap:10px !important; align-items:flex-end !important; border-top:1px solid #222 !important;">
-                        <textarea id="m-in" placeholder="Ask Memro to code..." rows="1" style="flex:1 !important; background:#2a2a2a !important; color:#fff !important; border:1px solid #444 !important; padding:12px 16px !important; border-radius:25px !important; outline:none !important; resize:none !important; font-size:14px !important; max-height:100px !important; box-sizing:border-box !important;"></textarea>
-                        <button id="m-stop" style="display:none; background:#dc2626 !important; color:#fff !important; border:none; width:44px; height:44px; border-radius:50%; align-items:center; justify-content:center;">⏹</button>
-                        <button id="m-send" style="background:#3b82f6 !important; color:#fff !important; border:none; width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center;">➤</button>
+                    <div style="padding:15px; background:#1a1a1a; display:flex; gap:10px; align-items:center; border-top:1px solid #333;">
+                        <textarea id="m-in" placeholder="Ask Memro to create or edit..." rows="1" style="flex:1; background:#2a2a2a; color:#fff; border:1px solid #444; padding:10px 15px; border-radius:20px; outline:none; resize:none; font-size:14px;"></textarea>
+                        <button id="m-send" style="background:#3b82f6; color:#fff; border:none; width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center;">➤</button>
                     </div>
                 </div>
             </div>
@@ -203,11 +281,10 @@ ACTION RULES:
         const log = page.querySelector('#m-log');
         const input = page.querySelector('#m-in');
         const sendBtn = page.querySelector('#m-send');
-        const stopBtn = page.querySelector('#m-stop');
         const statusEl = page.querySelector('#m-status');
         const configBtn = page.querySelector('#m-config');
-        const folderBtn = page.querySelector('#m-folder');
         const modeBtn = page.querySelector('#m-mode');
+        const clearBtn = page.querySelector('#m-clear');
 
         const addMsg = (role, text) => {
             const m = document.createElement('div'); m.className = `memro-msg ${role}`;
@@ -217,250 +294,104 @@ ACTION RULES:
             return m;
         };
 
-        const setGenerating = (val) => {
-            isGenerating = val;
-            sendBtn.style.display = val ? 'none' : 'flex';
-            stopBtn.style.display = val ? 'flex' : 'none';
-            statusEl.textContent = val ? 'streaming...' : '';
-        };
-
         modeBtn.onclick = () => {
             currentMode = currentMode === 'agent' ? 'chat' : 'agent';
             localStorage.setItem('memro-ai-mode', currentMode);
             modeBtn.innerHTML = currentMode === 'agent' ? '🤖 Agent' : '💬 Chat';
-            addMsg('system-note', `🔄 Switched to <b>${currentMode === 'agent' ? 'Agent Mode' : 'Chat Mode'}</b>`);
+            addMsg('system-note', `🔄 Mode set to <b>${currentMode === 'agent' ? 'Agent' : 'Chat'}</b>`);
         };
 
-        folderBtn.onclick = async () => {
-             const m = acode.require('openFolder');
-             let folders = getFolders();
-             
-             // Get current file's folder if any
-             let curFolder = null;
-             try {
-                const active = editorManager?.activeFile;
-                if (active && active.uri) {
-                    const parts = active.uri.split('/');
-                    parts.pop();
-                    curFolder = { url: parts.join('/'), name: "Current File's Folder" };
-                }
-             } catch(e) {}
-
-             const opts = [
-                 ...(curFolder ? [[curFolder.url, `📍 ${curFolder.name}`]] : []),
-                 ...folders.map(f => [f.url, `📁 ${f.name}`]),
-                 ['__BROWSE__', '📂 Browse Device...'],
-                 ['__MANUAL__', '🖋️ Enter URL Manually...'],
-                 ['__CLEAR__', '🧹 Clear (Reset to None)']
-             ];
-             
-             const res = await acode.select("Select Context Workspace", opts);
-             if (!res) return;
-
-             if (res === '__CLEAR__') {
-                 contextFolderUrl = null;
-                 contextFolderName = "None";
-                 localStorage.removeItem('memro-ai-folder-url');
-                 localStorage.removeItem('memro-ai-folder-name');
-                 folderBtn.textContent = `📂 None`;
-                 folderBtn.style.color = '#ef4444';
-                 return;
-             }
-
-             if (res === '__MANUAL__') {
-                 const url = await acode.prompt("Enter Folder URL", contextFolderUrl || "content://...", "text");
-                 if (url) {
-                     contextFolderUrl = url.trim();
-                     contextFolderName = contextFolderUrl.split('/').pop() || "Folder";
-                     localStorage.setItem('memro-ai-folder-url', contextFolderUrl);
-                     localStorage.setItem('memro-ai-folder-name', contextFolderName);
-                     folderBtn.textContent = `📂 ${contextFolderName}`;
-                     folderBtn.style.color = '#10b981';
-                     addMsg('system-note', `✅ Manual Workspace set: <b>${contextFolderName}</b>`);
-                 }
-                 return;
-             }
-
-             if (res === '__BROWSE__') {
-                 try {
-                     let picked = null;
-                     // Primary: selectFolder with starting path if possible
-                     if (typeof acode.selectFolder === 'function') {
-                         picked = await acode.selectFolder({ title: "Select Workspace" });
-                     } else {
-                         const browser = acode.require('fileBrowser');
-                         if (browser) {
-                            // Fallback to callback-based open for better Android support
-                            if (typeof browser.open === 'function') {
-                                picked = await new Promise((resolve) => {
-                                    browser.open('dir', (res) => resolve(res), () => resolve(null));
-                                });
-                            } else if (typeof browser.select === 'function') {
-                                picked = await browser.select('dir');
-                            }
-                         }
-                     }
-
-                     if (picked && picked.url) {
-                         const url = picked.url;
-                         if (m && !folders.some(f => f.url === url)) m.add(url, url.split('/').pop());
-                         contextFolderUrl = url;
-                         contextFolderName = url.split('/').pop() || "Folder";
-                         localStorage.setItem('memro-ai-folder-url', contextFolderUrl);
-                         localStorage.setItem('memro-ai-folder-name', contextFolderName);
-                         folderBtn.textContent = `📂 ${contextFolderName}`;
-                         folderBtn.style.color = '#10b981';
-                         addMsg('system-note', `✅ Workspace set: <b>${contextFolderName}</b>`);
-                     }
-                 } catch(e) { 
-                     acode.alert("Error", `Browsing failed: ${e.message}. Use "Enter URL Manually" as a workaround.`); 
-                 }
-                 return;
-             }
-
-             if (res) {
-                 contextFolderUrl = res;
-                 const folder = folders.find(f => f.url === res) || (curFolder?.url === res ? curFolder : null);
-                 contextFolderName = folder?.name || res.split('/').pop();
-                 localStorage.setItem('memro-ai-folder-url', contextFolderUrl);
-                 localStorage.setItem('memro-ai-folder-name', contextFolderName);
-                 folderBtn.textContent = `📂 ${contextFolderName}`;
-                 folderBtn.style.color = '#10b981';
-                 addMsg('system-note', `✅ Workspace switched: <b>${contextFolderName}</b>`);
-             }
+        clearBtn.onclick = () => {
+            conversationHistory = [];
+            log.innerHTML = '';
+            addMsg('system-note', '🗑️ Conversation cleared');
         };
 
         configBtn.onclick = async () => {
-            let host = currentBackendUrl.split('//')[1]?.split(':')[0] || DEFAULT_IP;
-            let val = await acode.prompt("Enter Laptop IP", host, "text");
+            let val = await acode.prompt("IP Address", localStorage.getItem('memro-ai-ip') || DEFAULT_IP, "text");
             if (val) {
-                currentBackendUrl = buildFullUrl(val);
-                localStorage.setItem('memro-ai-ip', val.trim());
-                acode.alert("Updated", `Using: ${currentBackendUrl}`);
+                currentBackendUrl = buildFullUrl(val); localStorage.setItem('memro-ai-ip', val.trim());
+                acode.alert("Synced", `Using: ${currentBackendUrl}`);
             }
         };
 
-        stopBtn.onclick = () => {
-            if (activeReader) { activeReader.cancel().catch(() => {}); activeReader = null; }
-            setGenerating(false);
-            addMsg('system-note', '⏹ Generation stopped.');
-        };
-
-        input.oninput = () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 100) + 'px'; };
         input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBtn.click(); } };
 
         sendBtn.onclick = async () => {
             const val = input.value.trim(); if (!val || isGenerating) return;
-            const originalVal = val; // Keep for sanity check
-            input.value = ''; input.style.height = 'auto';
-            conversationHistory.push({ role: 'user', content: val });
-            addMsg('user', val);
-            const aiMsg = addMsg('ai', 'Thinking...');
-            setGenerating(true);
+            input.value = ''; conversationHistory.push({ role: 'user', content: val });
+            addMsg('user', val); const aiMsg = addMsg('ai', 'Thinking...');
+            isGenerating = true; statusEl.textContent = 'Thinking...';
 
-            let fullContent = "";
             try {
-                // Inject Mode-specific System Instructions
-            const modePrompt = currentMode === 'agent' 
-                ? " [MODE: AGENT - You can perform file actions via JSON.]" 
-                : " [MODE: CHAT - DO NOT EXAMINE OR CHANGE FILES. No JSON blocks. Text/code only.]";
-            
-            const reqMessages = [
-                { role: 'system', content: getSystemPrompt() + modePrompt },
-                ...conversationHistory
-            ];
+                let iterations = 0;
+                let activeMessages = [{ role: 'system', content: getSystemPrompt() }, ...conversationHistory];
 
-            const response = await fetch(`${currentBackendUrl}${PATH}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ messages: reqMessages, stream: true })
-            });
+                while (iterations < 6) {
+                    const res = await fetch(`${currentBackendUrl}${PATH}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            messages: activeMessages,
+                            tools: currentMode === 'agent' ? TOOLS : undefined,
+                            tool_choice: currentMode === 'agent' ? 'auto' : undefined
+                        })
+                    });
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+                    const msg = data.choices[0].message;
+                    activeMessages.push(msg);
 
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                aiMsg.innerText = "";
-                activeReader = response.body.getReader();
-                const decoder = new TextDecoder();
-                while (true) {
-                    const { done, value } = await activeReader.read();
-                    if (done) break;
-                    const chunk = decoder.decode(value, { stream: true });
-                    for (const line of chunk.split('\n')) {
-                        if (line.startsWith('data: ')) {
-                            const dataStr = line.replace('data: ', '').trim();
-                            if (dataStr === "[DONE]") continue;
+                    if (msg.content) {
+                        aiMsg.innerHTML = mdToHtml(msg.content);
+                        const rawBlocks = msg.content.match(/\{[\s\S]*?"action":\s*"(?:scaffold|delete|multi_edit|ast_edit)"[\s\S]*?\}/g) || [];
+                        for (const block of rawBlocks) {
                             try {
-                                const json = JSON.parse(dataStr);
-                                const token = json.choices[0].delta.content || "";
-                                fullContent += token;
-                                const actionIdx = fullContent.indexOf('{"action');
-                                if (actionIdx !== -1) {
-                                    const displayText = fullContent.slice(0, actionIdx).trim();
-                                    aiMsg.innerHTML = displayText ? mdToHtml(displayText) : '<i style="color:#888;">Performing action...</i>';
-                                } else if (fullContent.trim().startsWith('{')) {
-                                    aiMsg.innerHTML = '<i style="color:#888;">Thinking...</i>';
-                                } else {
-                                    aiMsg.innerHTML = mdToHtml(fullContent);
-                                }
-                                log.scrollTop = log.scrollHeight;
+                                const action = JSON.parse(block);
+                                const sm = addMsg('system-note', `⚙️ Executing fallback action: ${action.action}...`);
+                                if (action.action === 'scaffold') await scaffoldFiles(action.files, m => sm.innerHTML += `<br/>${m}`);
+                                if (action.action === 'multi_edit') await applyMultiEdit(action.edits, m => sm.innerHTML += `<br/>${m}`);
+                                if (action.action === 'ast_edit') await applyASTEdit(action.path, action.target, action.new_code, m => sm.innerHTML += `<br/>${m}`);
+                                if (action.action === 'delete') await deletePaths(action.paths, m => sm.innerHTML += `<br/>${m}`);
                             } catch(e) {}
                         }
                     }
-                }
-                activeReader = null;
-                conversationHistory.push({ role: 'assistant', content: fullContent });
+                    
+                    if (!msg.tool_calls || msg.tool_calls.length === 0) break;
 
-                const blocks = fullContent.match(/\{[\s\S]*?"action":\s*"(?:scaffold|delete)"[\s\S]*?\}/g) || [];
-                for (const block of blocks) {
-                    try {
-                        const action = JSON.parse(block);
-                        if (action.action === 'scaffold') {
-                            const sm = addMsg('system-note', `⚙️ Scaffolding ${action.files.length} file(s)...`);
-                            await scaffoldFiles(action.files, (m) => sm.innerHTML += `<br/><span class="memro-file-badge">${m}</span>`);
-                        }
-                        if (action.action === 'delete') {
-                            // SANITY CHECK: Ignore if AI says to delete the user's greeting "hi" or exactly mirrors last input
-                            const cleanPaths = (action.paths || []).filter(p => p.toLowerCase() !== originalVal.toLowerCase());
-                            if (cleanPaths.length === 0) continue;
-                            const confirmed = await acode.confirm("Delete?", `Delete: ${cleanPaths.join(', ')}?`);
-                            if (confirmed) {
-                                const sm = addMsg('system-note', `🗑️ Deleting ${cleanPaths.length} item(s)...`);
-                                await deleteFiles(cleanPaths, (m) => sm.innerHTML += `<br/><span class="memro-file-badge">${m}</span>`);
-                            }
-                        }
-                    } catch(e) {}
+                    const sm = addMsg('system-note', `🛠️ Running ${msg.tool_calls.length} tool(s)...`);
+                    for (const t of msg.tool_calls) {
+                        const name = t.function.name; const args = JSON.parse(t.function.arguments);
+                        let result;
+                        try {
+                            if (name === 'scaffold') result = await scaffoldFiles(args.files, m => sm.innerHTML += `<br/>${m}`);
+                            if (name === 'multi_edit') result = await applyMultiEdit(args.edits, m => sm.innerHTML += `<br/>${m}`);
+                            if (name === 'ast_edit') result = await applyASTEdit(args.path, args.target, args.new_code, m => sm.innerHTML += `<br/>${m}`);
+                            if (name === 'delete') result = await deletePaths(args.paths, m => sm.innerHTML += `<br/>${m}`);
+                        } catch(e) { result = { success: false, error: e.message }; }
+                        activeMessages.push({ role: 'tool', tool_call_id: t.id, name, content: JSON.stringify(result) });
+                    }
+                    iterations++;
                 }
-            } catch (err) { aiMsg.innerHTML = `<b>Error:</b> ${err.message}`; } finally { setGenerating(false); }
+                conversationHistory = activeMessages.filter(m => m.role !== 'system' && m.role !== 'tool' && !m.tool_calls);
+            } catch (err) { aiMsg.innerHTML = `<b>Error:</b> ${err.message}`; } finally { isGenerating = false; statusEl.textContent = ''; }
         };
         initialized = true;
     };
 
-    const openChat = () => { if (pageRef) { buildUI(pageRef); pageRef.show(); } };
-
     if (typeof acode !== 'undefined') {
         acode.setPluginInit(PLUGIN_ID, (bu, $page) => {
             pageRef = $page;
-            // Attempt to restore context if possible
-            if (!contextFolderUrl) {
-                try {
-                    const m = acode.require('openFolder');
-                    if (m?.addedFolder?.length > 0) {
-                        contextFolderUrl = m.addedFolder[0].url;
-                        contextFolderName = m.addedFolder[0].name || contextFolderUrl.split('/').pop();
-                    }
-                } catch(e) {}
-            }
             setInterval(() => {
                 if (document.getElementById('m-side-btn')) return;
                 const pz = document.querySelector('.icon.extension') || document.querySelector('.puzzle');
-                if (pz?.closest('div, li, aside, nav')?.parentElement) {
+                if (pz?.parentElement) {
                     const btn = document.createElement('div'); btn.id = 'm-side-btn';
                     btn.style.cssText = 'width:100%;height:45px;display:flex;align-items:center;justify-content:center;cursor:pointer;';
-                    btn.innerHTML = `<span>🧠</span>`; btn.onclick = (e) => { e.stopPropagation(); openChat(); };
-                    pz.closest('div, li, aside, nav').parentElement.prepend(btn);
+                    btn.innerHTML = `<span>🧠</span>`; btn.onclick = (e) => { e.stopPropagation(); if (pageRef) { buildUI(pageRef); pageRef.show(); } };
+                    pz.parentElement.prepend(btn);
                 }
             }, 1000);
-            try { acode.require("commands").addCommand({ name: "memro:open", description: "Open Memro", exec: openChat }); } catch(e) {}
         });
-        acode.setPluginUnmount(PLUGIN_ID, () => { if (pageRef) pageRef.hide(); initialized = false; });
     }
 })();
