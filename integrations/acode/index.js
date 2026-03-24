@@ -1,6 +1,6 @@
 (function() {
     const PLUGIN_ID = 'memro-mcp';
-    const DEFAULT_IP = '192.168.0.111';
+    const DEFAULT_IP = '192.168.0.100';
     const PORT = '8001';
     const PATH = '/v1/chat/completions';
 
@@ -26,15 +26,15 @@
     };
 
     const buildFullUrl = (input) => {
-        if (!input || input.trim() === "") return `http://${DEFAULT_IP}:${PORT}${PATH}`;
-        let clean = input.trim().replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
+        let clean = input?.trim().replace(/^https?:\/\//i, '').split('/')[0].split(':')[0];
         if (!clean || clean.length < 3) clean = DEFAULT_IP;
-        return `http://${clean}:${PORT}${PATH}`;
+        return `http://${clean}:${PORT}`;
     };
 
     let currentBackendUrl = buildFullUrl(localStorage.getItem('memro-ai-ip'));
     let contextFolderUrl = localStorage.getItem('memro-ai-folder-url') || null;
     let contextFolderName = localStorage.getItem('memro-ai-folder-name') || "None";
+    let currentMode = localStorage.getItem('memro-ai-mode') || 'agent'; // 'agent' or 'chat'
     let pageRef = null;
     let initialized = false;
 
@@ -69,15 +69,38 @@ ACTION RULES:
         document.head.appendChild(style);
     };
 
-    const getOpenFolderUrl = () => {
+    const getFolders = () => {
         try {
             const m = acode.require('openFolder');
+            if (!m) return [];
+            const list = m.addedFolder || m.folders || m.list || [];
+            // Handle if list is an object instead of array
+            let arr = Array.isArray(list) ? list : Object.values(list || {});
+            
+            // Filter and map to standard {url, name} format
+            return arr.filter(f => f && (f.url || f.path || f.uri)).map(f => ({
+                url: f.url || f.path || f.uri,
+                name: f.name || f.label || (f.url || f.path || "").split('/').pop() || "Folder"
+            }));
+        } catch(e) { return []; }
+    };
+
+    const getOpenFolderUrl = () => {
+        try {
+            const folders = getFolders();
             if (contextFolderUrl) {
-                // Ensure it's still "added" in Acode
-                const stillAdded = m?.addedFolder?.some(f => f.url === contextFolderUrl);
+                const stillAdded = folders.some(f => f.url === contextFolderUrl);
                 if (stillAdded) return contextFolderUrl;
             }
-            if (m?.addedFolder?.length > 0) return m.addedFolder[0].url;
+            // Auto-detect: If no context set but exactly 1 folder open, use it
+            if (folders.length === 1) {
+                const f = folders[0];
+                contextFolderUrl = f.url;
+                contextFolderName = f.name;
+                localStorage.setItem('memro-ai-folder-url', contextFolderUrl);
+                localStorage.setItem('memro-ai-folder-name', contextFolderName);
+                return contextFolderUrl;
+            }
             return null;
         } catch(e) { return null; }
     };
@@ -86,8 +109,11 @@ ACTION RULES:
         try {
             const m = acode.require('openFolder');
             const url = getOpenFolderUrl();
-            const folder = m?.addedFolder?.find(f => f.url === url);
-            if (folder) folder.reload();
+            const folders = m?.addedFolder || m?.folders || [];
+            // Find the original folder object to call reload()
+            let list = Array.isArray(folders) ? folders : Object.values(folders);
+            const folder = list.find(f => f && (f.url === url || f.path === url));
+            if (folder && typeof folder.reload === 'function') folder.reload();
         } catch(e) {}
     };
 
@@ -116,7 +142,7 @@ ACTION RULES:
         try {
             const fs = acode.require('fsOperation');
             const rootUrl = getOpenFolderUrl();
-            if (!rootUrl) throw new Error("No context folder open.");
+            if (!rootUrl) throw new Error("No workspace selected. Set one in the chat header first!");
             for (const file of files) await scaffoldSingleFile(fs, rootUrl, file, onProgress);
             return { success: true, count: files.length };
         } catch(e) { return { success: false, error: e.message }; }
@@ -126,7 +152,7 @@ ACTION RULES:
         try {
             const fs = acode.require('fsOperation');
             const rootUrl = getOpenFolderUrl();
-            if (!rootUrl) throw new Error("No context folder open.");
+            if (!rootUrl) throw new Error("No workspace selected. Set one in the chat header first!");
             const root = rootUrl.replace(/\/$/, '');
             let deleted = 0;
             for (const relPath of paths) {
@@ -150,13 +176,18 @@ ACTION RULES:
                 <div style="flex:1" onclick="this.parentElement.parentElement.hide()"></div>
                 <div class="memro-bottom-sheet">
                     <div style="height:24px; display:flex; justify-content:center; align-items:center;"><div style="width:40px; height:4px; background:#444; border-radius:2px;"></div></div>
-                    <div style="padding:0 20px 10px; display:flex; justify-content:space-between; align-items:center;">
-                        <span style="font-weight:600; color:#fff;">🧠 Memro AI</span>
-                        <div style="display:flex; gap:12px; align-items:center;">
-                           <span id="m-status" style="font-size:11px; color:#888;"></span>
-                           <span id="m-folder" style="color:#10b981; font-size:12px; cursor:pointer;" title="Click to change workspace">📂 ${contextFolderName}</span>
-                           <span id="m-config" style="color:#3b82f6; font-size:12px; cursor:pointer;">Set IP</span>
-                           <span style="color:#888; font-size:28px; cursor:pointer; line-height:1;" onclick="this.closest('.page').hide()">&times;</span>
+                    <div style="padding:0 20px 10px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                        <span style="font-weight:600; color:#fff; flex:1;">🧠 Memro AI</span>
+                        <div id="m-status" style="font-size:10px; color:#888;"></div>
+                        <div style="display:flex; gap:6px; align-items:center;">
+                            <div id="m-mode" style="background:#333; padding:2px 8px; border-radius:10px; font-size:10px; color:#fff; cursor:pointer; border:1px solid #444;" title="Switch Mode">
+                                ${currentMode === 'agent' ? '🤖 Agent' : '💬 Chat'}
+                            </div>
+                            <div id="m-folder" style="color:${contextFolderName === "None" ? "#ef4444" : "#10b981"}; font-size:11px; cursor:pointer; max-width:85px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border:1px solid #444; padding:2px 8px; border-radius:10px; background:#1a1a1a;" title="Change Workspace">
+                                📂 ${contextFolderName}
+                            </div>
+                            <span id="m-config" style="color:#3b82f6; font-size:12px; cursor:pointer; padding:4px;">⚙️</span>
+                            <span style="color:#888; font-size:24px; cursor:pointer; line-height:1; padding:4px;" onclick="this.closest('.page').hide()">&times;</span>
                         </div>
                     </div>
                     <div id="m-log" class="memro-log"></div>
@@ -176,6 +207,7 @@ ACTION RULES:
         const statusEl = page.querySelector('#m-status');
         const configBtn = page.querySelector('#m-config');
         const folderBtn = page.querySelector('#m-folder');
+        const modeBtn = page.querySelector('#m-mode');
 
         const addMsg = (role, text) => {
             const m = document.createElement('div'); m.className = `memro-msg ${role}`;
@@ -192,47 +224,109 @@ ACTION RULES:
             statusEl.textContent = val ? 'streaming...' : '';
         };
 
+        modeBtn.onclick = () => {
+            currentMode = currentMode === 'agent' ? 'chat' : 'agent';
+            localStorage.setItem('memro-ai-mode', currentMode);
+            modeBtn.innerHTML = currentMode === 'agent' ? '🤖 Agent' : '💬 Chat';
+            addMsg('system-note', `🔄 Switched to <b>${currentMode === 'agent' ? 'Agent Mode' : 'Chat Mode'}</b>`);
+        };
+
         folderBtn.onclick = async () => {
              const m = acode.require('openFolder');
-             const folders = m?.addedFolder || [];
+             let folders = getFolders();
              
+             // Get current file's folder if any
+             let curFolder = null;
+             try {
+                const active = editorManager?.activeFile;
+                if (active && active.uri) {
+                    const parts = active.uri.split('/');
+                    parts.pop();
+                    curFolder = { url: parts.join('/'), name: "Current File's Folder" };
+                }
+             } catch(e) {}
+
              const opts = [
-                 ...folders.map(f => [f.url, f.name || f.url.split('/').pop()]),
-                 ['__BROWSE__', '📂 Browse Device...']
+                 ...(curFolder ? [[curFolder.url, `📍 ${curFolder.name}`]] : []),
+                 ...folders.map(f => [f.url, `📁 ${f.name}`]),
+                 ['__BROWSE__', '📂 Browse Device...'],
+                 ['__MANUAL__', '🖋️ Enter URL Manually...'],
+                 ['__CLEAR__', '🧹 Clear (Reset to None)']
              ];
              
              const res = await acode.select("Select Context Workspace", opts);
+             if (!res) return;
+
+             if (res === '__CLEAR__') {
+                 contextFolderUrl = null;
+                 contextFolderName = "None";
+                 localStorage.removeItem('memro-ai-folder-url');
+                 localStorage.removeItem('memro-ai-folder-name');
+                 folderBtn.textContent = `📂 None`;
+                 folderBtn.style.color = '#ef4444';
+                 return;
+             }
+
+             if (res === '__MANUAL__') {
+                 const url = await acode.prompt("Enter Folder URL", contextFolderUrl || "content://...", "text");
+                 if (url) {
+                     contextFolderUrl = url.trim();
+                     contextFolderName = contextFolderUrl.split('/').pop() || "Folder";
+                     localStorage.setItem('memro-ai-folder-url', contextFolderUrl);
+                     localStorage.setItem('memro-ai-folder-name', contextFolderName);
+                     folderBtn.textContent = `📂 ${contextFolderName}`;
+                     folderBtn.style.color = '#10b981';
+                     addMsg('system-note', `✅ Manual Workspace set: <b>${contextFolderName}</b>`);
+                 }
+                 return;
+             }
+
              if (res === '__BROWSE__') {
                  try {
-                     const browser = acode.require('fileBrowser');
-                     const picked = await browser.select('dir');
+                     let picked = null;
+                     // Primary: selectFolder with starting path if possible
+                     if (typeof acode.selectFolder === 'function') {
+                         picked = await acode.selectFolder({ title: "Select Workspace" });
+                     } else {
+                         const browser = acode.require('fileBrowser');
+                         if (browser) {
+                            // Fallback to callback-based open for better Android support
+                            if (typeof browser.open === 'function') {
+                                picked = await new Promise((resolve) => {
+                                    browser.open('dir', (res) => resolve(res), () => resolve(null));
+                                });
+                            } else if (typeof browser.select === 'function') {
+                                picked = await browser.select('dir');
+                            }
+                         }
+                     }
+
                      if (picked && picked.url) {
                          const url = picked.url;
-                         // Add to Acode sidebar if not already there
-                         if (!folders.some(f => f.url === url)) {
-                             m.add(url, url.split('/').pop());
-                         }
+                         if (m && !folders.some(f => f.url === url)) m.add(url, url.split('/').pop());
                          contextFolderUrl = url;
                          contextFolderName = url.split('/').pop() || "Folder";
                          localStorage.setItem('memro-ai-folder-url', contextFolderUrl);
                          localStorage.setItem('memro-ai-folder-name', contextFolderName);
                          folderBtn.textContent = `📂 ${contextFolderName}`;
-                         addMsg('system-note', `✅ New Workspace added: <b>${contextFolderName}</b>`);
+                         folderBtn.style.color = '#10b981';
+                         addMsg('system-note', `✅ Workspace set: <b>${contextFolderName}</b>`);
                      }
                  } catch(e) { 
-                     acode.alert("Error", "Could not browse folders via FileBrowser. Make sure you have a folder open first, or use Acode's '+' button in the sidebar to add a folder."); 
+                     acode.alert("Error", `Browsing failed: ${e.message}. Use "Enter URL Manually" as a workaround.`); 
                  }
                  return;
              }
 
              if (res) {
                  contextFolderUrl = res;
-                 const folder = folders.find(f => f.url === res);
+                 const folder = folders.find(f => f.url === res) || (curFolder?.url === res ? curFolder : null);
                  contextFolderName = folder?.name || res.split('/').pop();
                  localStorage.setItem('memro-ai-folder-url', contextFolderUrl);
                  localStorage.setItem('memro-ai-folder-name', contextFolderName);
                  folderBtn.textContent = `📂 ${contextFolderName}`;
-                 addMsg('system-note', `✅ Workspace switched to: <b>${contextFolderName}</b>`);
+                 folderBtn.style.color = '#10b981';
+                 addMsg('system-note', `✅ Workspace switched: <b>${contextFolderName}</b>`);
              }
         };
 
@@ -266,11 +360,21 @@ ACTION RULES:
 
             let fullContent = "";
             try {
-                const response = await fetch(currentBackendUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ messages: [{ role: 'system', content: getSystemPrompt() }, ...conversationHistory], stream: true })
-                });
+                // Inject Mode-specific System Instructions
+            const modePrompt = currentMode === 'agent' 
+                ? " [MODE: AGENT - You can perform file actions via JSON.]" 
+                : " [MODE: CHAT - DO NOT EXAMINE OR CHANGE FILES. No JSON blocks. Text/code only.]";
+            
+            const reqMessages = [
+                { role: 'system', content: getSystemPrompt() + modePrompt },
+                ...conversationHistory
+            ];
+
+            const response = await fetch(`${currentBackendUrl}${PATH}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages: reqMessages, stream: true })
+            });
 
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 aiMsg.innerText = "";
