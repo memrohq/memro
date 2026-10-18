@@ -28,7 +28,7 @@ class Agent:
     def __init__(
         self,
         agent_id: str,
-        private_key: str,
+        private_key: Optional[str] = None,
         client: Optional[MemroClient] = None,
     ):
         self.agent_id = agent_id
@@ -56,16 +56,26 @@ class Agent:
         )
 
     @classmethod
+    def from_api_key(cls, api_key: str, client: Optional[MemroClient] = None) -> "Agent":
+        """Use an API key (memro_sk_...) from the dashboard or `memro connect`."""
+        c = client or MemroClient(api_key=api_key)
+        c.api_key = api_key
+        return cls(agent_id=c.whoami()["agent_id"], client=c)
+
+    @classmethod
     def from_env(cls, client: Optional[MemroClient] = None) -> "Agent":
         """
-        Load agent from environment variables.
-        Requires: MEMRO_AGENT_ID, MEMRO_PRIVATE_KEY
+        Load agent from environment variables:
+        MEMRO_API_KEY, or MEMRO_AGENT_ID + MEMRO_PRIVATE_KEY.
         """
+        api_key = os.environ.get("MEMRO_API_KEY")
+        if api_key:
+            return cls.from_api_key(api_key, client=client)
         agent_id = os.environ.get("MEMRO_AGENT_ID")
         private_key = os.environ.get("MEMRO_PRIVATE_KEY")
         if not agent_id or not private_key:
             raise EnvironmentError(
-                "MEMRO_AGENT_ID and MEMRO_PRIVATE_KEY must be set"
+                "Set MEMRO_API_KEY, or MEMRO_AGENT_ID and MEMRO_PRIVATE_KEY"
             )
         return cls(agent_id=agent_id, private_key=private_key, client=client)
 

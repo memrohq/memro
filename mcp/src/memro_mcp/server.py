@@ -14,6 +14,8 @@ load_dotenv()
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.server.sse import SseServerTransport
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+import contextlib
 from mcp.types import Tool, TextContent, CallToolResult, JSONRPCNotification
 from memro import Agent, MemroClient, MemroError
 from starlette.applications import Starlette
@@ -40,6 +42,21 @@ current_auth_info: ContextVar[dict] = ContextVar("auth_info", default={})
 
 # In SaaS/Managed mode, we store agents per session
 _session_agents = {}
+
+# API key (memro_sk_...) -> Agent, so whoami is resolved once per key.
+_api_key_agents: dict = {}
+API_KEY_PREFIX = "memro_sk_"
+
+
+def agent_for_api_key(api_key: str) -> Agent:
+    agent = _api_key_agents.get(api_key)
+    if agent is None:
+        base_url = os.getenv("MEMRO_BASE_URL", "http://localhost:8081")
+        agent = Agent.from_api_key(api_key, client=MemroClient(base_url, api_key=api_key))
+        if len(_api_key_agents) > 10_000:
+            _api_key_agents.clear()
+        _api_key_agents[api_key] = agent
+    return agent
 
 # Global logging setup
 logging.basicConfig(
@@ -133,6 +150,11 @@ def get_agent_for_session(session_id: str = None, agent_id: str = None, token: s
         auth = current_auth_info.get()
         agent_id = agent_id or auth.get("agent_id")
         token = token or auth.get("token")
+
+    # API keys identify the agent by themselves (hosted /mcp, MEMRO_API_KEY).
+    api_key = token if token and token.startswith(API_KEY_PREFIX) else os.getenv("MEMRO_API_KEY")
+    if api_key:
+        return agent_for_api_key(api_key)
     
     if session_id and session_id in _session_agents:
         cached_agent = _session_agents[session_id]
@@ -704,12 +726,52 @@ async def handle_healthz(request):
     """Liveness probe for load balancers and blue-green deploys."""
     return PlainTextResponse("ok")
 
+# --- Streamable HTTP (/mcp): the current MCP transport, authenticated by API key ---
+
+# Stateless: every request carries its own API key, so any instance (blue or
+# green) can serve it and nothing is lost when a deploy swaps colors.
+session_manager = StreamableHTTPSessionManager(app=server, json_response=False, stateless=True)
+
+
+class StreamableHTTPApp:
+    """ASGI endpoint for /mcp. Requires `Authorization: Bearer memro_sk_...`."""
+
+    async def __call__(self, scope, receive, send):
+        token = current_auth_info.get().get("token") or ""
+        if not token.startswith(API_KEY_PREFIX):
+            response = JSONResponse(
+                {"error": "unauthorized", "message": "Send Authorization: Bearer <memro_sk_ API key>. Run `npx memro connect` to get one."},
+                status_code=401,
+                headers={"WWW-Authenticate": 'Bearer realm="memro"'},
+            )
+            return await response(scope, receive, send)
+        try:
+            await asyncio.to_thread(agent_for_api_key, token)
+        except MemroError as e:
+            status = 401 if e.status_code in (401, 403) else 502
+            response = JSONResponse({"error": "unauthorized" if status == 401 else "upstream_error", "message": str(e)}, status_code=status)
+            return await response(scope, receive, send)
+        except Exception:
+            logger.exception("Memro API unreachable while checking API key")
+            response = JSONResponse({"error": "upstream_error", "message": "Memro API is unreachable"}, status_code=502)
+            return await response(scope, receive, send)
+        await session_manager.handle_request(scope, receive, send)
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app):
+    async with session_manager.run():
+        yield
+
+
 # Final App Assembly
 _base_app = Starlette(
+    lifespan=lifespan,
     # Debug pages leak stack traces; enable only for local development.
     debug=os.getenv("MCP_DEBUG") == "1",
     routes=[
         Route("/healthz", endpoint=handle_healthz, methods=["GET"]),
+        Route("/mcp", endpoint=StreamableHTTPApp(), methods=["GET", "POST", "DELETE"]),
         Mount("/sse/messages", app=handle_messages),
         Mount("/sse", app=handle_sse),
         Route("/webhook/{agent_id}", endpoint=handle_webhook, methods=["POST"]),

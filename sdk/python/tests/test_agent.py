@@ -140,3 +140,11 @@ def test_delete_signs_empty_body():
     client.delete_memory(agent_id, private_key, "11111111-1111-1111-1111-111111111111")
     verify_key = nacl.signing.VerifyKey(bytes.fromhex(agent_id))
     verify_key.verify(captured["X-Timestamp"].encode(), bytes.fromhex(captured["X-Signature"]))
+
+
+def test_api_key_uses_bearer_header():
+    """With an API key the client sends Authorization: Bearer instead of signing."""
+    client = MemroClient(base_url="http://example.test", api_key="memro_sk_test")
+    headers = client._auth_headers("ignored", "", b"{}")
+    assert headers["Authorization"] == "Bearer memro_sk_test"
+    assert "X-Signature" not in headers

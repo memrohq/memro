@@ -25,13 +25,15 @@ class MemroClient:
     Usage:
         client = MemroClient()                          # uses MEMRO_BASE_URL or localhost:8081
         client = MemroClient("https://api.memro.co")   # custom server
+        client = MemroClient(api_key="memro_sk_...")   # API key instead of signing
     """
 
-    def __init__(self, base_url: Optional[str] = None):
+    def __init__(self, base_url: Optional[str] = None, api_key: Optional[str] = None):
         self.base_url = (
             base_url
             or os.getenv("MEMRO_BASE_URL", "http://localhost:8081")
         ).rstrip("/")
+        self.api_key = api_key or os.getenv("MEMRO_API_KEY") or None
         self._session = requests.Session()
 
     def _raise(self, resp: Response) -> None:
@@ -43,10 +45,21 @@ class MemroClient:
             raise MemroError(resp.status_code, msg)
 
     def _auth_headers(self, agent_id: str, private_key: str, body: bytes) -> dict:
+        if self.api_key:
+            return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         headers = sign_body(private_key, body)
         headers["X-Agent-Id"] = agent_id
         headers["Content-Type"] = "application/json"
         return headers
+
+    def _authenticated(self, private_key: Optional[str]) -> bool:
+        return bool(self.api_key or private_key)
+
+    def whoami(self) -> dict:
+        """Return the identity behind this client's API key or signature."""
+        resp = self._session.get(f"{self.base_url}/auth/whoami", headers=self._auth_headers("", "", b""))
+        self._raise(resp)
+        return resp.json()
 
     # ── Identity ────────────────────────────────────────────────────────────
 
@@ -138,7 +151,7 @@ class MemroClient:
             params["limit"] = limit
 
         headers: dict = {}
-        if private_key:
+        if self._authenticated(private_key):
             # For GET requests with no body, the signature payload is TIMESTAMP + b""
             headers = self._auth_headers(agent_id, private_key, b"")
 
@@ -176,7 +189,7 @@ class MemroClient:
             params["memory_type"] = memory_type
 
         headers: dict = {}
-        if private_key:
+        if self._authenticated(private_key):
             # For GET requests with no body, the signature payload is TIMESTAMP + b""
             headers = self._auth_headers(agent_id, private_key, b"")
 
