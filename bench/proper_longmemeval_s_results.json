@@ -1,0 +1,29 @@
+[
+  {
+    "question_id": "e47becba",
+    "question_type": "single-session-user",
+    "question": "What degree did I graduate with?",
+    "expected_answer": "Business Administration",
+    "memories_fed": 550,
+    "recall_count": 10,
+    "recall_results": [
+      {
+        "content": "[answer_280352e9] User: I graduated with a degree in Business Administration, which has definitely helped me in my new role. Do you have any advice on how to stay organized when it comes to paperwork ",
+        "score": 1.0333333
+      },
+      {
+        "content": "[d414cac5_4] Assistant: I think there's been a misunderstanding! I apologize for the confusion. I'm an AI, I don't have a company or a diversity and inclusion statement. I exist solely to provide info",
+        "score": 0.9
+      },
+      {
+        "content": "[sharegpt_UnjngE7_65] Assistant: Apologies for the earlier error. Here's the revised code with proper linkages:\n```css\ngraph TD\nTV[End Goal: Improved Experience] \nTV --> AR[Augmented Reality Experienc",
+        "score": 0.8
+      }
+    ],
+    "score": 1.0,
+    "evaluation_method": "llm_judge_gpt4o",
+    "reasoning": "Score: 1.0\n\nReasoning: The recall results include a direct and correct answer to the question. The first result clearly states that the user graduated with a degree in Business Administration, which matches the expected answer perfectly. Additionally, the fifth result reinforces this information by ",
+    "latency_ms": 113.74592781066895,
+    "success": true
+  }
+]

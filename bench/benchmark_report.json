@@ -1,0 +1,291 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-03-18T01:35:46.261062",
+  "title": "Memro Comprehensive Benchmark Report",
+  "metrics": {
+    "latency": {
+      "mean_ms": 45.87953567504883,
+      "median_ms": 10.280728340148926,
+      "p95_ms": 367.4546241760253,
+      "p99_ms": 402.2685360908508,
+      "min_ms": 5.542993545532227,
+      "max_ms": 415.10796546936035,
+      "stdev_ms": 105.33920883526869
+    },
+    "throughput": {
+      "queries_per_second": 118.65011135733047,
+      "total_queries": 3560,
+      "error_rate": 0.0
+    },
+    "scaling": {
+      "latency_growth_per_order": 0.5688573873087407,
+      "type": "linear"
+    }
+  },
+  "performance_tiers": {
+    "latency": "GOOD (100-500ms P95)",
+    "throughput": "EXCELLENT (>100 QPS)",
+    "scaling": "NEEDS_IMPROVEMENT (high growth)"
+  },
+  "recommendations": [
+    {
+      "category": "Scaling",
+      "issue": "Performance degrades significantly with data scale",
+      "recommendations": [
+        "Implement data partitioning strategy",
+        "Consider database sharding for large datasets",
+        "Enable query result caching for repeated patterns"
+      ]
+    }
+  ],
+  "raw_results": {
+    "benchmark_version": "1.0",
+    "timestamp": "2026-03-18T01:35:45.993318",
+    "duration_seconds": 65.596079,
+    "results": {
+      "recall_accuracy": {
+        "test": "recall_accuracy",
+        "total_queries": 5,
+        "avg_latency_ms": 390.6898021697998,
+        "median_latency_ms": 252.99906730651855,
+        "p95_latency_ms": 788.0280017852782,
+        "detailed_results": [
+          {
+            "query": "What programming languages do you know?",
+            "expected": 1,
+            "retrieved": 3,
+            "latency_ms": 911.5099906921387,
+            "top_result_score": 1.0
+          },
+          {
+            "query": "Tell me about your travels",
+            "expected": 2,
+            "retrieved": 0,
+            "latency_ms": 241.8839931488037,
+            "top_result_score": 0
+          },
+          {
+            "query": "What are your interests?",
+            "expected": 3,
+            "retrieved": 10,
+            "latency_ms": 252.95591354370117,
+            "top_result_score": 0.1
+          },
+          {
+            "query": "Coffee preferences",
+            "expected": 1,
+            "retrieved": 0,
+            "latency_ms": 252.99906730651855,
+            "top_result_score": 0
+          },
+          {
+            "query": "Team meetings",
+            "expected": 1,
+            "retrieved": 0,
+            "latency_ms": 294.1000461578369,
+            "top_result_score": 0
+          }
+        ]
+      },
+      "query_latency": {
+        "test": "query_latency",
+        "num_queries": 50,
+        "avg_latency_ms": 45.87953567504883,
+        "median_latency_ms": 10.280728340148926,
+        "min_latency_ms": 5.542993545532227,
+        "max_latency_ms": 415.10796546936035,
+        "p50_latency_ms": 10.280728340148926,
+        "p95_latency_ms": 367.4546241760253,
+        "p99_latency_ms": 402.2685360908508,
+        "stdev_latency_ms": 105.33920883526869
+      },
+      "temporal_reasoning": {
+        "test": "temporal_reasoning",
+        "total_queries": 4,
+        "avg_results": 0,
+        "avg_latency_ms": 361.09399795532227,
+        "detailed_results": [
+          {
+            "query": "What happened recently in the last 30 days?",
+            "results_count": 0,
+            "latency_ms": 326.86400413513184
+          },
+          {
+            "query": "Tell me about your career progression",
+            "results_count": 0,
+            "latency_ms": 329.86903190612793
+          },
+          {
+            "query": "What were your activities 6 months ago?",
+            "results_count": 0,
+            "latency_ms": 553.3089637756348
+          },
+          {
+            "query": "When did you start your current job?",
+            "results_count": 0,
+            "latency_ms": 234.33399200439453
+          }
+        ]
+      },
+      "knowledge_chains": {
+        "test": "knowledge_chains",
+        "total_queries": 3,
+        "avg_chain_coverage": 0.8888888888888888,
+        "avg_latency_ms": 273.8339900970459,
+        "detailed_results": [
+          {
+            "query": "Tell me about Alice and what she works on",
+            "chain_depth": 2,
+            "expected_depth": 3,
+            "results_retrieved": 2,
+            "latency_ms": 248.11911582946777
+          },
+          {
+            "query": "Explain the connection between neural networks and biology",
+            "chain_depth": 2,
+            "expected_depth": 2,
+            "results_retrieved": 3,
+            "latency_ms": 214.61105346679688
+          },
+          {
+            "query": "What do I know about meeting Alice?",
+            "chain_depth": 2,
+            "expected_depth": 2,
+            "results_retrieved": 4,
+            "latency_ms": 358.77180099487305
+          }
+        ]
+      },
+      "throughput": {
+        "test": "throughput",
+        "duration_seconds": 30,
+        "total_queries": 3560,
+        "queries_per_second": 118.65011135733047,
+        "errors": 0,
+        "error_rate": 0.0,
+        "avg_latency_ms": 8.42112148745676,
+        "p95_latency_ms": 12.151908874511713
+      },
+      "agent_isolation": {
+        "test": "agent_isolation_impact",
+        "scoped_retrieval": {
+          "avg_recall": 2.4444444444444446,
+          "avg_precision": 0.6666666666666666,
+          "avg_latency_ms": 19.995371500651043,
+          "details": [
+            {
+              "query": "What programming languages do you know?",
+              "retrieved_count": 4,
+              "relevant_results": 4,
+              "expected": 1,
+              "latency_ms": 15.439033508300781,
+              "recall_score": 4.0,
+              "precision": 1.0
+            },
+            {
+              "query": "Tell me about your travels",
+              "retrieved_count": 0,
+              "relevant_results": 0,
+              "expected": 1,
+              "latency_ms": 16.694068908691406,
+              "recall_score": 0.0,
+              "precision": 0
+            },
+            {
+              "query": "What are your interests?",
+              "retrieved_count": 10,
+              "relevant_results": 10,
+              "expected": 3,
+              "latency_ms": 27.853012084960938,
+              "recall_score": 3.3333333333333335,
+              "precision": 1.0
+            }
+          ]
+        },
+        "full_database_risk": {
+          "avg_pollution_risk": "HIGH",
+          "expected_recall_degradation": "50-75%",
+          "reason": "Unrelated memories from other agents contaminate retrieval",
+          "details": [
+            {
+              "query": "What programming languages do you know?",
+              "scenario": "full_database_simulated",
+              "note": "In production, this would search across ALL agent memories",
+              "expected_relevant": 4,
+              "pollution_risk": "HIGH"
+            },
+            {
+              "query": "Tell me about your travels",
+              "scenario": "full_database_simulated",
+              "note": "In production, this would search across ALL agent memories",
+              "expected_relevant": 0,
+              "pollution_risk": "HIGH"
+            },
+            {
+              "query": "What are your interests?",
+              "scenario": "full_database_simulated",
+              "note": "In production, this would search across ALL agent memories",
+              "expected_relevant": 10,
+              "pollution_risk": "MEDIUM"
+            }
+          ]
+        },
+        "isolation_benefit": {
+          "recall_improvement": "244.4%",
+          "key_insight": "Agent-ID scoping is CRITICAL for accurate memory retrieval",
+          "recommendation": "Always filter by agent/user namespace in production"
+        }
+      },
+      "memory_efficiency": {
+        "test": "memory_efficiency",
+        "memory_counts_tested": [
+          10,
+          50,
+          100,
+          500,
+          1000
+        ],
+        "latency_by_count": [
+          {
+            "memory_count": 10,
+            "latency_ms": 211.4100456237793,
+            "results": 0
+          },
+          {
+            "memory_count": 50,
+            "latency_ms": 13.422012329101562,
+            "results": 0
+          },
+          {
+            "memory_count": 100,
+            "latency_ms": 9.587764739990234,
+            "results": 0
+          },
+          {
+            "memory_count": 500,
+            "latency_ms": 10.042190551757812,
+            "results": 0
+          },
+          {
+            "memory_count": 1000,
+            "latency_ms": 44.68989372253418,
+            "results": 0
+          }
+        ],
+        "avg_latency_growth": 0.5688573873087407,
+        "max_latency_growth": 3.4502136752136754
+      }
+    },
+    "summary": {
+      "query_latency_p95_ms": 367.4546241760253,
+      "queries_per_second": 118.65011135733047,
+      "agent_scoped_recall": 2.4444444444444446,
+      "isolation_benefit": {
+        "recall_improvement": "244.4%",
+        "key_insight": "Agent-ID scoping is CRITICAL for accurate memory retrieval",
+        "recommendation": "Always filter by agent/user namespace in production"
+      },
+      "latency_growth_per_step": 0.5688573873087407
+    }
+  }
+}

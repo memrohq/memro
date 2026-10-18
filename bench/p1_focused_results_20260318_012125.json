@@ -1,0 +1,266 @@
+{
+  "timestamp": "2026-03-18T01:21:25.954924",
+  "agent_id": "ab7a24f744520625fb44fda13e3c5e7704cd80e15806cf4b1eada850fc9d79ca",
+  "test_name": "p1_hybrid_focused_test",
+  "test_count": 5,
+  "results": [
+    {
+      "query": "React and TypeScript projects",
+      "category": "Technology stack query",
+      "results": {
+        "semantic": {
+          "results_found": 10,
+          "keyword_matches": 10,
+          "keyword_match_rate": 1.0,
+          "avg_score": 0.5499999994,
+          "latency_ms": 453.4871578216553,
+          "top_score": 1.0,
+          "results": [
+            {
+              "content": "Completed project Alpha using React and TypeScript",
+              "score": 1.0
+            },
+            {
+              "content": "Completed project Alpha using React and TypeScript",
+              "score": 0.9
+            },
+            {
+              "content": "Completed project Alpha using React and TypeScript",
+              "score": 0.8
+            }
+          ]
+        },
+        "hybrid": {
+          "results_found": 10,
+          "keyword_matches": 10,
+          "keyword_match_rate": 1.0,
+          "avg_score": 0.5512499994,
+          "latency_ms": 43.51997375488281,
+          "top_score": 1.0125,
+          "results": [
+            {
+              "content": "Completed project Alpha using React and TypeScript",
+              "score": 1.0125
+            },
+            {
+              "content": "Completed project Alpha using React and TypeScript",
+              "score": 0.9
+            },
+            {
+              "content": "Completed project Alpha using React and TypeScript",
+              "score": 0.8
+            }
+          ]
+        }
+      }
+    },
+    {
+      "query": "Did I meet Sarah about roadmap?",
+      "category": "Person + meeting query",
+      "results": {
+        "semantic": {
+          "results_found": 10,
+          "keyword_matches": 10,
+          "keyword_match_rate": 1.0,
+          "avg_score": 0.5499999994,
+          "latency_ms": 210.9372615814209,
+          "top_score": 1.0,
+          "results": [
+            {
+              "content": "Met with Sarah about Q2 roadmap planning",
+              "score": 1.0
+            },
+            {
+              "content": "Met with Sarah about Q2 roadmap planning",
+              "score": 0.9
+            },
+            {
+              "content": "Met with Sarah about Q2 roadmap planning",
+              "score": 0.8
+            }
+          ]
+        },
+        "hybrid": {
+          "results_found": 10,
+          "keyword_matches": 10,
+          "keyword_match_rate": 1.0,
+          "avg_score": 0.5499999994,
+          "latency_ms": 23.028850555419922,
+          "top_score": 1.0,
+          "results": [
+            {
+              "content": "Met with Sarah about Q2 roadmap planning",
+              "score": 1.0
+            },
+            {
+              "content": "Met with Sarah about Q2 roadmap planning",
+              "score": 0.9
+            },
+            {
+              "content": "Met with Sarah about Q2 roadmap planning",
+              "score": 0.8
+            }
+          ]
+        }
+      }
+    },
+    {
+      "query": "Central Park running",
+      "category": "Activity query",
+      "results": {
+        "semantic": {
+          "results_found": 10,
+          "keyword_matches": 10,
+          "keyword_match_rate": 1.0,
+          "avg_score": 0.5499999994,
+          "latency_ms": 346.2100028991699,
+          "top_score": 1.0,
+          "results": [
+            {
+              "content": "Morning run at Central Park, 5 miles",
+              "score": 1.0
+            },
+            {
+              "content": "Morning run at Central Park, 5 miles",
+              "score": 0.9
+            },
+            {
+              "content": "Morning run at Central Park, 5 miles",
+              "score": 0.8
+            }
+          ]
+        },
+        "hybrid": {
+          "results_found": 10,
+          "keyword_matches": 10,
+          "keyword_match_rate": 1.0,
+          "avg_score": 0.5549999994,
+          "latency_ms": 56.52284622192383,
+          "top_score": 1.0,
+          "results": [
+            {
+              "content": "Morning run at Central Park, 5 miles",
+              "score": 1.0
+            },
+            {
+              "content": "Morning run at Central Park, 5 miles",
+              "score": 0.9
+            },
+            {
+              "content": "Morning run at Central Park, 5 miles",
+              "score": 0.825
+            }
+          ]
+        }
+      }
+    },
+    {
+      "query": "Italy vacation",
+      "category": "Travel query",
+      "results": {
+        "semantic": {
+          "results_found": 10,
+          "keyword_matches": 10,
+          "keyword_match_rate": 1.0,
+          "avg_score": 0.5499999994,
+          "latency_ms": 387.53414154052734,
+          "top_score": 1.0,
+          "results": [
+            {
+              "content": "Visited Italy for 2 weeks, loved Rome and Venice (iteration 6)",
+              "score": 1.0
+            },
+            {
+              "content": "Visited Italy for 2 weeks, loved Rome and Venice (iteration 6)",
+              "score": 0.9
+            },
+            {
+              "content": "Test memory number 4: Visited Italy for 2 weeks, loved Rome and Venice",
+              "score": 0.8
+            }
+          ]
+        },
+        "hybrid": {
+          "results_found": 10,
+          "keyword_matches": 10,
+          "keyword_match_rate": 1.0,
+          "avg_score": 0.5499999994,
+          "latency_ms": 44.80886459350586,
+          "top_score": 1.0,
+          "results": [
+            {
+              "content": "Visited Italy for 2 weeks, loved Rome and Venice (iteration 6)",
+              "score": 1.0
+            },
+            {
+              "content": "Visited Italy for 2 weeks, loved Rome and Venice (iteration 6)",
+              "score": 0.9
+            },
+            {
+              "content": "Test memory number 4: Visited Italy for 2 weeks, loved Rome and Venice",
+              "score": 0.8
+            }
+          ]
+        }
+      }
+    },
+    {
+      "query": "chess rating",
+      "category": "Hobby query",
+      "results": {
+        "semantic": {
+          "results_found": 10,
+          "keyword_matches": 10,
+          "keyword_match_rate": 1.0,
+          "avg_score": 0.5499999994,
+          "latency_ms": 359.10892486572266,
+          "top_score": 1.0,
+          "results": [
+            {
+              "content": "Play chess online, rating 1750",
+              "score": 1.0
+            },
+            {
+              "content": "Play chess online, rating 1750",
+              "score": 0.9
+            },
+            {
+              "content": "Play chess online, rating 1750",
+              "score": 0.8
+            }
+          ]
+        },
+        "hybrid": {
+          "results_found": 10,
+          "keyword_matches": 10,
+          "keyword_match_rate": 1.0,
+          "avg_score": 0.559999991,
+          "latency_ms": 50.45795440673828,
+          "top_score": 1.0,
+          "results": [
+            {
+              "content": "Play chess online, rating 1750",
+              "score": 1.0
+            },
+            {
+              "content": "Play chess online, rating 1750",
+              "score": 0.92499995
+            },
+            {
+              "content": "Play chess online, rating 1750",
+              "score": 0.8
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "summary": {
+    "total_hybrid_results": 50,
+    "total_semantic_results": 50,
+    "avg_hybrid_latency_ms": 43.66769790649414,
+    "avg_semantic_latency_ms": 351.4554977416992,
+    "avg_hybrid_match_rate": 1.0,
+    "avg_semantic_match_rate": 1.0
+  }
+}
