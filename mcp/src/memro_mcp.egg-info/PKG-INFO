@@ -1,0 +1,89 @@
+Metadata-Version: 2.4
+Name: memro-mcp
+Version: 0.1.0
+Summary: MCP server for memro — gives AI agents persistent memory via Claude, Cursor, and any MCP client
+Author-email: memro Team <sdk@memro.co>
+License: MIT
+Project-URL: Homepage, https://memro.co
+Project-URL: Repository, https://github.com/memro-co/memro-mcp
+Keywords: ai,agents,memory,mcp,claude,cursor,memro
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: mcp>=1.0.0
+Requires-Dist: memro>=0.1.0
+
+# memro MCP Server
+
+Gives any MCP-compatible AI (Claude Desktop, Cursor, Zed, etc.) persistent memory via the memro protocol.
+
+## Install
+
+```bash
+pip install memro-mcp
+```
+
+## Setup with Claude Desktop
+
+Add to `~/.claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "memro": {
+      "command": "memro-mcp",
+      "env": {
+        "MEMRO_AGENT_ID": "your_agent_id_here",
+        "MEMRO_PRIVATE_KEY": "your_private_key_here",
+        "MEMRO_BASE_URL": "http://localhost:8081"
+      }
+    }
+  }
+}
+```
+
+> First run without `MEMRO_AGENT_ID` set will auto-create a new agent and print the credentials to stderr.
+
+## Available Tools
+
+Once connected, Claude (or any MCP client) can use:
+
+| Tool | What it does |
+|------|-------------|
+| `remember` | Store a new memory (episodic, semantic, procedural, or profile) |
+| `recall` | Semantic search across all memories |
+| `get_recent_memories` | Get most recent memories chronologically |
+| `delete_memory` | Delete a specific memory by ID |
+| `export_memories` | Export a summary of all stored memories |
+
+## Example Usage
+
+Once configured, Claude will automatically use memory:
+
+```
+You: Remember that I prefer TypeScript over JavaScript
+Claude: [calls remember("User prefers TypeScript over JavaScript", type="profile")]
+        Got it, I'll remember that.
+
+You: What's my preferred language?
+Claude: [calls recall("preferred programming language")]
+        Based on what I remember, you prefer TypeScript over JavaScript.
+```
+
+## Self-host the memro backend
+
+```bash
+cd memrohq
+docker-compose up -d
+
+# Backend runs at http://localhost:8081
+```
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `MEMRO_AGENT_ID` | No* | auto-created | Your agent's public key |
+| `MEMRO_PRIVATE_KEY` | No* | auto-created | Your agent's private key |
+| `MEMRO_BASE_URL` | No | `http://localhost:8081` | memro backend URL |
+
+*First run will auto-create and print credentials. Save them for future runs.

@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8084:8080"
+    env_file:
+      - .env
+    environment:
+      - MCP_TRANSPORT=sse
+      - MCP_PORT=8080
+      - MCP_WORKERS=1 # Must be 1 for SSE session persistence (unless using sticky sessions)
+      - MEMRO_BASE_URL=http://host.docker.internal:8090
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
+        reservations:
+          cpus: '0.10'
+          memory: 64M
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
