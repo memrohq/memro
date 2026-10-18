@@ -21,7 +21,6 @@ dependencies = [
     "starlette",
     "uvicorn",
     "uvloop",
-    "neo4j",
 ]
 
 [project.scripts]

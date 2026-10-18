@@ -4,7 +4,7 @@ from mcp.client.sse import sse_client
 import json
 
 async def test_graph_reasoning():
-    print("\n--- Testing Graph-Augmented Reasoning (Neo4j Path) ---")
+    print("\n--- Testing Graph-Augmented Reasoning ---")
     url = "http://localhost:8080/sse/graph_tester"
     headers = {"Authorization": "Bearer mock_graph_token"}
     

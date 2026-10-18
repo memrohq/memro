@@ -16,7 +16,6 @@ from mcp.server.stdio import stdio_server
 from mcp.server.sse import SseServerTransport
 from mcp.types import Tool, TextContent, CallToolResult, JSONRPCNotification
 from memro import Agent, MemroClient, MemroError
-from memro_mcp.knowledge_graph import get_graph_for_agent
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.routing import Route, Mount
