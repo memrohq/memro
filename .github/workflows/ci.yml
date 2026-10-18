@@ -34,9 +34,13 @@ jobs:
           cache-dependency-path: server/go.sum
       - run: go vet ./...
       - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
-      - run: go test -race ./...
+      - run: go test -race -v ./... 2>&1 | tee test.log; test "${PIPESTATUS[0]}" -eq 0
+        shell: bash
         env:
           MEMRO_TEST_DATABASE_URL: postgres://memro:memro@localhost:5432/memro
+          MEMRO_REQUIRE_DB_TESTS: "1"
+      - name: Ensure no integration test was skipped
+        run: "! grep -- '--- SKIP' test.log"
       - name: Build Docker image
         run: docker build -t memro:ci .
 

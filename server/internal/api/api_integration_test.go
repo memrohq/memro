@@ -95,6 +95,9 @@ func newAgent(t *testing.T) agent {
 func setup(t *testing.T, customize ...func(*api.Deps)) *env {
 	url := os.Getenv("MEMRO_TEST_DATABASE_URL")
 	if url == "" {
+		if os.Getenv("MEMRO_REQUIRE_DB_TESTS") != "" {
+			t.Fatal("MEMRO_REQUIRE_DB_TESTS is set but MEMRO_TEST_DATABASE_URL is empty")
+		}
 		t.Skip("MEMRO_TEST_DATABASE_URL not set")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
