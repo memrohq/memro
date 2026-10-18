@@ -1,136 +1,105 @@
 import { useState } from "react";
+import { Icon, Logo } from "./ui";
+import { api } from "../lib/api";
 
-const Login = ({ apiBaseUrl, onLoginSuccess }) => {
-  const [step, setStep] = useState('email');
-  const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState('');
+export default function Login({ apiBaseUrl, onLoginSuccess }) {
+  const [step, setStep] = useState("email");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
+  const [error, setError] = useState("");
 
-  const handleEmailSubmit = async (e) => {
+  const sendCode = async (e) => {
     e.preventDefault();
-    if (!email) return;
-    setError('');
-    setMessage('');
+    setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${apiBaseUrl}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
-      if (res.ok) {
-        setStep('otp');
-        setMessage('OTP sent! Check your developer console/backend logs.');
-      } else {
-        const text = await res.text();
-        setError(text || "Failed to send OTP.");
-      }
-    } catch (e) {
-      setError('Network error: Could not reach backend.');
+      await api(apiBaseUrl, "/auth/login", { method: "POST", json: { email: email.trim() } });
+      setStep("code");
+    } catch (err) {
+      setError(err.status ? err.message : "Couldn't reach the Memro API.");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleOtpSubmit = async (e) => {
+  const verify = async (e) => {
     e.preventDefault();
-    if (!otp) return;
-    setError('');
+    setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${apiBaseUrl}/auth/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, code: otp })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        onLoginSuccess(data.token, data.agent_id, data.private_key, data.user_id, email);
-      } else {
-        const text = await res.text();
-        setError(text || "Invalid OTP.");
-      }
-    } catch (e) {
-      setError('Network error: Could not reach backend.');
+      const data = await api(apiBaseUrl, "/auth/verify", { method: "POST", json: { email: email.trim(), code: code.trim() } });
+      onLoginSuccess(data.token, data.agent_id, data.private_key, data.user_id, email.trim());
+    } catch (err) {
+      setError(err.status ? err.message : "Couldn't reach the Memro API.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 font-display">
-      <div className="max-w-md w-full p-8 bg-white border border-primary/20 shadow-xl relative overflow-hidden">
-        {/* Background Blueprint Grid */}
-        <div className="absolute inset-0 pointer-events-none opacity-[0.03]" 
-             style={{ backgroundImage: 'linear-gradient(#0f172a 1px, transparent 1px), linear-gradient(90deg, #0f172a 1px, transparent 1px)', backgroundSize: '20px 20px' }} />
-        
-        <div className="relative z-10 flex flex-col items-center mb-8">
-          <svg className="size-12 text-primary mb-4" fill="none" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
-            <path d="M36.7273 44C33.9891 44 31.6043 39.8386 30.3636 33.69C29.123 39.8386 26.7382 44 24 44C21.2618 44 18.877 39.8386 17.6364 33.69C16.3957 39.8386 14.0109 44 11.2727 44C7.25611 44 4 35.0457 4 24C4 12.9543 7.25611 4 11.2727 4C14.0109 4 16.3957 8.16144 17.6364 14.31C18.877 8.16144 21.2618 4 24 4C26.7382 4 29.123 8.16144 30.3636 14.31C31.6043 8.16144 33.9891 4 36.7273 4C40.7439 4 44 12.9543 44 24C44 35.0457 40.7439 44 36.7273 44Z" fill="currentColor"></path>
-          </svg>
-          <h1 className="text-2xl font-black text-primary uppercase tracking-widest text-center">MEMRO.CO</h1>
-          <p className="text-xs font-mono text-slate-500 tracking-tight mt-1">Multi-Tenant Cloud Access</p>
+    <div className="min-h-full flex flex-col items-center justify-center p-4">
+      <div className="w-full max-w-[380px]">
+        <div className="flex items-center gap-2.5 mb-8 justify-center">
+          <div className="size-9 rounded-lg bg-ink text-white flex items-center justify-center"><Logo className="size-5" /></div>
+          <span className="text-[18px] font-semibold tracking-tight">memro</span>
         </div>
 
-        {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-600 text-xs font-mono text-center">{error}</div>}
-        {message && <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 text-xs font-mono text-center">{message}</div>}
+        <div className="card bg-panel overflow-hidden">
+          <div className="px-5 h-11 flex items-center">
+            <p className="label">{step === "email" ? "Sign in" : "Check your email"}</p>
+          </div>
+          <div className="bg-surface border-t border-line rounded-xl -mx-px -mb-px p-5">
+            {step === "email" ? (
+              <form onSubmit={sendCode} className="space-y-4">
+                <div>
+                  <h1 className="text-[18px] font-semibold tracking-tight">Welcome to Memro</h1>
+                  <p className="text-[13px] text-muted mt-1">Enter your email and we'll send you a sign-in code.</p>
+                </div>
+                <input
+                  type="email"
+                  autoFocus
+                  required
+                  autoComplete="email"
+                  className="input h-10"
+                  placeholder="you@company.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+                {error && <p className="text-[12px] text-danger">{error}</p>}
+                <button className="btn-primary w-full h-10" disabled={loading}>{loading ? "Sending…" : "Continue with email"}</button>
+              </form>
+            ) : (
+              <form onSubmit={verify} className="space-y-4">
+                <div>
+                  <h1 className="text-[18px] font-semibold tracking-tight">Enter your code</h1>
+                  <p className="text-[13px] text-muted mt-1">We sent a 6-digit code to <span className="text-ink">{email}</span>. It expires in 15 minutes.</p>
+                </div>
+                <input
+                  autoFocus
+                  required
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  className="input h-12 text-center font-mono text-[22px] tracking-[0.5em]"
+                  placeholder="000000"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                />
+                {error && <p className="text-[12px] text-danger">{error}</p>}
+                <button className="btn-primary w-full h-10" disabled={loading || code.length < 6}>{loading ? "Verifying…" : "Sign in"}</button>
+                <button type="button" className="btn-ghost w-full" onClick={() => { setStep("email"); setCode(""); setError(""); }}>
+                  <Icon name="arrow_back" className="!text-[16px]" /> Use a different email
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
 
-        {step === 'email' ? (
-          <form onSubmit={handleEmailSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-primary uppercase tracking-wider mb-2">Email Address</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full border-2 border-primary/20 focus:border-primary p-3 bg-slate-50 outline-none text-sm transition-colors"
-                placeholder="developer@startup.com"
-                required
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-primary text-white py-3 font-bold uppercase text-xs tracking-widest hover:bg-primary/90 transition-colors disabled:opacity-50"
-            >
-              {loading ? 'SENDING...' : 'CONTINUE WITH EMAIL'}
-            </button>
-          </form>
-        ) : (
-          <form onSubmit={handleOtpSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-primary uppercase tracking-wider mb-2">One-Time Passcode</label>
-              <input
-                type="text"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                className="w-full border-2 border-primary/20 focus:border-primary p-4 text-center tracking-[0.6em] text-xl font-mono bg-slate-50 outline-none transition-colors"
-                placeholder="000000"
-                maxLength={8}
-                required
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-primary text-white py-3 font-bold uppercase text-xs tracking-widest hover:bg-primary/90 transition-colors disabled:opacity-50"
-            >
-              {loading ? 'VERIFYING...' : 'SECURE LOGIN'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setStep('email')}
-              className="w-full border-2 border-primary/20 text-primary py-3 font-bold uppercase text-xs tracking-widest hover:bg-primary/5 transition-colors"
-            >
-              USE DIFFERENT EMAIL
-            </button>
-          </form>
-        )}
+        <p className="text-center text-[12px] text-subtle mt-6">
+          Free for non-commercial use · <a className="hover:text-ink underline-offset-2 hover:underline" href="https://memro.co">memro.co</a>
+        </p>
       </div>
     </div>
   );
-};
-
-export default Login;
+}

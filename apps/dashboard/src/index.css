@@ -1,64 +1,63 @@
 @import "tailwindcss";
 
-@layer base {
-  body {
-    @apply bg-[#f6f7f8] text-[#0f172a] font-sans antialiased min-h-screen flex flex-col;
-    background-image:
-      linear-gradient(to right, rgba(19, 109, 236, 0.05) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(19, 109, 236, 0.05) 1px, transparent 1px);
-    background-size: 20px 20px;
-  }
-}
-
+/* Warm, monochrome palette: off-white canvas, white surfaces, ink for
+   primary actions; color only for status. */
 @theme {
-  --color-primary: #136dec;
-  --color-background-light: #f6f7f8;
-  --color-background-dark: #101822;
-  --color-blueprint-border: #136dec;
-  --font-display: "Space Grotesk", sans-serif;
-  --radius-default: 0px;
+  --color-canvas: #efeeeb;
+  --color-surface: #ffffff;
+  --color-panel: #f7f6f3;
+  --color-line: #e5e3de;
+  --color-line-strong: #d6d3cc;
+  --color-ink: #141414;
+  --color-muted: #6b6965;
+  --color-subtle: #9b9893;
+  --color-ok: #1f8a4c;
+  --color-warn: #b7791f;
+  --color-danger: #b9382b;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
 }
 
-.blueprint-grid {
-  background-image:
-    linear-gradient(to right, rgba(19, 109, 236, 0.05) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(19, 109, 236, 0.05) 1px, transparent 1px);
-  background-size: 20px 20px;
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  ::selection { background: #141414; color: #fff; }
+  :focus-visible { outline: 2px solid #141414; outline-offset: 2px; }
 }
 
-.custom-scrollbar::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+@layer components {
+  .icon {
+    font-family: "Material Symbols Outlined";
+    font-weight: 300;
+    font-size: 18px;
+    line-height: 1;
+    font-variation-settings: "opsz" 20, "wght" 300, "FILL" 0;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+  /* Small uppercase monospace section label, as in the reference */
+  .label {
+    @apply font-mono text-[11px] uppercase tracking-[0.08em] text-muted;
+  }
+  .card {
+    @apply bg-surface border border-line rounded-xl;
+  }
+  .input {
+    @apply w-full h-9 px-3 rounded-lg bg-surface border border-line text-[13px] placeholder:text-subtle outline-none focus:border-ink transition-colors;
+  }
+  .scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #d6d3cc; border-radius: 8px; }
 }
 
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: #f1f5f9;
+/* Buttons are utilities so variants can build on the base with @apply. */
+@utility btn {
+  @apply inline-flex items-center justify-center gap-1.5 h-9 px-3.5 rounded-lg text-[13px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
 }
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #136dec;
-}
-
-.blueprint-outline {
-  border: 1px solid #136dec;
-}
-
-.blueprint-outline-half {
-  border: 0.5px solid rgba(19, 109, 236, 0.4);
-}
-
-.divider-b {
-  border-bottom: 1px solid #136dec;
-}
-
-.divider-t {
-  border-top: 1px solid #136dec;
-}
-
-.divider-r {
-  border-right: 1px solid #136dec;
-}
-
-.divider-l {
-  border-left: 1px solid #136dec;
-}
+@utility btn-primary { @apply btn bg-ink text-white hover:bg-black; }
+@utility btn-secondary { @apply btn bg-surface text-ink border border-line hover:bg-panel; }
+@utility btn-ghost { @apply btn text-muted hover:text-ink hover:bg-panel; }
+@utility btn-danger { @apply btn bg-surface text-danger border border-line hover:bg-red-50; }
