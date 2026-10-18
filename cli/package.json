@@ -9,6 +9,6 @@
   "bin": { "memro": "bin/memro.js" },
   "files": ["bin", "src", "LICENSE", "README.md"],
   "engines": { "node": ">=18" },
-  "scripts": { "test": "node --test test/*.test.js" },
+  "scripts": { "test": "node --test" },
   "keywords": ["memro", "mcp", "memory", "claude-code", "codex", "cursor", "antigravity", "opencode", "ai-agents"]
 }
