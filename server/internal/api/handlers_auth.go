@@ -36,7 +36,8 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "A valid email is required")
 		return
 	}
-	if !s.email.Configured() {
+	devLog := !s.email.Configured() && s.cfg.DevLogOTP
+	if !s.email.Configured() && !devLog {
 		httpError(w, http.StatusServiceUnavailable, "Email login is not configured on this server")
 		return
 	}
@@ -54,6 +55,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.SetUserOTP(ctx, email, tenant, auth.HashOTP(email, code), time.Now().Add(otpTTL)); err != nil {
 		slog.Error("set otp", "err", err)
 		httpError(w, http.StatusInternalServerError, "Database error")
+		return
+	}
+	if devLog {
+		slog.Warn("DEV_LOG_OTP: sign-in code (email is not configured)", "email", email, "code", code)
+		writeJSON(w, http.StatusOK, authMessage{true, "OTP sent to email"})
 		return
 	}
 	if err := s.email.SendOTP(email, code); err != nil {

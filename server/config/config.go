@@ -44,6 +44,11 @@ type Config struct {
 	EmailFrom string
 
 	MemorySoftCap int
+
+	// DevLogOTP writes dashboard sign-in codes to the server log instead of
+	// emailing them when no SMTP server is configured. For local development
+	// and staging only; never enable it in production.
+	DevLogOTP bool
 }
 
 func Load() Config {
@@ -70,6 +75,7 @@ func Load() Config {
 		EmailUser:             strings.TrimSpace(os.Getenv("EMAIL_HOST_USER")),
 		EmailPass:             strings.TrimSpace(os.Getenv("EMAIL_HOST_PASSWORD")),
 		MemorySoftCap:         envInt("MEMORY_SOFT_CAP", 1000),
+		DevLogOTP:             envBool("DEV_LOG_OTP", false),
 	}
 	c.BaseURL = env("BASE_URL", "http://localhost:"+strconv.Itoa(c.Port))
 	c.EmailFrom = env("EMAIL_FROM", c.EmailUser)

@@ -521,3 +521,15 @@ func TestExtensionPoints(t *testing.T) {
 	code, body = e.do(nil, "", "POST", "/billing/webhook", []byte("{}"), nil)
 	e.must(202, code, body, "extra route")
 }
+
+func TestDevLogOTPSignIn(t *testing.T) {
+	e := setup(t, func(d *api.Deps) { d.Config.DevLogOTP = true })
+	code, body := e.do(nil, "", "POST", "/auth/login", j(map[string]string{"email": "dev@example.com"}), nil)
+	e.must(200, code, body, "login with DEV_LOG_OTP")
+
+	// Wrong codes are rejected and count toward the attempt limit.
+	code, body = e.do(nil, "", "POST", "/auth/verify", j(map[string]string{"email": "dev@example.com", "code": "000000"}), nil)
+	if code != 401 && code != 429 {
+		t.Fatalf("wrong code: status %d: %s", code, body)
+	}
+}
