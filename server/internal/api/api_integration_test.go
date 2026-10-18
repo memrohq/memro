@@ -25,16 +25,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/memrohq/memro/backend/internal/api"
-	"github.com/memrohq/memro/backend/internal/config"
-	"github.com/memrohq/memro/backend/internal/db"
-	"github.com/memrohq/memro/backend/internal/email"
-	"github.com/memrohq/memro/backend/internal/embed"
-	"github.com/memrohq/memro/backend/internal/engine"
-	"github.com/memrohq/memro/backend/internal/filestore"
-	"github.com/memrohq/memro/backend/internal/indexer"
-	"github.com/memrohq/memro/backend/internal/store"
-	"github.com/memrohq/memro/backend/migrations"
+	"github.com/memrohq/memro/server/internal/api"
+	"github.com/memrohq/memro/server/internal/config"
+	"github.com/memrohq/memro/server/internal/db"
+	"github.com/memrohq/memro/server/internal/email"
+	"github.com/memrohq/memro/server/internal/embed"
+	"github.com/memrohq/memro/server/internal/engine"
+	"github.com/memrohq/memro/server/internal/filestore"
+	"github.com/memrohq/memro/server/internal/indexer"
+	"github.com/memrohq/memro/server/internal/store"
+	"github.com/memrohq/memro/server/migrations"
 )
 
 // fakeEmbeddings returns bag-of-words vectors, so texts sharing words are

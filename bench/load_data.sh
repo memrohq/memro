@@ -16,7 +16,7 @@ echo ""
 echo "1️⃣  Checking services..."
 echo "=================================="
 
-cd "$PROJECT_ROOT/memro-core"
+cd "$PROJECT_ROOT"
 
 # Try to connect to PostgreSQL
 if ! psql -h localhost -U memro -d memro -c "SELECT 1" > /dev/null 2>&1; then
@@ -39,7 +39,7 @@ echo ""
 echo "2️⃣  Running database migrations..."
 echo "=================================="
 
-cd "$PROJECT_ROOT/memro-core/backend"
+cd "$PROJECT_ROOT/server"
 
 if command -v sqlx &> /dev/null; then
     export DATABASE_URL=postgresql://memro:memro@localhost:5432/memro
@@ -212,6 +212,6 @@ echo "✅ DATA LOADING COMPLETE"
 echo "=================================="
 echo ""
 echo "Next step: Run benchmarks"
-echo "  cd memro-benchmark/"
+echo "  cd bench/"
 echo "  python3 run_supermemory_benchmarks.py"
 echo ""

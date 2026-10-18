@@ -9,10 +9,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/memrohq/memro/backend/internal/domain"
-	"github.com/memrohq/memro/backend/internal/engine"
-	"github.com/memrohq/memro/backend/internal/extract"
-	"github.com/memrohq/memro/backend/internal/metrics"
+	"github.com/memrohq/memro/server/internal/domain"
+	"github.com/memrohq/memro/server/internal/engine"
+	"github.com/memrohq/memro/server/internal/extract"
+	"github.com/memrohq/memro/server/internal/metrics"
 )
 
 // queryAgent returns the agent_id query parameter, defaulting to the caller.

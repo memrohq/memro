@@ -1,4 +1,4 @@
-module github.com/memrohq/memro/backend
+module github.com/memrohq/memro/server
 
 go 1.26.0
 

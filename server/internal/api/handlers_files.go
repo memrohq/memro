@@ -15,9 +15,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/memrohq/memro/backend/internal/domain"
-	"github.com/memrohq/memro/backend/internal/extract"
-	"github.com/memrohq/memro/backend/internal/store"
+	"github.com/memrohq/memro/server/internal/domain"
+	"github.com/memrohq/memro/server/internal/extract"
+	"github.com/memrohq/memro/server/internal/store"
 )
 
 const docChunkRunes = 1500

@@ -72,7 +72,7 @@ aws ecr get-login-password --region us-east-1 | \
 
 ```bash
 # Build backend image
-cd backend
+cd server
 docker build -t memro/backend .
 
 # Tag and push
@@ -323,5 +323,5 @@ aws ecs execute-command \
 
 ## Support
 
-- GitHub Issues: https://github.com/memro-co/memro/issues
+- GitHub Issues: https://github.com/memrohq/memro/issues
 - Discord: https://discord.gg/memro

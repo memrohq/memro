@@ -26,7 +26,7 @@ def check_database_connection():
     except Exception as e:
         print(f"\n❌ Cannot connect to PostgreSQL: {e}")
         print("\nStart PostgreSQL first:")
-        print("  cd memro-core/")
+        print("  cd memro/")
         print("  docker-compose up -d postgres qdrant")
         return False
 

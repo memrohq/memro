@@ -15,7 +15,7 @@ import numpy as np
 try:
     from memro import Agent, MemroClient
 except ImportError:
-    raise ImportError("memro SDK not installed. Run: pip install memro-sdk-python")
+    raise ImportError("memro SDK not installed. Run: pip install memro")
 
 
 class MemroExistingDataBenchmark:

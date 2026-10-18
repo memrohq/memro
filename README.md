@@ -36,7 +36,7 @@ memro.co is the **cognitive runtime for persistent AI agents**. It provides:
 
 ```bash
 # Clone the repository
-git clone https://github.com/memro-co/memro.git
+git clone https://github.com/memrohq/memro.git
 cd memro
 
 # Copy environment template
@@ -78,7 +78,7 @@ curl http://localhost:8081/health
 
 ### Components
 
-- **Backend**: Go API server (`backend/cmd/memro-api`)
+- **Backend**: Go API server (`server/cmd/memro-api`)
 - **Database**: PostgreSQL with pgvector (identities, memories, knowledge graph and embeddings in one database)
 - **Frontend**: React explorer (optional, for debugging)
 
@@ -237,7 +237,7 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md).
 ```bash
 # Backend (Go 1.26+): start Postgres, then run the API
 docker compose up -d db
-cd backend
+cd server
 DATABASE_URL=postgres://memro:memro@localhost:5432/memro go run ./cmd/memro-api
 
 # Tests (integration tests use the same database)
@@ -260,7 +260,7 @@ MIT License - see [LICENSE](LICENSE)
 ## Support
 
 - **Documentation**: [docs.memro.co](https://docs.memro.co)
-- **GitHub Issues**: [github.com/memro-co/memro/issues](https://github.com/memro-co/memro/issues)
+- **GitHub Issues**: [github.com/memrohq/memro/issues](https://github.com/memrohq/memro/issues)
 - **Discord**: [discord.gg/memro](https://discord.gg/memro)
 - **Email**: support@memro.co
 
@@ -285,4 +285,3 @@ MIT License - see [LICENSE](LICENSE)
 Just like you wouldn't build your own database, you shouldn't build agent memory from scratch.
 
 Self-host it. Trust it. Scale it.
-# memro-core

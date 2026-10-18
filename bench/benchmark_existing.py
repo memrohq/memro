@@ -16,7 +16,7 @@ from pathlib import Path
 try:
     from memro import Agent, MemroClient
 except ImportError:
-    print("❌ memro SDK not found. Install with: pip install -e memro-sdk-python")
+    print("❌ memro SDK not found. Install with: pip install -e sdk/python")
     sys.exit(1)
 
 class ExistingDataEvaluator:

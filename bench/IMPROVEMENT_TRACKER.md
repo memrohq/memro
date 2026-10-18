@@ -495,7 +495,7 @@ python compare_benchmarks.py baseline_p0.txt results_p3.json --output final_resu
 
 ### Baseline (Already Captured)
 ```bash
-cd memro-benchmark
+cd bench
 python run_benchmarks.py \
   --base_url http://localhost:8081 \
   --agent_id ab7a24f744520625fb44fda13e3c5e7704cd80e15806cf4b1eada850fc9d79ca \

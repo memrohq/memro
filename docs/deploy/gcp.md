@@ -93,7 +93,7 @@ gcloud sql instances describe memro-db \
 gcloud auth configure-docker
 
 # Build backend
-cd backend
+cd server
 docker build -t gcr.io/$PROJECT_ID/memro-backend .
 
 # Push to Container Registry
@@ -308,7 +308,7 @@ Create `cloudbuild.yaml`:
 steps:
   # Build backend
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/memro-backend', './backend']
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/memro-backend', './server']
   
   # Push to Container Registry
   - name: 'gcr.io/cloud-builders/docker'
@@ -375,5 +375,5 @@ gcloud run services update memro-backend \
 
 ## Support
 
-- GitHub Issues: https://github.com/memro-co/memro/issues
+- GitHub Issues: https://github.com/memrohq/memro/issues
 - Discord: https://discord.gg/memro

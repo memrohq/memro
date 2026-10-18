@@ -10,9 +10,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/memrohq/memro/backend/internal/embed"
-	"github.com/memrohq/memro/backend/internal/metrics"
-	"github.com/memrohq/memro/backend/internal/store"
+	"github.com/memrohq/memro/server/internal/embed"
+	"github.com/memrohq/memro/server/internal/metrics"
+	"github.com/memrohq/memro/server/internal/store"
 )
 
 const (

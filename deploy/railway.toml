@@ -1,6 +1,6 @@
 [build]
 builder = "dockerfile"
-dockerfilePath = "memro-core/backend/Dockerfile"
+dockerfilePath = "server/Dockerfile"
 
 [deploy]
 startCommand = "memro-api"

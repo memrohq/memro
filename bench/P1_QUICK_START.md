@@ -10,10 +10,10 @@
 
 ```bash
 # Activate venv (if not already done)
-source /Users/freya/Documents/work/hackit/memrohq/.venv/bin/activate
+source .venv/bin/activate
 
 # Navigate to benchmark directory
-cd /Users/freya/Documents/work/hackit/memrohq/memro-benchmark
+cd bench
 
 # Verify Docker containers running
 docker ps | grep memro  # Should show: backend, postgres, qdrant, neo4j, frontend-developer
@@ -25,7 +25,7 @@ docker ps | grep memro  # Should show: backend, postgres, qdrant, neo4j, fronten
 
 ### Step 1: Backend Implementation
 
-Edit `/Users/freya/Documents/work/hackit/memrohq/memro-core/backend/src/search/hybrid.rs`
+Edit `server/src/search/hybrid.rs`
 
 **Add PostgreSQL FTS Index:**
 ```sql
@@ -69,7 +69,7 @@ async fn search_hybrid(
 
 ### Step 3: Python SDK Update
 
-Edit `memro-sdk-python/memro.py`:
+Edit `sdk/python/src/memro/`:
 ```python
 def recall(self, query: str, use_hybrid: bool = False, **kwargs) -> List[Memory]:
     if use_hybrid:
@@ -209,8 +209,8 @@ cat IMPROVEMENT_TRACKER.md
 
 ```bash
 # Confirm environment
-source /Users/freya/Documents/work/hackit/memrohq/.venv/bin/activate
-cd /Users/freya/Documents/work/hackit/memrohq/memro-benchmark
+source .venv/bin/activate
+cd bench
 
 # Verify baseline exists
 ls -la benchmark_report.json

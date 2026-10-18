@@ -17,7 +17,7 @@ Benchmarks **require** these services to be operational:
 ### Option 1: Using Docker Compose (Recommended)
 
 ```bash
-cd memro-core/
+cd memro/
 
 # Start all services
 docker-compose up -d
@@ -63,7 +63,7 @@ sleep 5
 
 #### 3. Run Database Migrations
 ```bash
-cd memro-core/backend/
+cd server/
 
 # Set environment
 export DATABASE_URL=postgresql://memro:memro@localhost:5432/memro
@@ -74,7 +74,7 @@ sqlx migrate run
 
 #### 4. Start Memro Backend
 ```bash
-cd memro-core/backend/
+cd server/
 
 # Development mode (faster to build)
 cargo run
@@ -112,7 +112,7 @@ Once all services are running:
 
 ### Option 1: Quick Start Script (Automated)
 ```bash
-cd memro-benchmark/
+cd bench/
 chmod +x quickstart.sh
 ./quickstart.sh
 ```
@@ -120,7 +120,7 @@ chmod +x quickstart.sh
 ### Option 2: Manual Benchmark Execution
 
 ```bash
-cd memro-benchmark/
+cd bench/
 
 # Set Python environment
 source ../.venv/bin/activate
@@ -143,7 +143,7 @@ python3 supermemory_scale_benchmark.py \
 
 ### Option 3: Comprehensive Benchmark Suite
 ```bash
-cd memro-benchmark/
+cd bench/
 python3 run_supermemory_benchmarks.py
 ```
 
@@ -153,7 +153,7 @@ python3 run_supermemory_benchmarks.py
 
 ### "Connection refused" on 8081
 - Memro backend not running
-- Solution: `cd memro-core/backend && cargo run --release`
+- Solution: `cd server && cargo run --release`
 - Wait 30-60 seconds for Rust compilation and startup
 
 ### "Connection refused" on 6334 (Qdrant)
@@ -166,7 +166,7 @@ python3 run_supermemory_benchmarks.py
 
 ### Migrations failed
 - Database not initialized
-- Solution: `sqlx migrate run` in `memro-core/backend/`
+- Solution: `sqlx migrate run` in `server/`
 
 ### "Table memro does not exist"
 - Migrations haven't run

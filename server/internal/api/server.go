@@ -21,14 +21,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/memrohq/memro/backend/internal/auth"
-	"github.com/memrohq/memro/backend/internal/config"
-	"github.com/memrohq/memro/backend/internal/email"
-	"github.com/memrohq/memro/backend/internal/embed"
-	"github.com/memrohq/memro/backend/internal/engine"
-	"github.com/memrohq/memro/backend/internal/filestore"
-	"github.com/memrohq/memro/backend/internal/metrics"
-	"github.com/memrohq/memro/backend/internal/store"
+	"github.com/memrohq/memro/server/internal/auth"
+	"github.com/memrohq/memro/server/internal/config"
+	"github.com/memrohq/memro/server/internal/email"
+	"github.com/memrohq/memro/server/internal/embed"
+	"github.com/memrohq/memro/server/internal/engine"
+	"github.com/memrohq/memro/server/internal/filestore"
+	"github.com/memrohq/memro/server/internal/metrics"
+	"github.com/memrohq/memro/server/internal/store"
 )
 
 type Server struct {

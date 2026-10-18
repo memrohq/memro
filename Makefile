@@ -21,11 +21,11 @@ backend: setup
 dev: setup
 	@echo "🐹 Starting database, then the Go backend natively..."
 	docker compose up -d db
-	cd backend && DATABASE_URL=postgres://memro:memro@localhost:5432/memro go run ./cmd/memro-api
+	cd server && DATABASE_URL=postgres://memro:memro@localhost:5432/memro go run ./cmd/memro-api
 
 # Run backend tests (integration tests need the db service running)
 test:
-	cd backend && MEMRO_TEST_DATABASE_URL=postgres://memro:memro@localhost:5432/memro go test -race ./...
+	cd server && MEMRO_TEST_DATABASE_URL=postgres://memro:memro@localhost:5432/memro go test -race ./...
 
 # Run only the frontend components
 frontend: setup

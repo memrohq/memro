@@ -199,7 +199,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       memro:
-        image: memrohq/memro-core:latest
+        image: ghcr.io/memrohq/memro:latest
         ports:
           - 8081:8081
     steps:
@@ -207,9 +207,9 @@ jobs:
       - uses: actions/setup-python@v2
         with:
           python-version: '3.11'
-      - run: pip install -r memro-benchmark/requirements.txt
+      - run: pip install -r bench/requirements.txt
       - run: |
-          cd memro-benchmark
+          cd bench
           python run_benchmarks.py --quick
           python scripts/compare_results.py
 ```
@@ -312,7 +312,7 @@ Error: Connection refused at http://localhost:8081
 
 **Solution:** Ensure Memro backend is running:
 ```bash
-cd memro-core
+cd memro
 cargo run --release
 ```
 

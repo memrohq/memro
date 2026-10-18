@@ -1,6 +1,6 @@
 # Go
 *.test
-backend/memro-api
+server/memro-api
 
 # Node.js
 node_modules/

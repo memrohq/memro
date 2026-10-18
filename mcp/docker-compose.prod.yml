@@ -3,8 +3,8 @@ version: '3.8'
 services:
   mcp-server:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: mcp/Dockerfile
     ports:
       - "8085:8080"
     env_file:

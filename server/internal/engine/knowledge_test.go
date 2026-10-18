@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/memrohq/memro/backend/internal/domain"
+	"github.com/memrohq/memro/server/internal/domain"
 )
 
 func TestClassify(t *testing.T) {

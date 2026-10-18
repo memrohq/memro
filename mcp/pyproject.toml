@@ -31,4 +31,4 @@ where = ["src"]
 
 [project.urls]
 Homepage = "https://memro.co"
-Repository = "https://github.com/memro-co/memro-mcp"
+Repository = "https://github.com/memrohq/memro/tree/main/mcp"

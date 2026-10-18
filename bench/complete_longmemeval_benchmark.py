@@ -287,7 +287,7 @@ Provide brief reasoning for your score.
 def main():
     import sys
 
-    dataset_path = "../data/eval/longmemeval_s.json"  # Relative to memro-benchmark folder
+    dataset_path = "../data/eval/longmemeval_s.json"  # Relative to the bench folder
     batch_size = 25
     limit = None
 

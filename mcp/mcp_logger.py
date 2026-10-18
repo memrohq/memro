@@ -2,7 +2,7 @@ import sys
 import json
 import os
 
-LOG_FILE = "/Users/freya/Documents/work/hackit/memrohq/mcp_traffic.log"
+LOG_FILE = os.environ.get("MCP_LOG_FILE", "mcp_traffic.log")
 
 def log(direction, data):
     try:
@@ -15,7 +15,7 @@ def log(direction, data):
 import subprocess
 env = os.environ.copy()
 # Ensure we use the correct python
-cmd = ["/Users/freya/Documents/work/hackit/memrohq/.venv/bin/python", "/Users/freya/Documents/work/hackit/memrohq/memro-mcp/src/memro_mcp/server.py"]
+cmd = [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src", "memro_mcp", "server.py")]
 
 proc = subprocess.Popen(
     cmd,

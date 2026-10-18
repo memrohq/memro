@@ -22,7 +22,7 @@ from pathlib import Path
 try:
     from memro import Agent, MemroClient
 except ImportError:
-    raise ImportError("memro SDK not installed. Run: pip install memro-sdk-python")
+    raise ImportError("memro SDK not installed. Run: pip install memro")
 
 
 class SupermemoryStyleBenchmark:

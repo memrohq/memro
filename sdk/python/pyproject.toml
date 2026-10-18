@@ -49,8 +49,8 @@ dev = [
 [project.urls]
 Homepage = "https://memro.co"
 Documentation = "https://docs.memro.co/sdk/python"
-Repository = "https://github.com/memro-co/memro-sdk-python"
-Issues = "https://github.com/memro-co/memro-sdk-python/issues"
+Repository = "https://github.com/memrohq/memro/tree/main/sdk/python"
+Issues = "https://github.com/memrohq/memro/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

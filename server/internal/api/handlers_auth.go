@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/memrohq/memro/backend/internal/auth"
-	"github.com/memrohq/memro/backend/internal/domain"
+	"github.com/memrohq/memro/server/internal/auth"
+	"github.com/memrohq/memro/server/internal/domain"
 )
 
 const (

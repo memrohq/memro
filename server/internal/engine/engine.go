@@ -17,9 +17,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 
-	"github.com/memrohq/memro/backend/internal/domain"
-	"github.com/memrohq/memro/backend/internal/embed"
-	"github.com/memrohq/memro/backend/internal/metrics"
+	"github.com/memrohq/memro/server/internal/domain"
+	"github.com/memrohq/memro/server/internal/embed"
+	"github.com/memrohq/memro/server/internal/metrics"
 )
 
 var ErrNotFound = errors.New("not found")

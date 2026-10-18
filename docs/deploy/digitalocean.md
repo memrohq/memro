@@ -80,7 +80,7 @@ docker compose version
 
 ```bash
 # Clone repository
-git clone https://github.com/memro-co/memro.git
+git clone https://github.com/memrohq/memro.git
 cd memro
 
 # Create .env file
@@ -238,5 +238,5 @@ swapon /swapfile
 
 ## Support
 
-- GitHub Issues: https://github.com/memro-co/memro/issues
+- GitHub Issues: https://github.com/memrohq/memro/issues
 - Discord: https://discord.gg/memro

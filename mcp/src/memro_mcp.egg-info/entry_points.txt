@@ -1,2 +1,0 @@
-[console_scripts]
-memro-mcp = memro_mcp:main

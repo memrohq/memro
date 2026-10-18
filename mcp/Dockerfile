@@ -4,15 +4,16 @@ FROM python:3.11-slim
 # Set the working directory
 WORKDIR /app
 
-# 1. Install the vendored Memro SDK
-# We copy it into a temporary location in the container
-COPY vendor/memro-sdk-python ./sdk
+# Build from the repository root: docker build -f mcp/Dockerfile .
+
+# 1. Install the Memro Python SDK from this monorepo
+COPY sdk/python ./sdk
 RUN pip install --no-cache-dir ./sdk
 
 # 2. Copy the MCP server source
-COPY pyproject.toml .
-COPY README.md .
-COPY src ./src
+COPY mcp/pyproject.toml .
+COPY mcp/README.md .
+COPY mcp/src ./src
 
 # Install the MCP server
 RUN pip install --no-cache-dir .

@@ -32,10 +32,11 @@
     "license": "MIT",
     "repository": {
         "type": "git",
-        "url": "https://github.com/memro-co/memro-sdk-js"
+        "url": "https://github.com/memrohq/memro",
+        "directory": "sdk/js"
     },
     "bugs": {
-        "url": "https://github.com/memro-co/memro-sdk-js/issues"
+        "url": "https://github.com/memrohq/memro/issues"
     },
     "homepage": "https://memro.co",
     "dependencies": {

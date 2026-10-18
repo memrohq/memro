@@ -10,8 +10,8 @@ pip install memro
 
 **From source:**
 ```bash
-git clone https://github.com/memro-co/memro-sdk-python
-cd memro-sdk-python
+git clone https://github.com/memrohq/memro
+cd memro/sdk/python
 pip install -e .
 ```
 
@@ -214,8 +214,8 @@ deploy_steps = agent.recall("how to deploy", type="procedural")
 
 ```bash
 # Clone repository
-git clone https://github.com/memro-co/memro-sdk-python
-cd memro-sdk-python
+git clone https://github.com/memrohq/memro
+cd memro/sdk/python
 
 # Install dependencies
 pip install -e ".[dev]"
@@ -245,8 +245,8 @@ MIT License - see LICENSE file
 ## Links
 
 - **Documentation**: https://docs.memro.co/sdk/python
-- **Protocol Spec**: https://github.com/memro-co/memro-spec
-- **Issues**: https://github.com/memro-co/memro-sdk-python/issues
+- **Protocol Spec**: https://github.com/memrohq/memro/tree/main/docs/spec
+- **Issues**: https://github.com/memrohq/memro/issues
 - **PyPI**: https://pypi.org/project/memro/
 
 ## Contributing

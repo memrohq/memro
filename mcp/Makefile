@@ -5,7 +5,7 @@
 # Default: Build the docker image
 build:
 	@echo "🐳 Building portable memro-mcp docker image..."
-	docker build -t memro-mcp .
+	docker build -t memro-mcp -f Dockerfile ..
 
 # Run in SSE (Cloud) mode via Docker
 run-sse:
@@ -25,7 +25,7 @@ local-sse:
 # Clean up build artifacts
 clean:
 	@echo "🧹 Cleaning up..."
-	rm -rf vendor/ memro_mcp.egg-info/ build/ dist/
+	rm -rf src/memro_mcp.egg-info/ build/ dist/
 
 help:
 	@echo "Usage:"

@@ -9,7 +9,7 @@ echo "🚀 MEMRO BENCHMARK QUICK START"
 echo "=================================="
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Color codes
 RED='\033[0;31m'
@@ -110,7 +110,7 @@ echo "=================================="
 
 if [ "$QDRANT_RUNNING" = false ]; then
     print_warning "Starting Qdrant..."
-    cd "$PROJECT_ROOT/memro-core"
+    cd "$PROJECT_ROOT"
     
     # Check if docker-compose.yml exists
     if [ -f "docker-compose.yml" ]; then
@@ -130,11 +130,11 @@ if [ "$MEMRO_RUNNING" = false ]; then
     print_warning "Memro API not running"
     echo ""
     echo "To start Memro backend:"
-    echo "  cd $PROJECT_ROOT/memro-core/backend"
+    echo "  cd $PROJECT_ROOT/server"
     echo "  cargo run --release"
     echo ""
     echo "Or if running test environment:"
-    echo "  cd $PROJECT_ROOT/memro-core"
+    echo "  cd $PROJECT_ROOT"
     echo "  docker-compose up memro-backend"
     echo ""
     print_error "Please start Memro backend and run this script again"

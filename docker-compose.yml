@@ -1,7 +1,7 @@
 services:
   backend:
     build:
-      context: ./backend
+      context: ./server
     ports:
       - "8081:8081"
     env_file:
@@ -39,7 +39,7 @@ services:
 
   frontend:
     build:
-      context: ./frontend
+      context: ./apps/dashboard
     ports:
       - "5173:80"
     depends_on:

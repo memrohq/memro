@@ -5,7 +5,7 @@ Official Go SDK for the memro protocol — AI agent memory infrastructure.
 ## Installation
 
 ```bash
-go get github.com/memrohq/memro-sdk-go
+go get github.com/memrohq/memro/sdk/go
 ```
 
 ## Quick Start
@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"log"
 
-	memro "github.com/memrohq/memro-sdk-go"
+	memro "github.com/memrohq/memro/sdk/go"
 )
 
 func main() {

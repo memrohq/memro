@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 
-	"github.com/memrohq/memro/backend/internal/domain"
+	"github.com/memrohq/memro/server/internal/domain"
 )
 
 type Store struct {

@@ -212,7 +212,7 @@ def main():
         print("\n🎉 All validation tests passed!")
         print("🚀 Ready to run full LongMemEval_S benchmark")
         print("   Next steps:")
-        print("   1. Ensure memro-core backend is running")
+        print("   1. Ensure the Memro server is running")
         print("   2. Run: python3 efficient_longmemeval.py")
         print("   3. For full 500 questions: python3 efficient_longmemeval.py 500")
     else:

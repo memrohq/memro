@@ -215,8 +215,8 @@ See [examples/](./examples/) directory for complete examples:
 
 ```bash
 # Clone repository
-git clone https://github.com/memro-co/memro-sdk-js
-cd memro-sdk-js
+git clone https://github.com/memrohq/memro
+cd memro/sdk/js
 
 # Install dependencies
 npm install
@@ -261,8 +261,8 @@ MIT License - see LICENSE file
 ## Links
 
 - **Documentation**: https://docs.memro.co/sdk/javascript
-- **Protocol Spec**: https://github.com/memro-co/memro-spec
-- **Issues**: https://github.com/memro-co/memro-sdk-js/issues
+- **Protocol Spec**: https://github.com/memrohq/memro/tree/main/docs/spec
+- **Issues**: https://github.com/memrohq/memro/issues
 - **npm**: https://www.npmjs.com/package/@memro/sdk
 
 ## Contributing
