@@ -4,7 +4,7 @@
 
 Open-source memory infrastructure that gives AI agents continuity of self. Install with Docker, scale with managed cloud.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
 
 ---
@@ -253,7 +253,7 @@ npm run dev
 
 ## License
 
-MIT License - see [LICENSE](LICENSE)
+Apache License 2.0 - see [LICENSE](LICENSE)
 
 ---
 

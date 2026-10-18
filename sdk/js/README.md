@@ -256,7 +256,7 @@ The SDK works in modern browsers with ES6+ support:
 
 ## License
 
-MIT License - see LICENSE file
+Apache License 2.0 - see [LICENSE](../../LICENSE)
 
 ## Links
 

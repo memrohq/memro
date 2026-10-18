@@ -4,6 +4,12 @@
   "description": "VS Code extension for Memro MCP integration",
   "version": "0.0.1",
   "publisher": "memro",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/memrohq/memro",
+    "directory": "integrations/vscode"
+  },
   "icon": "resources/icon-full.png",
   "engines": {
     "vscode": "^1.85.0"
