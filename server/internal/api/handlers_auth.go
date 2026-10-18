@@ -120,7 +120,7 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := map[string]any{"token": token, "user_id": user.ID.String(), "agent_id": nil, "private_key": nil}
+	resp := map[string]any{"token": token, "user_id": user.ID.String(), "agent_id": nil}
 	existing, err := s.store.GetIdentityByUser(ctx, user.ID)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "Database error")
@@ -129,8 +129,11 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 	if existing != nil {
 		resp["agent_id"] = existing.ID
 	} else {
-		// The private key is returned once and never stored on the server.
-		pub, seed, err := auth.GenerateKeyPair()
+		// Dashboard accounts act through their session and API keys, so the
+		// agent's private key is not needed by anyone: it is discarded rather
+		// than handed to the browser. SDK users who want ed25519 signing create
+		// their own identity locally (POST /identity with a public key).
+		pub, _, err := auth.GenerateKeyPair()
 		if err != nil {
 			httpError(w, http.StatusInternalServerError, "Failed to create agent identity")
 			return
@@ -140,7 +143,7 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 			httpError(w, http.StatusInternalServerError, "Failed to create agent identity")
 			return
 		}
-		resp["agent_id"], resp["private_key"] = pub, seed
+		resp["agent_id"] = pub
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

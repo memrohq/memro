@@ -641,3 +641,38 @@ func TestDeviceLoginAndAPIKeys(t *testing.T) {
 		t.Fatalf("create key: %s", body)
 	}
 }
+
+// Signing in creates an agent but never hands its private key to the browser;
+// the session alone is enough to use it.
+func TestSignInDoesNotReturnPrivateKey(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	email := fmt.Sprintf("nokey-%d@example.com", time.Now().UnixNano())
+	if err := e.st.EnsureUser(ctx, email, uuid.Nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.SetUserOTP(ctx, email, uuid.Nil, auth.HashOTP(email, "123456"), time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	code, body := e.do(nil, "", "POST", "/auth/verify", j(map[string]string{"email": email, "code": "123456"}), nil)
+	e.must(200, code, body, "verify")
+	if strings.Contains(string(body), "private_key") {
+		t.Fatalf("verify returned a private key: %s", body)
+	}
+	var res struct {
+		Token   string `json:"token"`
+		AgentID string `json:"agent_id"`
+	}
+	_ = json.Unmarshal(body, &res)
+	if res.AgentID == "" {
+		t.Fatalf("no agent created: %s", body)
+	}
+	bearer := map[string]string{"Authorization": "Bearer " + res.Token}
+	code, body = e.do(nil, "", "GET", "/auth/whoami", nil, bearer)
+	e.must(200, code, body, "whoami")
+	if !strings.Contains(string(body), res.AgentID) {
+		t.Fatalf("whoami: %s", body)
+	}
+	code, body = e.do(nil, "", "POST", "/memory", j(map[string]any{"content": "saved with a session"}), bearer)
+	e.must(200, code, body, "memory via session")
+}

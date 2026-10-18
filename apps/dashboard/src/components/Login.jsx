@@ -29,7 +29,7 @@ export default function Login({ apiBaseUrl, onLoginSuccess }) {
     setLoading(true);
     try {
       const data = await api(apiBaseUrl, "/auth/verify", { method: "POST", json: { email: email.trim(), code: code.trim() } });
-      onLoginSuccess(data.token, data.agent_id, data.private_key, data.user_id, email.trim());
+      onLoginSuccess(data.token, data.agent_id, data.user_id, email.trim());
     } catch (err) {
       setError(err.status ? err.message : "Couldn't reach the Memro API.");
     } finally {

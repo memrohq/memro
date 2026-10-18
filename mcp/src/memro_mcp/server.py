@@ -189,6 +189,15 @@ from memro_mcp.supermemory_tools import get_supermemory_tools
 
 @server.list_tools()
 async def list_tools() -> list[Tool]:
+    # Clients reject duplicate tool names; the core definitions win over the
+    # supermemory-compatible set, which repeats remember_with_context.
+    unique: dict[str, Tool] = {}
+    for tool in _all_tools():
+        unique.setdefault(tool.name, tool)
+    return list(unique.values())
+
+
+def _all_tools() -> list[Tool]:
     logger.info("Listing tools for client")
     return [
         Tool(

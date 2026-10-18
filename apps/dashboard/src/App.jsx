@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Login from "./components/Login";
 import { Icon, Logo, Modal, Field, StatusPill } from "./components/ui";
-import { api, fromHex, newKeypair } from "./lib/api";
+import { api } from "./lib/api";
 import Overview from "./views/Overview";
 import Memories from "./views/Memories";
 import Search from "./views/Search";
 import Agent from "./views/Agent";
 import Activity from "./views/Activity";
 import Settings from "./views/Settings";
+import Connect from "./views/Connect";
+import Keys from "./views/Keys";
 
 const store = {
   get: (k) => localStorage.getItem(k),
@@ -20,8 +22,12 @@ const NAV = [
     { id: "memories", label: "Memories", icon: "stacks" },
     { id: "search", label: "Search", icon: "search" },
   ] },
-  { group: "Agent", items: [
-    { id: "agent", label: "Identity & data", icon: "key" },
+  { group: "Connect", items: [
+    { id: "connect", label: "Connect tools", icon: "cable" },
+    { id: "keys", label: "API keys", icon: "vpn_key" },
+  ] },
+  { group: "Account", items: [
+    { id: "agent", label: "Account", icon: "person" },
     { id: "activity", label: "Activity", icon: "history" },
   ] },
   { group: "Settings", items: [
@@ -30,14 +36,18 @@ const NAV = [
 ];
 const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items.map((i) => [i.id, i.label])));
 
+// `npx memro connect` opens /connect?code=XXXX-XXXX.
+const initialConnectCode = () =>
+  window.location.pathname.startsWith("/connect") ? new URLSearchParams(window.location.search).get("code") : null;
+
 export default function App() {
   const [sessionToken, setSessionToken] = useState(() => store.get("memro_session_token"));
   const [apiBase, setApiBase] = useState(() => store.get("memro_api_base") || import.meta.env.VITE_API_BASE_URL || "/api");
-  const [agentId, setAgentId] = useState(() => store.get("memro_did") || "NOT_INITIALIZED");
-  const [privateKey, setPrivateKey] = useState(() => store.get("memro_pk"));
+  const [agentId, setAgentId] = useState(() => store.get("memro_did"));
   const [email, setEmail] = useState(() => store.get("memro_email"));
+  const [connectCode, setConnectCode] = useState(initialConnectCode);
 
-  const [view, setView] = useState("overview");
+  const [view, setView] = useState(() => (window.location.pathname.startsWith("/connect") ? "connect" : "overview"));
   const [navOpen, setNavOpen] = useState(false);
   const [health, setHealth] = useState({});
   const [memories, setMemories] = useState([]);
@@ -52,8 +62,8 @@ export default function App() {
   const [searchSeed, setSearchSeed] = useState("");
   const searchRef = useRef(null);
 
-  const auth = { agentId, privateKey, sessionToken };
-  const initialized = agentId && agentId !== "NOT_INITIALIZED";
+  const auth = { sessionToken };
+  const initialized = !!agentId;
 
   const notify = useCallback((title, detail = "", error = false) => {
     setEvents((prev) => [{ id: crypto.randomUUID(), at: new Date().toISOString(), title, detail, error }, ...prev].slice(0, 200));
@@ -71,7 +81,7 @@ export default function App() {
       try { await api(apiBase, "/auth/logout", { method: "DELETE", auth: { sessionToken } }); } catch { /* best effort */ }
     }
     ["memro_session_token", "memro_did", "memro_pk", "memro_email"].forEach((k) => store.set(k, null));
-    setSessionToken(null); setAgentId("NOT_INITIALIZED"); setPrivateKey(null); setEmail(null);
+    setSessionToken(null); setAgentId(null); setEmail(null);
     setMemories([]); setStats(null); setUsage(null); setView("overview");
   }, [apiBase, sessionToken]);
 
@@ -91,6 +101,17 @@ export default function App() {
     return () => { alive = false; clearInterval(id); };
   }, [apiBase]);
 
+  // Older dashboards kept the agent's private key in localStorage; drop it.
+  useEffect(() => { store.set("memro_pk", null); }, []);
+
+  // The session says which agent it acts as.
+  useEffect(() => {
+    if (!sessionToken || agentId) return;
+    api(apiBase, "/auth/whoami", { auth: { sessionToken } })
+      .then((who) => { store.set("memro_did", who.agent_id); setAgentId(who.agent_id); })
+      .catch((err) => { if (err.status === 401) signOut(); });
+  }, [apiBase, sessionToken, agentId, signOut]);
+
   const load = useCallback(async () => {
     if (!sessionToken || !initialized) return;
     try {
@@ -109,7 +130,7 @@ export default function App() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, agentId, sessionToken, privateKey]);
+  }, [apiBase, agentId, sessionToken]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -122,7 +143,10 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const go = (id) => { setView(id); setNavOpen(false); };
+  const go = (id) => {
+    setView(id); setNavOpen(false);
+    if (id !== "connect" && window.location.pathname !== "/") { setConnectCode(null); window.history.replaceState(null, "", "/"); }
+  };
 
   const addMemory = async (e) => {
     e.preventDefault();
@@ -193,29 +217,6 @@ export default function App() {
     }
   };
 
-  const generate = async () => {
-    setBusy(true);
-    try {
-      const kp = newKeypair();
-      const res = await api(apiBase, "/identity", { method: "POST", json: { public_key: kp.publicKey } });
-      store.set("memro_did", res.agent_id); store.set("memro_pk", kp.privateKey);
-      setAgentId(res.agent_id); setPrivateKey(kp.privateKey);
-      notify("Identity created", res.agent_id.slice(0, 12));
-    } catch (err) {
-      notify("Couldn't create identity", err.message, true);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const restore = (id, key) => {
-    if (fromHex(id).length !== 32) return notify("Invalid agent ID", "Expected 64 hex characters.", true);
-    if (![32, 64].includes(fromHex(key).length)) return notify("Invalid private key", "Expected 64 or 128 hex characters.", true);
-    store.set("memro_did", id); store.set("memro_pk", key);
-    setAgentId(id); setPrivateKey(key);
-    notify("Identity restored", id.slice(0, 12));
-  };
-
   const copy = async (text, what) => {
     try { await navigator.clipboard.writeText(text); notify("Copied", what); }
     catch { notify("Copy failed", "Your browser blocked clipboard access.", true); }
@@ -231,10 +232,9 @@ export default function App() {
     return (
       <Login
         apiBaseUrl={apiBase}
-        onLoginSuccess={(token, id, key, _userId, mail) => {
+        onLoginSuccess={(token, id, _userId, mail) => {
           store.set("memro_session_token", token); store.set("memro_email", mail);
           if (id) { store.set("memro_did", id); setAgentId(id); }
-          if (key) { store.set("memro_pk", key); setPrivateKey(key); }
           setEmail(mail); setSessionToken(token);
         }}
       />
@@ -328,12 +328,12 @@ export default function App() {
 
           <main className="flex-1 overflow-y-auto scroll-thin">
             <div className="max-w-[1400px] mx-auto p-4 md:p-6">
-              {!initialized && view !== "agent" && view !== "settings" ? (
-                <div className="card p-8 max-w-xl">
-                  <h1 className="text-[20px] font-semibold">Set up your agent</h1>
-                  <p className="text-[13px] text-muted mt-2">This account has no agent identity in this browser yet. Create one or restore an existing key to start storing memories.</p>
-                  <button className="btn-primary mt-5" onClick={() => go("agent")}>Go to identity</button>
-                </div>
+              {view === "connect" ? (
+                <Connect apiBase={apiBase} auth={auth} code={connectCode} onDone={() => go("overview")} onCopy={copy} notify={notify} />
+              ) : view === "keys" ? (
+                <Keys apiBase={apiBase} auth={auth} onCopy={copy} notify={notify} />
+              ) : !initialized && view !== "settings" ? (
+                <p className="text-[13px] text-muted">Loading your account…</p>
               ) : view === "overview" ? (
                 <Overview email={email} stats={stats} usage={usage} memories={memories} onOpenMemories={() => go("memories")} onAdd={() => setAddOpen(true)} onDelete={deleteMemory} />
               ) : view === "memories" ? (
@@ -341,7 +341,7 @@ export default function App() {
               ) : view === "search" ? (
                 <Search key={searchSeed} initialQuery={searchSeed} onSearch={search} />
               ) : view === "agent" ? (
-                <Agent agentId={agentId} privateKey={privateKey} email={email} onCopy={copy} onGenerate={generate} onRestore={restore} onExport={exportData} onSignOut={signOut} busy={busy} />
+                <Agent agentId={agentId} email={email} onCopy={copy} onExport={exportData} onSignOut={signOut} onOpenKeys={() => go("keys")} />
               ) : view === "activity" ? (
                 <Activity events={events} />
               ) : (

@@ -1,0 +1,14 @@
+{
+  "name": "memro",
+  "version": "0.1.0",
+  "description": "Connect Claude Code, Codex, Cursor, Antigravity, OpenCode and other AI tools to Memro memory with one command.",
+  "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://memro.co",
+  "repository": { "type": "git", "url": "git+https://github.com/memrohq/memro.git", "directory": "cli" },
+  "type": "module",
+  "bin": { "memro": "bin/memro.js" },
+  "files": ["bin", "src", "LICENSE", "README.md"],
+  "engines": { "node": ">=18" },
+  "scripts": { "test": "node --test test/*.test.js" },
+  "keywords": ["memro", "mcp", "memory", "claude-code", "codex", "cursor", "antigravity", "opencode", "ai-agents"]
+}
