@@ -1,7 +1,6 @@
-# Rust
-target/
-**/*.rs.bk
-Cargo.lock
+# Go
+*.test
+backend/memro-api
 
 # Node.js
 node_modules/
@@ -34,7 +33,6 @@ venv/
 
 # Docker / Local data
 data/
-cargo_cache/
 docker-compose.stage.yml
 docker-compose.prod.yml
 

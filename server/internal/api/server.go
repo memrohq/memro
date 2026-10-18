@@ -1,0 +1,444 @@
+// Package api is the HTTP layer: routing, middleware and handlers.
+package api
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"runtime/debug"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/memrohq/memro/backend/internal/auth"
+	"github.com/memrohq/memro/backend/internal/config"
+	"github.com/memrohq/memro/backend/internal/email"
+	"github.com/memrohq/memro/backend/internal/embed"
+	"github.com/memrohq/memro/backend/internal/engine"
+	"github.com/memrohq/memro/backend/internal/filestore"
+	"github.com/memrohq/memro/backend/internal/metrics"
+	"github.com/memrohq/memro/backend/internal/store"
+)
+
+type Server struct {
+	cfg     config.Config
+	store   *store.Store
+	engine  *engine.Engine
+	embed   *embed.Provider
+	indexer engine.Indexer
+	files   *filestore.Local
+	email   *email.Sender
+	replay  *auth.ReplayCache
+
+	ipLimiter    *RateLimiter
+	agentLimiter *RateLimiter
+	meeLimiters  map[string]*RateLimiter
+}
+
+type Deps struct {
+	Config  config.Config
+	Store   *store.Store
+	Engine  *engine.Engine
+	Embed   *embed.Provider
+	Indexer engine.Indexer
+	Files   *filestore.Local
+	Email   *email.Sender
+}
+
+func NewServer(d Deps) *Server {
+	return &Server{
+		cfg: d.Config, store: d.Store, engine: d.Engine, embed: d.Embed, indexer: d.Indexer,
+		files: d.Files, email: d.Email, replay: auth.NewReplayCache(),
+		ipLimiter:    NewRateLimiter(d.Config.RateLimitMax, d.Config.RateLimitWindow),
+		agentLimiter: NewRateLimiter(d.Config.RateLimitMax, d.Config.RateLimitWindow),
+		// Per-agent limits for the expensive cognitive endpoints.
+		meeLimiters: map[string]*RateLimiter{
+			"/mee/reason":  NewRateLimiter(20, time.Minute),
+			"/mee/evolve":  NewRateLimiter(5, time.Minute),
+			"/mee/resolve": NewRateLimiter(10, time.Minute),
+		},
+	}
+}
+
+// Handler returns the full HTTP handler with middleware applied.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	public := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, h) }
+	protected := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.requireAgent(h)) }
+
+	public("GET /health", s.health)
+	public("GET /metrics", promhttp.Handler().ServeHTTP)
+	public("GET /stats/cache", s.cacheStats)
+	public("POST /identity", s.createIdentity)
+	public("GET /identity/{id}", s.getIdentity)
+	public("GET /assets/{id}", s.getAsset)
+	public("POST /auth/login", s.login)
+	public("POST /auth/verify", s.verify)
+	public("DELETE /auth/logout", s.logout)
+
+	protected("DELETE /identity/{id}", s.deleteIdentity)
+	protected("POST /memory", s.createMemory)
+	protected("GET /memory/agent/{agent_id}", s.listMemories)
+	protected("DELETE /memory/{id}", s.deleteMemory)
+	protected("GET /memory/chain/{id}", s.memoryChain)
+	protected("POST /memory/generate-atoms", s.generateAtoms)
+	protected("POST /memory/from-file", s.memoryFromFile)
+	protected("GET /export/{agent_id}", s.export)
+	protected("POST /upload", s.upload)
+	protected("POST /upload/image", s.uploadImage)
+	protected("POST /upload/document", s.uploadDocument)
+	protected("GET /search", s.search)
+	protected("GET /search/temporal", s.searchTemporal)
+	protected("GET /stats/temporal", s.temporalStats)
+	protected("GET /analyze/conflicts", s.analyzeConflicts)
+	protected("POST /mee/reason", s.reason)
+	protected("POST /mee/resolve", s.resolve)
+	protected("POST /mee/evolve", s.evolve)
+	protected("GET /mee/timeline/{id}", s.timeline)
+	protected("GET /usage", s.usage)
+	protected("POST /tenant", s.createTenant)
+	protected("GET /tenant/{id}", s.getTenant)
+	protected("GET /tenant/{id}/usage", s.tenantUsage)
+	protected("POST /hooks", s.registerHook)
+	protected("GET /hooks/{event_type}", s.getHooks)
+
+	var h http.Handler = mux
+	h = s.limitBody(h)
+	h = s.rateLimitIP(h)
+	h = s.cors(h)
+	h = observe(h)
+	return recoverPanics(h)
+}
+
+// --- Request context ------------------------------------------------------------
+
+type Agent struct {
+	ID       string
+	UserID   *uuid.UUID
+	TenantID uuid.UUID
+}
+
+type ctxKey int
+
+const (
+	agentKey ctxKey = iota
+	bodyKey
+)
+
+func agentFrom(r *http.Request) Agent { return r.Context().Value(agentKey).(Agent) }
+
+// body returns the request body that auth already read and verified.
+func body(r *http.Request) []byte {
+	if b, ok := r.Context().Value(bodyKey).([]byte); ok {
+		return b
+	}
+	return nil
+}
+
+// --- Middleware -----------------------------------------------------------------
+
+func (s *Server) requireAgent(next http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		agent, raw, status, msg := s.authenticate(r)
+		if status != 0 {
+			httpError(w, status, msg)
+			return
+		}
+		key := agent.ID + ":" + r.URL.Path
+		if !s.agentLimiter.Allow(key) {
+			metrics.RateLimitHits.Inc()
+			httpError(w, http.StatusTooManyRequests, "Rate limit exceeded for this endpoint")
+			return
+		}
+		if l, ok := s.meeLimiters[r.URL.Path]; ok && !l.Allow(agent.ID) {
+			metrics.RateLimitHits.Inc()
+			httpError(w, http.StatusTooManyRequests, "Rate limit exceeded for this endpoint")
+			return
+		}
+		ctx := context.WithValue(r.Context(), agentKey, agent)
+		ctx = context.WithValue(ctx, bodyKey, raw)
+		r = r.WithContext(ctx)
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		next(w, r)
+	})
+}
+
+// authenticate accepts either a dashboard session (Authorization: Bearer) or
+// an ed25519-signed agent request (X-Agent-Id / X-Signature / X-Timestamp).
+func (s *Server) authenticate(r *http.Request) (Agent, []byte, int, string) {
+	ctx := r.Context()
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return Agent{}, nil, http.StatusRequestEntityTooLarge, "Request body too large or unreadable"
+	}
+
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		ses, err := s.store.GetSessionByTokenHash(ctx, auth.HashToken(strings.TrimPrefix(h, "Bearer ")))
+		if err != nil {
+			return Agent{}, nil, http.StatusInternalServerError, "Database error"
+		}
+		if ses == nil {
+			return Agent{}, nil, http.StatusUnauthorized, "Invalid session token"
+		}
+		if time.Now().After(ses.ExpiresAt) {
+			return Agent{}, nil, http.StatusUnauthorized, "Session expired"
+		}
+		id, err := s.store.GetIdentityByUser(ctx, ses.UserID)
+		if err != nil {
+			return Agent{}, nil, http.StatusInternalServerError, "Database error"
+		}
+		if id == nil {
+			return Agent{}, nil, http.StatusUnauthorized, "No agent associated with this user"
+		}
+		return Agent{ID: id.ID, UserID: id.UserID, TenantID: id.TenantID}, raw, 0, ""
+	}
+
+	agentID, sig, ts := r.Header.Get("X-Agent-Id"), r.Header.Get("X-Signature"), r.Header.Get("X-Timestamp")
+	if agentID == "" {
+		return Agent{}, nil, http.StatusUnauthorized, "Missing X-Agent-Id or Authorization header"
+	}
+	if sig == "" {
+		return Agent{}, nil, http.StatusUnauthorized, "Missing X-Signature header"
+	}
+	if ts == "" {
+		return Agent{}, nil, http.StatusUnauthorized, "Missing X-Timestamp header"
+	}
+	if err := auth.CheckTimestamp(ts, time.Now()); err != nil {
+		if errors.Is(err, auth.ErrExpired) {
+			return Agent{}, nil, http.StatusUnauthorized, "Request timestamp expired"
+		}
+		return Agent{}, nil, http.StatusUnauthorized, "Invalid X-Timestamp"
+	}
+	pub, err := auth.ParsePublicKey(agentID)
+	if err != nil {
+		return Agent{}, nil, http.StatusUnauthorized, "Invalid X-Agent-Id"
+	}
+	identity, err := s.store.GetIdentity(ctx, agentID)
+	if err != nil {
+		return Agent{}, nil, http.StatusInternalServerError, "Database error"
+	}
+	if identity == nil {
+		return Agent{}, nil, http.StatusUnauthorized, "Agent identity not registered"
+	}
+
+	switch r.Header.Get("X-Signature-Version") {
+	case "2":
+		payload := auth.PayloadV2(ts, r.Method, r.URL.RequestURI(), raw)
+		if auth.Verify(pub, payload, sig) != nil {
+			return Agent{}, nil, http.StatusUnauthorized, "Invalid signature"
+		}
+		if !s.replay.Use(sig, time.Now()) {
+			return Agent{}, nil, http.StatusUnauthorized, "Request already used"
+		}
+	case "", "1":
+		if !s.cfg.AllowLegacySignatures {
+			return Agent{}, nil, http.StatusUnauthorized, "Legacy signatures are disabled; send X-Signature-Version: 2"
+		}
+		if auth.Verify(pub, auth.PayloadV1(ts, raw), sig) != nil {
+			return Agent{}, nil, http.StatusUnauthorized, "Invalid signature"
+		}
+	default:
+		return Agent{}, nil, http.StatusUnauthorized, "Unsupported X-Signature-Version"
+	}
+	return Agent{ID: identity.ID, UserID: identity.UserID, TenantID: identity.TenantID}, raw, 0, ""
+}
+
+func (s *Server) rateLimitIP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" && r.URL.Path != "/metrics" && !s.ipLimiter.Allow(s.clientIP(r)) {
+			metrics.RateLimitHits.Inc()
+			httpError(w, http.StatusTooManyRequests, "Rate limit exceeded")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) limitBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodyBytes)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		h := w.Header()
+		switch {
+		case len(s.cfg.AllowedOrigins) == 0:
+			h.Set("Access-Control-Allow-Origin", "*")
+		case origin != "" && slices.Contains(s.cfg.AllowedOrigins, origin):
+			h.Set("Access-Control-Allow-Origin", origin)
+			h.Add("Vary", "Origin")
+		}
+		h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Agent-Id, X-Signature, X-Timestamp, X-Signature-Version")
+		h.Set("Access-Control-Max-Age", "600")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func observe(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(sw, r)
+		if sw.status == 0 {
+			sw.status = http.StatusOK
+		}
+		route := r.Pattern
+		if route == "" {
+			route = "unmatched"
+		}
+		code := strconv.Itoa(sw.status)
+		metrics.HTTPRequestSeconds.WithLabelValues(route, code).Observe(time.Since(start).Seconds())
+		if sw.status >= 400 {
+			metrics.HTTPErrors.WithLabelValues(code).Inc()
+		}
+		if r.URL.Path != "/health" && r.URL.Path != "/metrics" {
+			slog.Info("request", "method", r.Method, "path", r.URL.Path, "status", sw.status, "ms", time.Since(start).Milliseconds())
+		}
+	})
+}
+
+func recoverPanics(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if v := recover(); v != nil {
+				if v == http.ErrAbortHandler {
+					panic(v)
+				}
+				slog.Error("panic", "err", v, "stack", string(debug.Stack()))
+				httpError(w, http.StatusInternalServerError, "Internal server error")
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) clientIP(r *http.Request) string {
+	if s.cfg.TrustProxyHeaders {
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			first, _, _ := strings.Cut(fwd, ",")
+			return strings.TrimSpace(first)
+		}
+		if real := r.Header.Get("X-Real-Ip"); real != "" {
+			return real
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// --- Rate limiter ---------------------------------------------------------------
+
+// RateLimiter is a fixed-window counter per key.
+type RateLimiter struct {
+	mu     sync.Mutex
+	max    int
+	window time.Duration
+	hits   map[string]*window
+}
+
+type window struct {
+	start time.Time
+	count int
+}
+
+func NewRateLimiter(max int, w time.Duration) *RateLimiter {
+	return &RateLimiter{max: max, window: w, hits: map[string]*window{}}
+}
+
+func (l *RateLimiter) Allow(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := time.Now()
+	if len(l.hits) > 50_000 {
+		for k, w := range l.hits {
+			if now.Sub(w.start) >= l.window {
+				delete(l.hits, k)
+			}
+		}
+	}
+	w, ok := l.hits[key]
+	if !ok || now.Sub(w.start) >= l.window {
+		l.hits[key] = &window{start: now, count: 1}
+		return true
+	}
+	if w.count >= l.max {
+		return false
+	}
+	w.count++
+	return true
+}
+
+// --- Responses ------------------------------------------------------------------
+
+// httpError writes a plain-text error, matching the Rust backend's format.
+func httpError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, msg)
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func decodeJSON(raw []byte, v any) error {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return errors.New("empty request body")
+	}
+	if err := json.Unmarshal(raw, v); err != nil {
+		return fmt.Errorf("Invalid JSON: %w", err)
+	}
+	return nil
+}
+
+func readJSON(r *http.Request, v any) error {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return errors.New("request body too large or unreadable")
+	}
+	return decodeJSON(raw, v)
+}
+
+func strPtr(s string) *string { return &s }

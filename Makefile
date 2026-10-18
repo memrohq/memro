@@ -1,32 +1,36 @@
 # memro.co - Build & Execution Makefile
 
-.PHONY: setup local infra backend frontend down logs ps clean
+.PHONY: setup local infra backend dev test frontend down logs ps clean
 
 # Default: Start all services in the background (Local Dev)
 local: setup
 	@echo "🚀 Starting all Memro services..."
 	./start.sh
 
-# Start only infrastructure (Postgres + Qdrant)
+# Start only infrastructure (Postgres + pgvector)
 infra: setup
-	@echo "📦 Starting infrastructure (Postgres + Qdrant)..."
-	docker compose up -d db qdrant
+	@echo "📦 Starting infrastructure (Postgres + pgvector)..."
+	docker compose up -d db
 
 # Run only the backend API (and infra)
 backend: setup
-	@echo "🦀 Starting Rust backend & infrastructure..."
-	docker compose up -d db qdrant backend
+	@echo "🐹 Starting Go backend & infrastructure..."
+	docker compose up -d --build db backend
 
-# Run backend with hot-reloading (cargo-watch)
-# This will start infra if not already running
-watch: setup
-	@echo "🔍 Starting infrastructure and Rust backend in watch mode..."
-	docker compose up backend
+# Run the Go backend natively against the dockerized database
+dev: setup
+	@echo "🐹 Starting database, then the Go backend natively..."
+	docker compose up -d db
+	cd backend && DATABASE_URL=postgres://memro:memro@localhost:5432/memro go run ./cmd/memro-api
+
+# Run backend tests (integration tests need the db service running)
+test:
+	cd backend && MEMRO_TEST_DATABASE_URL=postgres://memro:memro@localhost:5432/memro go test -race ./...
 
 # Run only the frontend components
 frontend: setup
 	@echo "🌐 Starting landing page & developer UI..."
-	docker compose up -d frontend-landing frontend-developer
+	docker compose up -d frontend
 
 # Stop all services
 down:

@@ -15,16 +15,16 @@ This guide shows you how to deploy memro.co on a DigitalOcean Droplet with Manag
 │         DigitalOcean Droplet            │
 │  (Docker + Docker Compose)              │
 │                                         │
-│  ┌──────────┐  ┌──────────┐            │
-│  │ Backend  │  │  Qdrant  │            │
-│  │  (Rust)  │  │ (Vector) │            │
-│  └──────────┘  └──────────┘            │
+│  ┌──────────┐                          │
+│  │ Backend  │                          │
+│  │   (Go)   │                          │
+│  └──────────┘                          │
 └────────┬────────────────────────────────┘
          │
          │ PostgreSQL Connection
          │
 ┌────────▼────────────────────────────────┐
-│   Managed PostgreSQL Database           │
+│   Managed PostgreSQL + pgvector         │
 │   (DigitalOcean Managed DB)             │
 └─────────────────────────────────────────┘
 ```
@@ -86,9 +86,9 @@ cd memro
 # Create .env file
 cat > .env << EOF
 DATABASE_URL=postgresql://USER:PASS@HOST:PORT/memro
-QDRANT_URL=http://qdrant:6333
 PORT=8081
-RUST_LOG=info
+LOG_LEVEL=info
+TRUST_PROXY_HEADERS=true
 EOF
 
 # Start services

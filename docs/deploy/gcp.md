@@ -13,17 +13,17 @@ This guide shows you how to deploy memro.co on GCP using Cloud Run, Cloud SQL Po
 ┌────────▼────────────────────────────────────────┐
 │              Cloud Run Services                 │
 │                                                 │
-│  ┌──────────────┐      ┌──────────────┐        │
-│  │   Backend    │      │   Qdrant     │        │
-│  │  (Container) │      │ (Container)  │        │
-│  └──────────────┘      └──────────────┘        │
+│  ┌──────────────┐                               │
+│  │   Backend    │                               │
+│  │ (Go, Docker) │                               │
+│  └──────────────┘                               │
 └────────┬────────────────────────────────────────┘
          │
          │ Private IP Connection
          │
 ┌────────▼────────────────────────────────────────┐
-│         Cloud SQL PostgreSQL                    │
-│          (High Availability)                    │
+│    Cloud SQL PostgreSQL + pgvector              │
+│   (memories, graph and embeddings)              │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -79,6 +79,13 @@ gcloud sql instances describe memro-db \
   --format='value(connectionName)'
 ```
 
+> **pgvector:** Cloud SQL for PostgreSQL ships the `vector` extension. The
+> backend runs `CREATE EXTENSION IF NOT EXISTS vector` in its migrations, so
+> no manual step is needed as long as the `memro` user can create extensions.
+>
+> **Uploads:** Cloud Run's filesystem is ephemeral. Files from `/upload`
+> are lost on restart; use the Compute Engine VM setup for persistent files.
+
 ## Step 3: Build and Push Docker Images
 
 ```bash
@@ -92,10 +99,6 @@ docker build -t gcr.io/$PROJECT_ID/memro-backend .
 # Push to Container Registry
 docker push gcr.io/$PROJECT_ID/memro-backend
 
-# Build Qdrant (or use official image)
-docker pull qdrant/qdrant:latest
-docker tag qdrant/qdrant:latest gcr.io/$PROJECT_ID/qdrant
-docker push gcr.io/$PROJECT_ID/qdrant
 ```
 
 ## Step 4: Deploy Backend to Cloud Run
@@ -112,8 +115,7 @@ gcloud run deploy memro-backend \
   --region $REGION \
   --allow-unauthenticated \
   --set-env-vars="DATABASE_URL=postgresql://memro:PASSWORD@/memro?host=/cloudsql/$SQL_CONNECTION" \
-  --set-env-vars="QDRANT_URL=http://qdrant:6333" \
-  --set-env-vars="RUST_LOG=info" \
+  --set-env-vars="LOG_LEVEL=info,TRUST_PROXY_HEADERS=true" \
   --add-cloudsql-instances=$SQL_CONNECTION \
   --memory=1Gi \
   --cpu=1 \
@@ -126,31 +128,7 @@ gcloud run services describe memro-backend \
   --format='value(status.url)'
 ```
 
-## Step 5: Deploy Qdrant to Cloud Run
-
-```bash
-# Deploy Qdrant
-gcloud run deploy qdrant \
-  --image gcr.io/$PROJECT_ID/qdrant \
-  --platform managed \
-  --region $REGION \
-  --allow-unauthenticated \
-  --memory=2Gi \
-  --cpu=1 \
-  --min-instances=1
-
-# Get Qdrant URL
-export QDRANT_URL=$(gcloud run services describe qdrant \
-  --region $REGION \
-  --format='value(status.url)')
-
-# Update backend with Qdrant URL
-gcloud run services update memro-backend \
-  --region $REGION \
-  --set-env-vars="QDRANT_URL=$QDRANT_URL"
-```
-
-## Step 6: Configure Custom Domain (Optional)
+## Step 5: Configure Custom Domain (Optional)
 
 ```bash
 # Map custom domain
@@ -162,7 +140,7 @@ gcloud run domain-mappings create \
 # Follow instructions to update DNS records
 ```
 
-## Step 7: Set Up Cloud Load Balancer (For HTTPS)
+## Step 6: Set Up Cloud Load Balancer (For HTTPS)
 
 ```bash
 # Create serverless NEG for Cloud Run
@@ -201,7 +179,7 @@ gcloud compute forwarding-rules create memro-https-rule \
   --ports=443
 ```
 
-## Step 8: Configure Auto Scaling
+## Step 7: Configure Auto Scaling
 
 ```bash
 # Update Cloud Run service with scaling config
@@ -214,7 +192,7 @@ gcloud run services update memro-backend \
   --cpu-boost
 ```
 
-## Step 9: Set Up Monitoring
+## Step 8: Set Up Monitoring
 
 ```bash
 # Create log-based metric
@@ -233,7 +211,7 @@ gcloud alpha monitoring policies create \
   --condition-threshold-duration=60s
 ```
 
-## Step 10: Verify Deployment
+## Step 9: Verify Deployment
 
 ```bash
 # Get service URL

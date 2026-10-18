@@ -69,18 +69,17 @@ curl http://localhost:8081/health
                  │
 ┌────────────────▼────────────────────────────────┐
 │              memro.co Backend                   │
-│         (Rust + Axum + Hexagonal)               │
+│            (Go + net/http)                      │
 ├─────────────────────────────────────────────────┤
-│  Identity Store  │  Memory Store  │  Vector DB  │
-│   (Postgres)     │   (Postgres)   │  (Qdrant)   │
+│  Identity Store  │  Memory Store  │  Vectors    │
+│   (Postgres)     │   (Postgres)   │ (pgvector)  │
 └─────────────────────────────────────────────────┘
 ```
 
 ### Components
 
-- **Backend**: Rust API server (Axum framework)
-- **Database**: PostgreSQL (identity + memory metadata)
-- **Vector Store**: Qdrant (semantic search)
+- **Backend**: Go API server (`backend/cmd/memro-api`)
+- **Database**: PostgreSQL with pgvector (identities, memories, knowledge graph and embeddings in one database)
 - **Frontend**: React explorer (optional, for debugging)
 
 ---
@@ -172,15 +171,12 @@ See [docs/deploy/kubernetes.md](docs/deploy/kubernetes.md)
 ### Environment Variables
 
 ```bash
-# Database
-DATABASE_URL=postgresql://memro:memro@postgres:5432/memro
-
-# Vector Store
-QDRANT_URL=http://qdrant:6333
+# Database (Postgres + pgvector)
+DATABASE_URL=postgresql://memro:memro@db:5432/memro
 
 # API
 PORT=8081
-RUST_LOG=info
+LOG_LEVEL=info
 ```
 
 See [.env.example](.env.example) for full configuration.
@@ -239,9 +235,13 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md).
 ### Development Setup
 
 ```bash
-# Backend (Rust)
+# Backend (Go 1.26+): start Postgres, then run the API
+docker compose up -d db
 cd backend
-cargo run
+DATABASE_URL=postgres://memro:memro@localhost:5432/memro go run ./cmd/memro-api
+
+# Tests (integration tests use the same database)
+MEMRO_TEST_DATABASE_URL=postgres://memro:memro@localhost:5432/memro go test -race ./...
 
 # Frontend (React)
 cd frontend
@@ -270,7 +270,7 @@ MIT License - see [LICENSE](LICENSE)
 
 - [x] Cryptographic identity (Ed25519)
 - [x] Long-term memory (Postgres)
-- [x] Semantic recall (Qdrant)
+- [x] Semantic recall (pgvector)
 - [ ] Python SDK
 - [ ] JavaScript SDK
 - [ ] Request signing verification

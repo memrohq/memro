@@ -9,24 +9,19 @@
 
 ### Option 2: Manually (Step by Step)
 
-#### 1. Start Infrastructure
+#### 1. Start Infrastructure (Postgres + pgvector)
 ```bash
-docker compose up -d db qdrant
+docker compose up -d db
 ```
 
-#### 2. Start Backend
+#### 2. Start Backend (Go)
 ```bash
-docker compose up -d backend
+docker compose up -d --build backend
 ```
 
-#### 3. Start Landing Page
+#### 3. Start Developer UI
 ```bash
-docker compose up -d frontend-landing
-```
-
-#### 4. Start Developer UI
-```bash
-docker compose up -d frontend-developer
+docker compose up -d frontend
 ```
 
 ---
@@ -36,10 +31,8 @@ docker compose up -d frontend-developer
 | Service | URL | Purpose |
 |---------|-----|---------|
 | **Backend API** | http://localhost:8081 | REST API |
-| **Landing Page** | http://localhost:3000 | Marketing site |
-| **Developer UI** | http://localhost:5174 | Infrastructure management |
-| **Postgres** | localhost:5432 | Database |
-| **Qdrant** | localhost:6343 | Vector store |
+| **Developer UI** | http://localhost:5173 | Infrastructure management |
+| **Postgres** | localhost:5432 | Database + vectors (pgvector) |
 
 ---
 
@@ -85,10 +78,10 @@ docker compose up -d --build
 ## 🔧 Development Mode
 
 ### Backend (Hot Reload)
-Backend uses `cargo watch` - changes auto-rebuild:
+Run the Go backend natively for fast iteration (restart to pick up changes):
 ```bash
-# Watch logs
-docker compose logs -f backend
+make dev        # starts Postgres in Docker, then `go run ./cmd/memro-api`
+make test       # unit + integration tests against the same database
 ```
 
 ### Frontend Developer UI (Hot Reload)
@@ -144,13 +137,11 @@ npm install
 docker compose up -d --build frontend-developer
 ```
 
-### Qdrant connection error
+### Semantic search returns nothing
+Semantic search needs `OPENAI_API_KEY` (or `VOYAGE_API_KEY`) in `.env`;
+without it the API falls back to keyword search. Check:
 ```bash
-# Restart Qdrant
-docker compose restart qdrant
-
-# Check status
-docker compose ps qdrant
+curl localhost:8081/health   # "embeddings": "enabled" when a key is set
 ```
 
 ---

@@ -1,11 +1,9 @@
-target/
-**/*.rs.bk
-.DS_Store
 .git/
 .gitignore
 .dockerignore
 Dockerfile
-Dockerfile.dev
+.DS_Store
 data/
+.env
 *.tar.gz
-memro.tar.gz
+*.test

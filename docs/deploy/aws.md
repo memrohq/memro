@@ -14,16 +14,16 @@ This guide shows you how to deploy memro.co on AWS using ECS Fargate, RDS Postgr
 ┌────────▼────────────────────────────────────────┐
 │           ECS Fargate Cluster                   │
 │                                                 │
-│  ┌──────────────┐      ┌──────────────┐        │
-│  │   Backend    │      │   Qdrant     │        │
-│  │  (Container) │      │ (Container)  │        │
-│  └──────────────┘      └──────────────┘        │
+│  ┌──────────────┐                               │
+│  │   Backend    │                               │
+│  │ (Go, Docker) │                               │
+│  └──────────────┘                               │
 └────────┬────────────────────────────────────────┘
          │
          │ PostgreSQL Connection
          │
 ┌────────▼────────────────────────────────────────┐
-│           RDS PostgreSQL                        │
+│      RDS PostgreSQL + pgvector                  │
 │        (Multi-AZ for HA)                        │
 └─────────────────────────────────────────────────┘
 ```
@@ -126,12 +126,12 @@ Create `task-definition.json`:
           "value": "postgresql://memro:PASSWORD@RDS_ENDPOINT:5432/memro"
         },
         {
-          "name": "QDRANT_URL",
-          "value": "http://localhost:6333"
+          "name": "LOG_LEVEL",
+          "value": "info"
         },
         {
-          "name": "RUST_LOG",
-          "value": "info"
+          "name": "TRUST_PROXY_HEADERS",
+          "value": "true"
         }
       ],
       "logConfiguration": {
@@ -142,16 +142,6 @@ Create `task-definition.json`:
           "awslogs-stream-prefix": "backend"
         }
       }
-    },
-    {
-      "name": "qdrant",
-      "image": "qdrant/qdrant:latest",
-      "portMappings": [
-        {
-          "containerPort": 6333,
-          "protocol": "tcp"
-        }
-      ]
     }
   ]
 }

@@ -480,7 +480,7 @@ const App = () => {
                 </div>
                 <div className="flex items-center gap-2">
                   <div className={`size-2 rounded-full ${vStoreStatus === 'ok' ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
-                  <span className="text-[10px] text-slate-600 font-mono">Qdrant: {vStoreStatus === 'ok' ? 'ONLINE' : 'FALLBACK'}</span>
+                  <span className="text-[10px] text-slate-600 font-mono">pgvector: {vStoreStatus === 'ok' ? 'ONLINE' : 'FALLBACK'}</span>
                 </div>
               </div>
             </div>
@@ -566,7 +566,7 @@ const App = () => {
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-xs text-slate-600">Qdrant Vector DB</span>
+                      <span className="text-xs text-slate-600">pgvector (Postgres)</span>
                       <span className={`text-xs font-bold ${vStoreStatus === 'ok' ? 'text-green-600' : 'text-yellow-600'}`}>
                         {vStoreStatus === 'ok' ? 'ONLINE' : 'FALLBACK'}
                       </span>
