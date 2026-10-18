@@ -15,7 +15,7 @@ authors = [
 keywords = ["ai", "agents", "memory", "mcp", "claude", "cursor", "memro"]
 
 dependencies = [
-    "mcp>=1.0.0",
+    "mcp>=1.0.0,<2",
     "memro>=0.1.0",
     "python-dotenv",
     "starlette",
