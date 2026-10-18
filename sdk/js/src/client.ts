@@ -67,7 +67,7 @@ export class MemroClient {
   }
 
   async deleteIdentity(agentId: string, privateKey: string): Promise<void> {
-    const headers = signBody(agentId, privateKey, new TextEncoder().encode(agentId));
+    const headers = signBody(agentId, privateKey, new Uint8Array(0));
     try {
       await this.http.delete(`/identity/${agentId}`, { headers });
     } catch (e) { handleAxiosError(e); }
@@ -110,7 +110,7 @@ export class MemroClient {
   }
 
   async deleteMemory(agentId: string, privateKey: string, memoryId: string): Promise<boolean> {
-    const headers = signBody(agentId, privateKey, new TextEncoder().encode(memoryId));
+    const headers = signBody(agentId, privateKey, new Uint8Array(0));
     try {
       const resp = await this.http.delete(`/memory/${memoryId}`, { headers });
       return resp.status === 204;

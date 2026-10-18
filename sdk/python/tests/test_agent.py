@@ -121,3 +121,22 @@ def test_export(mock_agent):
     export = mock_agent.export()
     assert export.total == 1
     assert len(export.memories) == 1
+
+
+def test_delete_signs_empty_body():
+    """DELETE sends no body, so the signature must cover an empty body."""
+    from memro.crypto import generate_keypair
+    import nacl.signing
+    agent_id, private_key = generate_keypair()
+    client = MemroClient(base_url="http://example.test")
+    captured = {}
+
+    def fake_delete(url, headers=None, **kw):
+        captured.update(headers)
+        resp = MagicMock(status_code=204)
+        return resp
+
+    client._session.delete = fake_delete
+    client.delete_memory(agent_id, private_key, "11111111-1111-1111-1111-111111111111")
+    verify_key = nacl.signing.VerifyKey(bytes.fromhex(agent_id))
+    verify_key.verify(captured["X-Timestamp"].encode(), bytes.fromhex(captured["X-Signature"]))

@@ -75,8 +75,8 @@ class MemroClient:
         return resp.json()
 
     def delete_identity(self, agent_id: str, private_key: str) -> None:
-        body = agent_id.encode()
-        headers = self._auth_headers(agent_id, private_key, body)
+        # DELETE sends no body, so the signature covers an empty body.
+        headers = self._auth_headers(agent_id, private_key, b"")
         resp = self._session.delete(
             f"{self.base_url}/identity/{agent_id}", headers=headers
         )
@@ -149,8 +149,7 @@ class MemroClient:
         return resp.json()
 
     def delete_memory(self, agent_id: str, private_key: str, memory_id: str) -> bool:
-        body = memory_id.encode()
-        headers = self._auth_headers(agent_id, private_key, body)
+        headers = self._auth_headers(agent_id, private_key, b"")
         resp = self._session.delete(
             f"{self.base_url}/memory/{memory_id}", headers=headers
         )

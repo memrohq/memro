@@ -41,7 +41,6 @@
     "homepage": "https://memro.co",
     "dependencies": {
         "tweetnacl": "^1.0.3",
-        "tweetnacl-util": "^0.15.1",
         "axios": "^1.6.0"
     },
     "devDependencies": {

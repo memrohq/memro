@@ -44,18 +44,32 @@ func (h SignedHeaders) Headers() map[string]string {
 	}
 }
 
-// SignBody signs the given body bytes with the agent's private key.
-func SignBody(agentID, privateKeyHex string, body []byte) (SignedHeaders, error) {
-	privBytes, err := hex.DecodeString(privateKeyHex)
+// parsePrivateKey accepts a hex-encoded 32-byte seed (Python SDK, dashboard)
+// or a 64-byte expanded private key (Go/JS SDKs).
+func parsePrivateKey(privateKeyHex string) (ed25519.PrivateKey, error) {
+	b, err := hex.DecodeString(privateKeyHex)
 	if err != nil {
-		return SignedHeaders{}, fmt.Errorf("memro: decode private key: %w", err)
+		return nil, fmt.Errorf("memro: decode private key: %w", err)
 	}
-	if len(privBytes) != ed25519.PrivateKeySize {
-		return SignedHeaders{}, fmt.Errorf("memro: invalid private key length: got %d, want %d", len(privBytes), ed25519.PrivateKeySize)
+	switch len(b) {
+	case ed25519.SeedSize:
+		return ed25519.NewKeyFromSeed(b), nil
+	case ed25519.PrivateKeySize:
+		return ed25519.PrivateKey(b), nil
+	}
+	return nil, fmt.Errorf("memro: invalid private key length: got %d bytes, want %d or %d", len(b), ed25519.SeedSize, ed25519.PrivateKeySize)
+}
+
+// SignBody signs a request: the signature covers the timestamp followed by
+// the exact body bytes sent (empty for GET and DELETE).
+func SignBody(agentID, privateKeyHex string, body []byte) (SignedHeaders, error) {
+	priv, err := parsePrivateKey(privateKeyHex)
+	if err != nil {
+		return SignedHeaders{}, err
 	}
 
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-	signature := ed25519.Sign(ed25519.PrivateKey(privBytes), body)
+	signature := ed25519.Sign(priv, append([]byte(timestamp), body...))
 
 	return SignedHeaders{
 		AgentID:     agentID,

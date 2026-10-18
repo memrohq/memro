@@ -136,7 +136,7 @@ func (c *Client) GetIdentity(ctx context.Context, agentID string) (*getIdentityR
 
 // DeleteIdentity permanently deletes an agent and all its memories.
 func (c *Client) DeleteIdentity(ctx context.Context, agentID, privateKey string) error {
-	headers, err := c.authHeaders(agentID, privateKey, []byte(agentID))
+	headers, err := c.authHeaders(agentID, privateKey, nil)
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ func (c *Client) GetMemories(ctx context.Context, agentID string, opts *GetRecen
 
 // DeleteMemory deletes a specific memory. Returns true if deleted, false if not found.
 func (c *Client) DeleteMemory(ctx context.Context, agentID, privateKey, memoryID string) (bool, error) {
-	headers, err := c.authHeaders(agentID, privateKey, []byte(memoryID))
+	headers, err := c.authHeaders(agentID, privateKey, nil)
 	if err != nil {
 		return false, err
 	}

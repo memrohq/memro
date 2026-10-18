@@ -3,10 +3,10 @@
 //
 // Quickstart:
 //
-//agent, err := memro.CreateAgent(nil)
-//if err != nil { log.Fatal(err) }
+// agent, err := memro.CreateAgent(nil)
+// if err != nil { log.Fatal(err) }
 //
-//mem, err := agent.Remember(ctx, "User prefers Go", nil)
-//results, err := agent.Recall(ctx, "user preferences", nil)
-//agent.Save("identity.json")
+// mem, err := agent.Remember(ctx, "User prefers Go", nil)
+// results, err := agent.Recall(ctx, "user preferences", nil)
+// agent.Save("identity.json")
 package memro
