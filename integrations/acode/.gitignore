@@ -1,0 +1,4 @@
+memro-plugin.zip
+*.log
+node_modules/
+.DS_Store
