@@ -114,6 +114,120 @@ func (s *Store) DeleteSessionByTokenHash(ctx context.Context, tokenHash string) 
 	return err
 }
 
+// --- API keys -------------------------------------------------------------------
+
+type APIKey struct {
+	ID         uuid.UUID  `json:"id"`
+	Name       string     `json:"name"`
+	Prefix     string     `json:"prefix"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+}
+
+func (s *Store) CreateAPIKey(ctx context.Context, id, tenantID uuid.UUID, agentID, name, prefix, hash string) error {
+	_, err := s.Pool.Exec(ctx, `INSERT INTO api_keys (id, tenant_id, agent_id, name, prefix, key_hash)
+		VALUES ($1, $2, $3, $4, $5, $6)`, id, tenantID, agentID, name, prefix, hash)
+	return err
+}
+
+// AgentForAPIKey returns the identity behind an active key and records use
+// (at most once a minute, to avoid a write per request).
+func (s *Store) AgentForAPIKey(ctx context.Context, hash string) (*domain.AgentIdentity, error) {
+	var a domain.AgentIdentity
+	var keyID uuid.UUID
+	err := s.Pool.QueryRow(ctx, `SELECT k.id, i.id, i.user_id, i.tenant_id, i.created_at
+		FROM api_keys k JOIN agent_identities i ON i.id = k.agent_id
+		WHERE k.key_hash = $1 AND k.revoked_at IS NULL`, hash).
+		Scan(&keyID, &a.ID, &a.UserID, &a.TenantID, &a.CreatedAt)
+	if err != nil {
+		return nilIfNoRows(&a, err)
+	}
+	_, _ = s.Pool.Exec(ctx, `UPDATE api_keys SET last_used_at = NOW()
+		WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '1 minute')`, keyID)
+	return &a, nil
+}
+
+func (s *Store) ListAPIKeys(ctx context.Context, agentID string) ([]APIKey, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT id, name, prefix, created_at, last_used_at FROM api_keys
+		WHERE agent_id = $1 AND revoked_at IS NULL ORDER BY created_at DESC`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	keys := []APIKey{}
+	for rows.Next() {
+		var k APIKey
+		if err := rows.Scan(&k.ID, &k.Name, &k.Prefix, &k.CreatedAt, &k.LastUsedAt); err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, rows.Err()
+}
+
+func (s *Store) RevokeAPIKey(ctx context.Context, id uuid.UUID, agentID string) (bool, error) {
+	tag, err := s.Pool.Exec(ctx, `UPDATE api_keys SET revoked_at = NOW()
+		WHERE id = $1 AND agent_id = $2 AND revoked_at IS NULL`, id, agentID)
+	return tag.RowsAffected() > 0, err
+}
+
+// --- Device-code login ---------------------------------------------------------------
+
+type DeviceCode struct {
+	UserCode   string
+	ClientName string
+	ExpiresAt  time.Time
+	ApprovedAt *time.Time
+	ConsumedAt *time.Time
+	AgentID    *string
+	TenantID   *uuid.UUID
+}
+
+func (s *Store) CreateDeviceCode(ctx context.Context, deviceHash, userCode, clientName string, expires time.Time) error {
+	_, err := s.Pool.Exec(ctx, `DELETE FROM device_codes WHERE expires_at < NOW() - INTERVAL '1 day'`)
+	if err != nil {
+		return err
+	}
+	_, err = s.Pool.Exec(ctx, `INSERT INTO device_codes (device_code_hash, user_code, client_name, expires_at)
+		VALUES ($1, $2, $3, $4)`, deviceHash, userCode, clientName, expires)
+	return err
+}
+
+func (s *Store) DeviceCodeByUserCode(ctx context.Context, userCode string) (*DeviceCode, error) {
+	var d DeviceCode
+	err := s.Pool.QueryRow(ctx, `SELECT user_code, client_name, expires_at, approved_at, consumed_at, agent_id, tenant_id
+		FROM device_codes WHERE user_code = $1`, userCode).
+		Scan(&d.UserCode, &d.ClientName, &d.ExpiresAt, &d.ApprovedAt, &d.ConsumedAt, &d.AgentID, &d.TenantID)
+	return nilIfNoRows(&d, err)
+}
+
+// ApproveDeviceCode binds an unexpired, unapproved code to an agent.
+func (s *Store) ApproveDeviceCode(ctx context.Context, userCode, agentID string, tenantID uuid.UUID) (bool, error) {
+	tag, err := s.Pool.Exec(ctx, `UPDATE device_codes SET approved_at = NOW(), agent_id = $2, tenant_id = $3
+		WHERE user_code = $1 AND approved_at IS NULL AND expires_at > NOW()`, userCode, agentID, tenantID)
+	return tag.RowsAffected() > 0, err
+}
+
+// ConsumeDeviceCode atomically marks an approved code as used and returns it,
+// so a device code can be exchanged for an API key exactly once.
+func (s *Store) ConsumeDeviceCode(ctx context.Context, deviceHash string) (*DeviceCode, error) {
+	var d DeviceCode
+	err := s.Pool.QueryRow(ctx, `UPDATE device_codes SET consumed_at = NOW()
+		WHERE device_code_hash = $1 AND approved_at IS NOT NULL AND consumed_at IS NULL AND expires_at > NOW()
+		RETURNING user_code, client_name, expires_at, approved_at, consumed_at, agent_id, tenant_id`, deviceHash).
+		Scan(&d.UserCode, &d.ClientName, &d.ExpiresAt, &d.ApprovedAt, &d.ConsumedAt, &d.AgentID, &d.TenantID)
+	return nilIfNoRows(&d, err)
+}
+
+// DeviceCodeStatus reports why a device code cannot be exchanged yet.
+func (s *Store) DeviceCodeStatus(ctx context.Context, deviceHash string) (*DeviceCode, error) {
+	var d DeviceCode
+	err := s.Pool.QueryRow(ctx, `SELECT user_code, client_name, expires_at, approved_at, consumed_at, agent_id, tenant_id
+		FROM device_codes WHERE device_code_hash = $1`, deviceHash).
+		Scan(&d.UserCode, &d.ClientName, &d.ExpiresAt, &d.ApprovedAt, &d.ConsumedAt, &d.AgentID, &d.TenantID)
+	return nilIfNoRows(&d, err)
+}
+
 // --- Memories -----------------------------------------------------------------
 
 const memoryColumns = `id, agent_id, tenant_id, content, memory_type, visibility, created_at, file_id, asset_url,

@@ -13,6 +13,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"hash/fnv"
 	"io"
 	"math"
@@ -26,9 +27,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/memrohq/memro/server/config"
 	"github.com/memrohq/memro/server/extension"
 	"github.com/memrohq/memro/server/internal/api"
+	"github.com/memrohq/memro/server/internal/auth"
 	"github.com/memrohq/memro/server/internal/db"
 	"github.com/memrohq/memro/server/internal/email"
 	"github.com/memrohq/memro/server/internal/embed"
@@ -531,5 +535,109 @@ func TestDevLogOTPSignIn(t *testing.T) {
 	code, body = e.do(nil, "", "POST", "/auth/verify", j(map[string]string{"email": "dev@example.com", "code": "000000"}), nil)
 	if code != 401 && code != 429 {
 		t.Fatalf("wrong code: status %d: %s", code, body)
+	}
+}
+
+// dashboardSession creates a user with an agent and a session token, as the
+// email login would.
+func (e *env) dashboardSession(email string) (agent, string) {
+	e.t.Helper()
+	ctx := context.Background()
+	a := newAgent(e.t)
+	if err := e.st.EnsureUser(ctx, email, uuid.Nil); err != nil {
+		e.t.Fatal(err)
+	}
+	u, err := e.st.GetUserByEmail(ctx, email, uuid.Nil)
+	if err != nil || u == nil {
+		e.t.Fatalf("user: %v", err)
+	}
+	if err := e.st.CreateIdentity(ctx, a.id, &u.ID, uuid.Nil); err != nil {
+		e.t.Fatal(err)
+	}
+	token, hash, _ := auth.NewSessionToken()
+	if err := e.st.CreateSession(ctx, u.ID, uuid.Nil, hash, time.Now().Add(time.Hour)); err != nil {
+		e.t.Fatal(err)
+	}
+	return a, token
+}
+
+func TestDeviceLoginAndAPIKeys(t *testing.T) {
+	e := setup(t)
+	a, session := e.dashboardSession(fmt.Sprintf("dev-%d@example.com", time.Now().UnixNano()))
+	bearer := func(tok string) map[string]string { return map[string]string{"Authorization": "Bearer " + tok} }
+
+	code, body := e.do(nil, "", "POST", "/auth/device/code", j(map[string]string{"client_name": "memro connect (test)"}), nil)
+	e.must(200, code, body, "device code")
+	var dc struct {
+		DeviceCode string `json:"device_code"`
+		UserCode   string `json:"user_code"`
+		URI        string `json:"verification_uri_complete"`
+	}
+	_ = json.Unmarshal(body, &dc)
+	if len(dc.UserCode) != 9 || !strings.Contains(dc.URI, "/connect?code="+dc.UserCode) {
+		t.Fatalf("device code response: %s", body)
+	}
+
+	code, body = e.do(nil, "", "POST", "/auth/device/token", j(map[string]string{"device_code": dc.DeviceCode}), nil)
+	if code != 400 || !strings.Contains(string(body), "authorization_pending") {
+		t.Fatalf("expected pending, got %d %s", code, body)
+	}
+
+	code, body = e.do(nil, "", "GET", "/auth/device?user_code="+dc.UserCode, nil, bearer(session))
+	e.must(200, code, body, "device info")
+	if !strings.Contains(string(body), "memro connect (test)") || !strings.Contains(string(body), `"pending"`) {
+		t.Fatalf("device info: %s", body)
+	}
+	code, body = e.do(nil, "", "POST", "/auth/device/approve", j(map[string]string{"user_code": strings.ToLower(dc.UserCode)}), bearer(session))
+	e.must(200, code, body, "approve")
+
+	code, body = e.do(nil, "", "POST", "/auth/device/token", j(map[string]string{"device_code": dc.DeviceCode}), nil)
+	e.must(200, code, body, "token exchange")
+	var tok struct {
+		APIKey  string `json:"api_key"`
+		AgentID string `json:"agent_id"`
+		MCPURL  string `json:"mcp_url"`
+	}
+	_ = json.Unmarshal(body, &tok)
+	if !strings.HasPrefix(tok.APIKey, "memro_sk_") || tok.AgentID != a.id || tok.MCPURL == "" {
+		t.Fatalf("token response: %s", body)
+	}
+	code, body = e.do(nil, "", "POST", "/auth/device/token", j(map[string]string{"device_code": dc.DeviceCode}), nil)
+	if code != 400 || !strings.Contains(string(body), "invalid_grant") {
+		t.Fatalf("device code reused: %d %s", code, body)
+	}
+
+	// The key works for memory operations.
+	code, body = e.do(nil, "", "GET", "/auth/whoami", nil, bearer(tok.APIKey))
+	e.must(200, code, body, "whoami with api key")
+	if !strings.Contains(string(body), a.id) || !strings.Contains(string(body), `"api_key"`) {
+		t.Fatalf("whoami: %s", body)
+	}
+	code, body = e.do(nil, "", "POST", "/memory", j(map[string]any{"content": "written with an API key"}), bearer(tok.APIKey))
+	e.must(200, code, body, "memory via api key")
+
+	// But it cannot manage keys or approve logins.
+	code, body = e.do(nil, "", "GET", "/api-keys", nil, bearer(tok.APIKey))
+	e.must(403, code, body, "api key listing keys")
+	code, body = e.do(nil, "", "POST", "/auth/device/approve", j(map[string]string{"user_code": "BCDF-GHJK"}), bearer(tok.APIKey))
+	e.must(403, code, body, "api key approving login")
+
+	// The dashboard lists and revokes it.
+	code, body = e.do(nil, "", "GET", "/api-keys", nil, bearer(session))
+	e.must(200, code, body, "list keys")
+	var keys []struct{ ID, Prefix string }
+	_ = json.Unmarshal(body, &keys)
+	if len(keys) != 1 || !strings.HasPrefix(tok.APIKey, keys[0].Prefix) || strings.Contains(string(body), tok.APIKey) {
+		t.Fatalf("key listing: %s", body)
+	}
+	code, body = e.do(nil, "", "DELETE", "/api-keys/"+keys[0].ID, nil, bearer(session))
+	e.must(204, code, body, "revoke")
+	code, body = e.do(nil, "", "GET", "/auth/whoami", nil, bearer(tok.APIKey))
+	e.must(401, code, body, "revoked key")
+
+	code, body = e.do(nil, "", "POST", "/api-keys", j(map[string]string{"name": "ci"}), bearer(session))
+	e.must(200, code, body, "create key in dashboard")
+	if !strings.Contains(string(body), `"key":"memro_sk_`) {
+		t.Fatalf("create key: %s", body)
 	}
 }

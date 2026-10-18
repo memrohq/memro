@@ -156,3 +156,41 @@ func GenerateKeyPair() (pubHex, seedHex string, err error) {
 	}
 	return hex.EncodeToString(pub), hex.EncodeToString(priv.Seed()), nil
 }
+
+// --- API keys & device codes -------------------------------------------------
+
+// APIKeyPrefix marks Memro API keys so they are easy to recognise and to
+// detect in leaked-secret scanners.
+const APIKeyPrefix = "memro_sk_"
+
+// NewAPIKey returns a new key, a short display prefix and its storage hash.
+func NewAPIKey() (key, prefix, hash string, err error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", "", err
+	}
+	key = APIKeyPrefix + base64.RawURLEncoding.EncodeToString(b)
+	return key, key[:len(APIKeyPrefix)+6], HashToken(key), nil
+}
+
+// userCodeAlphabet avoids vowels (no accidental words) and look-alike characters.
+const userCodeAlphabet = "BCDFGHJKLMNPQRSTVWXZ"
+
+// NewDeviceCode returns the secret the CLI polls with and the short code the
+// user confirms in the dashboard (e.g. "KQZT-HMRW").
+func NewDeviceCode() (deviceCode, userCode string, err error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", err
+	}
+	deviceCode = base64.RawURLEncoding.EncodeToString(b)
+	code := make([]byte, 8)
+	for i := range code {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(userCodeAlphabet))))
+		if err != nil {
+			return "", "", err
+		}
+		code[i] = userCodeAlphabet[n.Int64()]
+	}
+	return deviceCode, string(code[:4]) + "-" + string(code[4:]), nil
+}

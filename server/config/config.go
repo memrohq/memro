@@ -45,6 +45,10 @@ type Config struct {
 
 	MemorySoftCap int
 
+	// Public URLs handed to `memro connect`.
+	AppURL string // dashboard, e.g. https://app.memro.co
+	MCPURL string // hosted MCP endpoint, e.g. https://mcp.memro.co/mcp
+
 	// DevLogOTP writes dashboard sign-in codes to the server log instead of
 	// emailing them when no SMTP server is configured. For local development
 	// and staging only; never enable it in production.
@@ -76,6 +80,8 @@ func Load() Config {
 		EmailPass:             strings.TrimSpace(os.Getenv("EMAIL_HOST_PASSWORD")),
 		MemorySoftCap:         envInt("MEMORY_SOFT_CAP", 1000),
 		DevLogOTP:             envBool("DEV_LOG_OTP", false),
+		AppURL:                strings.TrimRight(env("APP_URL", "http://localhost:5173"), "/"),
+		MCPURL:                env("MCP_URL", "http://localhost:8080/mcp"),
 	}
 	c.BaseURL = env("BASE_URL", "http://localhost:"+strconv.Itoa(c.Port))
 	c.EmailFrom = env("EMAIL_FROM", c.EmailUser)

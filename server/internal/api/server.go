@@ -110,6 +110,8 @@ func (s *Server) Handler() http.Handler {
 	public("POST /auth/login", s.login)
 	public("POST /auth/verify", s.verify)
 	public("DELETE /auth/logout", s.logout)
+	public("POST /auth/device/code", s.deviceCode)
+	public("POST /auth/device/token", s.deviceToken)
 
 	protected("DELETE /identity/{id}", s.deleteIdentity)
 	protected("POST /memory", s.createMemory)
@@ -136,6 +138,12 @@ func (s *Server) Handler() http.Handler {
 	protected("GET /tenant/{id}/usage", s.tenantUsage)
 	protected("POST /hooks", s.registerHook)
 	protected("GET /hooks/{event_type}", s.getHooks)
+	protected("GET /auth/whoami", s.whoami)
+	protected("GET /auth/device", s.deviceInfo)
+	protected("POST /auth/device/approve", s.deviceApprove)
+	protected("GET /api-keys", s.listAPIKeys)
+	protected("POST /api-keys", s.createAPIKey)
+	protected("DELETE /api-keys/{id}", s.revokeAPIKey)
 
 	for pattern, h := range s.extra {
 		mux.Handle(pattern, h)
@@ -155,6 +163,9 @@ type Agent struct {
 	ID       string
 	UserID   *uuid.UUID
 	TenantID uuid.UUID
+	// Via records how the request authenticated: "session" (dashboard),
+	// "api_key" (memro_sk_...) or "signature" (ed25519).
+	Via string
 }
 
 type ctxKey int
@@ -211,6 +222,17 @@ func (s *Server) authenticate(r *http.Request) (Agent, []byte, int, string) {
 		return Agent{}, nil, http.StatusRequestEntityTooLarge, "Request body too large or unreadable"
 	}
 
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer "+auth.APIKeyPrefix) {
+		id, err := s.store.AgentForAPIKey(ctx, auth.HashToken(strings.TrimPrefix(h, "Bearer ")))
+		if err != nil {
+			return Agent{}, nil, http.StatusInternalServerError, "Database error"
+		}
+		if id == nil {
+			return Agent{}, nil, http.StatusUnauthorized, "Invalid or revoked API key"
+		}
+		return Agent{ID: id.ID, UserID: id.UserID, TenantID: id.TenantID, Via: "api_key"}, raw, 0, ""
+	}
+
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		ses, err := s.store.GetSessionByTokenHash(ctx, auth.HashToken(strings.TrimPrefix(h, "Bearer ")))
 		if err != nil {
@@ -229,7 +251,7 @@ func (s *Server) authenticate(r *http.Request) (Agent, []byte, int, string) {
 		if id == nil {
 			return Agent{}, nil, http.StatusUnauthorized, "No agent associated with this user"
 		}
-		return Agent{ID: id.ID, UserID: id.UserID, TenantID: id.TenantID}, raw, 0, ""
+		return Agent{ID: id.ID, UserID: id.UserID, TenantID: id.TenantID, Via: "session"}, raw, 0, ""
 	}
 
 	agentID, sig, ts := r.Header.Get("X-Agent-Id"), r.Header.Get("X-Signature"), r.Header.Get("X-Timestamp")
@@ -279,7 +301,7 @@ func (s *Server) authenticate(r *http.Request) (Agent, []byte, int, string) {
 	default:
 		return Agent{}, nil, http.StatusUnauthorized, "Unsupported X-Signature-Version"
 	}
-	return Agent{ID: identity.ID, UserID: identity.UserID, TenantID: identity.TenantID}, raw, 0, ""
+	return Agent{ID: identity.ID, UserID: identity.UserID, TenantID: identity.TenantID, Via: "signature"}, raw, 0, ""
 }
 
 func (s *Server) rateLimitIP(next http.Handler) http.Handler {
