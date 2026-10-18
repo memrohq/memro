@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--new-window",
+        "${workspaceFolder}",
+        "--extensionDevelopmentPath=/tmp/memro-link",
+        "--user-data-dir=/tmp/vscode-test-profile-sub",
+        "--extensions-dir=/tmp/vscode-extensions-sub"
+      ],
+      "debugPort": 5871,
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js"
+      ],
+      "preLaunchTask": "npm: compile"
+    }
+  ]
+}

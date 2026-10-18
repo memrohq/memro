@@ -1,0 +1,126 @@
+{
+  "name": "memro-vscode-extension",
+  "displayName": "Memro MCP Extension",
+  "description": "VS Code extension for Memro MCP integration",
+  "version": "0.0.1",
+  "publisher": "memro",
+  "icon": "resources/icon-full.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onView:memro.memoryExplorer",
+    "onCommand:memro.remember",
+    "onCommand:memro.recall",
+    "onCommand:memro.claim",
+    "onCommand:memro.logIntent"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "memro.remember", "title": "Memro: Remember", "category": "Memro" },
+      { "command": "memro.recall", "title": "Memro: Recall", "category": "Memro" },
+      { "command": "memro.getRecent", "title": "Memro: Get Recent Memories", "category": "Memro" },
+      { "command": "memro.deleteMemory", "title": "Memro: Delete Memory", "category": "Memro" },
+      { "command": "memro.exportMemories", "title": "Memro: Export Memories", "category": "Memro" },
+      { "command": "memro.queryGraph", "title": "Memro: Query Knowledge Graph", "category": "Memro" },
+      { "command": "memro.claim", "title": "⬢ Memro: Claim File/Task", "category": "Memro" },
+      { "command": "memro.logIntent", "title": "⬢ Memro: Declare Intent", "category": "Memro" },
+      {
+        "command": "memro.release",
+        "title": "Memro: Release Resource",
+        "category": "Memro"
+      },
+      {
+        "command": "memro.handoff",
+        "title": "Memro: Handoff Task (Summarize & Release)",
+        "category": "Memro"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "memro-explorer",
+          "title": "Memro",
+          "icon": "resources/icon-monochrome.png"
+        }
+      ]
+    },
+    "views": {
+      "memro-explorer": [
+        {
+          "type": "webview",
+          "id": "memro.memoryExplorer",
+          "name": "Memory Explorer",
+          "icon": "resources/icon-monochrome.svg",
+          "visibility": "visible"
+        }
+      ]
+    },
+    "menus": {
+      "editor/title": [
+        { "command": "memro.remember", "group": "navigation", "when": "editorTextFocus" }
+      ],
+      "explorer/context": [
+        {
+          "command": "memro.remember",
+          "group": "memro@1",
+          "when": "resourceLangId == plaintext || resourceLangId == markdown || resourceLangId == typescript || resourceLangId == javascript || resourceLangId == python || resourceLangId == java"
+        },
+        {
+          "command": "memro.claim",
+          "group": "memro@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "memro.claim",
+          "group": "memro@1"
+        },
+        {
+          "command": "memro.logIntent",
+          "group": "memro@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Memro",
+      "properties": {
+        "memro.mcpBaseUrl": {
+          "type": "string",
+          "default": "http://localhost:8080/sse",
+          "description": "Base URL for the Memro MCP SSE server."
+        },
+        "memro.agentId": {
+          "type": "string",
+          "default": "",
+          "description": "Your Memro Agent ID."
+        },
+        "memro.privateKey": {
+          "type": "string",
+          "default": "",
+          "description": "Your Memro Private Key."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext .ts",
+    "test": "echo \"No tests configured\" && exit 0"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/mocha": "^10.0.0",
+    "@types/node": "18.x",
+    "typescript": "^5.3.0",
+    "eslint": "^8.55.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.22.0"
+  }
+}
