@@ -97,7 +97,9 @@ export default function Login({ apiBaseUrl, onLoginSuccess }) {
         </div>
 
         <p className="text-center text-[12px] text-subtle mt-6">
-          Free for non-commercial use · <a className="hover:text-ink underline-offset-2 hover:underline" href="https://memro.co">memro.co</a>
+          Memro Cloud ·{" "}
+          <a className="hover:text-ink underline-offset-2 hover:underline" href="https://memro.co/terms.html">Terms</a> ·{" "}
+          <a className="hover:text-ink underline-offset-2 hover:underline" href="https://memro.co/privacy.html">Privacy</a>
         </p>
       </div>
     </div>
