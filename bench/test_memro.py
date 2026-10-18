@@ -4,9 +4,9 @@ import sys
 from memro import Agent, MemroClient
 
 def test_memro():
-    agent_id = "ab7a24f744520625fb44fda13e3c5e7704cd80e15806cf4b1eada850fc9d79ca"
-    private_key = "REDACTED_TEST_KEY"
-    base_url = "http://localhost:8081"
+    agent_id = os.environ["MEMRO_AGENT_ID"]
+    private_key = os.environ["MEMRO_PRIVATE_KEY"]
+    base_url = os.environ.get("MEMRO_BASE_URL", "http://localhost:8081")
     
     print(f"Connecting to {base_url}...")
     client = MemroClient(base_url)
