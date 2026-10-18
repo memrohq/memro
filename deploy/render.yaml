@@ -9,16 +9,16 @@ services:
         fromDatabase:
           name: memro-db
           property: connectionString
-      - key: QDRANT_URL
-        value: http://memro-qdrant:6333
       - key: OPENAI_API_KEY
         sync: false   # set manually in Render dashboard
       - key: ALLOWED_ORIGINS
         sync: false   # set to your frontend domain
       - key: DB_MAX_CONNECTIONS
         value: "20"
-      - key: RUST_LOG
+      - key: LOG_LEVEL
         value: info
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
 
 databases:
   - name: memro-db

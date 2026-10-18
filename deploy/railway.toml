@@ -3,7 +3,7 @@ builder = "dockerfile"
 dockerfilePath = "memro-core/backend/Dockerfile"
 
 [deploy]
-startCommand = "memro-backend"
+startCommand = "memro-api"
 healthcheckPath = "/health"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
@@ -15,11 +15,7 @@ source = "."
 
 [[services]]
 name = "postgres"
-image = "postgres:15-alpine"
+image = "pgvector/pgvector:pg15"
 
 [services.variables]
 POSTGRES_DB = "memro"
-
-[[services]]
-name = "qdrant"
-image = "qdrant/qdrant:latest"

@@ -27,7 +27,6 @@ docker-compose up -d
 # Apply Kubernetes manifests
 kubectl apply -f kubernetes/namespace.yaml
 kubectl apply -f kubernetes/postgres.yaml
-kubectl apply -f kubernetes/qdrant.yaml
 kubectl apply -f kubernetes/backend.yaml
 kubectl apply -f kubernetes/ingress.yaml
 ```
@@ -52,7 +51,6 @@ memro-infra/
 ├── kubernetes/          # K8s manifests
 │   ├── namespace.yaml
 │   ├── postgres.yaml
-│   ├── qdrant.yaml
 │   ├── backend.yaml
 │   ├── frontend.yaml
 │   └── ingress.yaml
@@ -119,12 +117,11 @@ Create a `.env` file or use Kubernetes secrets:
 ```bash
 # Required
 OPENAI_API_KEY=sk-...
-DATABASE_URL=postgres://user:pass@host:5432/memro
-QDRANT_URL=http://qdrant:6333
+DATABASE_URL=postgres://user:pass@host:5432/memro  # Postgres with the pgvector extension
 
 # Optional
-RUST_LOG=info
-PORT=8080
+LOG_LEVEL=info
+PORT=8081
 ```
 
 ### Secrets Management
@@ -165,7 +162,6 @@ kubectl port-forward svc/grafana 3000:3000
 
 - **Backend API**: `/metrics` (Prometheus format)
 - **PostgreSQL**: via postgres_exporter
-- **Qdrant**: Built-in metrics endpoint
 
 ### Dashboards
 
@@ -212,10 +208,11 @@ spec:
 - **Horizontal**: Use read replicas (pg_pool, patroni)
 - **Managed**: Use RDS, Cloud SQL, or Azure Database
 
-### Vector Database Scaling
+### Vector Search Scaling
 
-- **Qdrant**: Supports clustering and sharding
-- See `kubernetes/qdrant-cluster.yaml` for multi-node setup
+Embeddings are stored in Postgres with pgvector, so they scale (and are
+backed up) with the database. Add an HNSW index once single agents hold
+more than ~100k memories.
 
 ---
 
@@ -234,12 +231,7 @@ kubectl exec -it postgres-0 -- pg_dump memro > backup.sql
 kubectl exec -i postgres-0 -- psql memro < backup.sql
 ```
 
-### Qdrant Backups
-
-```bash
-# Qdrant snapshots
-curl -X POST http://qdrant:6333/collections/memories/snapshots
-```
+Embeddings live in the same database, so `pg_dump` backs them up too.
 
 ---
 
@@ -318,15 +310,13 @@ jobs:
 ### Production (Small)
 
 - **Compute**: 2-4 vCPUs, 8-16 GB RAM
-- **Database**: Managed PostgreSQL (small instance)
-- **Vector DB**: Qdrant (2 GB RAM)
+- **Database**: Managed PostgreSQL with pgvector (small instance)
 - **Estimated**: $50-150/month
 
 ### Production (Medium)
 
 - **Compute**: 8-16 vCPUs, 32-64 GB RAM
-- **Database**: Managed PostgreSQL with read replicas
-- **Vector DB**: Qdrant cluster (3 nodes)
+- **Database**: Managed PostgreSQL with pgvector and read replicas
 - **Estimated**: $300-800/month
 
 ---
