@@ -45,3 +45,7 @@ logs/
 *.key
 *.p12
 secrets/
+
+# Python build output
+*.egg-info/
+.pytest_cache/

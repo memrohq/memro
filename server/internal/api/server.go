@@ -21,8 +21,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/memrohq/memro/server/config"
+	"github.com/memrohq/memro/server/extension"
 	"github.com/memrohq/memro/server/internal/auth"
-	"github.com/memrohq/memro/server/internal/config"
 	"github.com/memrohq/memro/server/internal/email"
 	"github.com/memrohq/memro/server/internal/embed"
 	"github.com/memrohq/memro/server/internal/engine"
@@ -40,6 +41,9 @@ type Server struct {
 	files   *filestore.Local
 	email   *email.Sender
 	replay  *auth.ReplayCache
+	meter   extension.UsageMeter
+	quota   extension.QuotaPolicy
+	extra   map[string]http.Handler
 
 	ipLimiter    *RateLimiter
 	agentLimiter *RateLimiter
@@ -54,12 +58,32 @@ type Deps struct {
 	Indexer engine.Indexer
 	Files   *filestore.Local
 	Email   *email.Sender
+
+	// Optional extension points; nil uses the open-source defaults.
+	Usage  extension.UsageMeter
+	Quota  extension.QuotaPolicy
+	Routes map[string]http.Handler // extra unauthenticated routes, e.g. billing webhooks
+}
+
+// StoreUsageMeter records usage in the tenant_usage table.
+func StoreUsageMeter(st *store.Store) extension.UsageMeter {
+	return extension.UsageMeterFunc(func(ctx context.Context, e extension.UsageEvent) error {
+		return st.RecordTenantUsage(ctx, e.TenantID, e.Metric, e.Value)
+	})
 }
 
 func NewServer(d Deps) *Server {
+	usage, quota := d.Usage, d.Quota
+	if usage == nil {
+		usage = StoreUsageMeter(d.Store)
+	}
+	if quota == nil {
+		quota = extension.PerAgentCap{Max: d.Config.MemorySoftCap}
+	}
 	return &Server{
 		cfg: d.Config, store: d.Store, engine: d.Engine, embed: d.Embed, indexer: d.Indexer,
 		files: d.Files, email: d.Email, replay: auth.NewReplayCache(),
+		meter: usage, quota: quota, extra: d.Routes,
 		ipLimiter:    NewRateLimiter(d.Config.RateLimitMax, d.Config.RateLimitWindow),
 		agentLimiter: NewRateLimiter(d.Config.RateLimitMax, d.Config.RateLimitWindow),
 		// Per-agent limits for the expensive cognitive endpoints.
@@ -112,6 +136,10 @@ func (s *Server) Handler() http.Handler {
 	protected("GET /tenant/{id}/usage", s.tenantUsage)
 	protected("POST /hooks", s.registerHook)
 	protected("GET /hooks/{event_type}", s.getHooks)
+
+	for pattern, h := range s.extra {
+		mux.Handle(pattern, h)
+	}
 
 	var h http.Handler = mux
 	h = s.limitBody(h)

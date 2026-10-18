@@ -22,11 +22,13 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/memrohq/memro/server/config"
+	"github.com/memrohq/memro/server/extension"
 	"github.com/memrohq/memro/server/internal/api"
-	"github.com/memrohq/memro/server/internal/config"
 	"github.com/memrohq/memro/server/internal/db"
 	"github.com/memrohq/memro/server/internal/email"
 	"github.com/memrohq/memro/server/internal/embed"
@@ -90,7 +92,7 @@ func newAgent(t *testing.T) agent {
 	return agent{hex.EncodeToString(pub), priv}
 }
 
-func setup(t *testing.T) *env {
+func setup(t *testing.T, customize ...func(*api.Deps)) *env {
 	url := os.Getenv("MEMRO_TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("MEMRO_TEST_DATABASE_URL not set")
@@ -120,8 +122,12 @@ func setup(t *testing.T) *env {
 	go ix.Run(ctx)
 	files, _ := filestore.NewLocal(cfg.FileStoragePath)
 	cfg.BaseURL = "http://example.test"
-	srv := api.NewServer(api.Deps{Config: cfg, Store: st, Engine: engine.New(pool, prov, ix), Embed: prov,
-		Indexer: ix, Files: files, Email: email.New("", 0, "", "", "")})
+	deps := api.Deps{Config: cfg, Store: st, Engine: engine.New(pool, prov, ix), Embed: prov,
+		Indexer: ix, Files: files, Email: email.New("", 0, "", "", "")}
+	for _, c := range customize {
+		c(&deps)
+	}
+	srv := api.NewServer(deps)
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
 	return &env{t, hs, st}
@@ -467,4 +473,48 @@ func TestFilesHooksTenants(t *testing.T) {
 	e.must(403, code, body, "delete another identity")
 	code, body = e.do(&a, "v1", "DELETE", "/identity/"+a.id, nil, nil)
 	e.must(204, code, body, "delete own identity")
+}
+
+func TestExtensionPoints(t *testing.T) {
+	var mu sync.Mutex
+	var events []extension.UsageEvent
+	meter := extension.UsageMeterFunc(func(_ context.Context, ev extension.UsageEvent) error {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, ev)
+		return nil
+	})
+	e := setup(t, func(d *api.Deps) {
+		d.Usage = meter
+		d.Quota = extension.PerAgentCap{Max: 2}
+		d.Routes = map[string]http.Handler{
+			"POST /billing/webhook": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusAccepted) }),
+		}
+	})
+	a := newAgent(t)
+	e.register(a)
+	e.remember(a, "first memory", "semantic")
+	e.remember(a, "second memory", "semantic")
+	code, body := e.do(&a, "v1", "POST", "/memory", j(map[string]any{"content": "third memory"}), nil)
+	e.must(403, code, body, "custom quota")
+	if !strings.Contains(string(body), "soft cap reached (2/agent)") {
+		t.Fatalf("quota message = %s", body)
+	}
+
+	code, body = e.do(&a, "v1", "GET", "/search?query=memory&mode=keyword", nil, nil)
+	e.must(200, code, body, "search")
+	mu.Lock()
+	got := map[string]int{}
+	for _, ev := range events {
+		if ev.AgentID == a.id {
+			got[ev.Metric]++
+		}
+	}
+	mu.Unlock()
+	if got[extension.MetricMemoriesStored] != 2 || got[extension.MetricMemoriesSearched] != 1 {
+		t.Fatalf("usage events = %v", got)
+	}
+
+	code, body = e.do(nil, "", "POST", "/billing/webhook", []byte("{}"), nil)
+	e.must(202, code, body, "extra route")
 }

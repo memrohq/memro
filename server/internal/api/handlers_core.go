@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/memrohq/memro/server/extension"
 	"github.com/memrohq/memro/server/internal/auth"
 	"github.com/memrohq/memro/server/internal/domain"
 	"github.com/memrohq/memro/server/internal/engine"
@@ -201,13 +203,7 @@ func (s *Server) createMemory(w http.ResponseWriter, r *http.Request) {
 // fires side effects. It writes the error response and returns false on failure.
 func (s *Server) saveMemory(w http.ResponseWriter, r *http.Request, a Agent, m *domain.Memory, action string) bool {
 	ctx := r.Context()
-	n, err := s.store.CountMemories(ctx, a.ID)
-	if err != nil {
-		httpError(w, http.StatusInternalServerError, "Failed to store memory")
-		return false
-	}
-	if n >= s.cfg.MemorySoftCap {
-		httpError(w, http.StatusForbidden, fmt.Sprintf("Memory soft cap reached (%d/agent). Please prune old memories to continue in Developer Preview.", s.cfg.MemorySoftCap))
+	if !s.allowWrite(w, r, a, 1) {
 		return false
 	}
 	if m.EntityTags == nil {
@@ -222,15 +218,39 @@ func (s *Server) saveMemory(w http.ResponseWriter, r *http.Request, a Agent, m *
 	return true
 }
 
+// allowWrite asks the quota policy whether the agent may add n memories and
+// writes the error response when it may not.
+func (s *Server) allowWrite(w http.ResponseWriter, r *http.Request, a Agent, n int) bool {
+	current, err := s.store.CountMemories(r.Context(), a.ID)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "Failed to store memory")
+		return false
+	}
+	if err := s.quota.AllowMemoryWrite(r.Context(), a.TenantID, a.ID, current, n); err != nil {
+		if errors.Is(err, extension.ErrQuotaExceeded) {
+			httpError(w, http.StatusForbidden, err.Error())
+		} else {
+			slog.Error("quota check", "err", err)
+			httpError(w, http.StatusInternalServerError, "Failed to check quota")
+		}
+		return false
+	}
+	return true
+}
+
+func (s *Server) recordUsage(r *http.Request, a Agent, metric string, value int64) {
+	if err := s.meter.Record(r.Context(), extension.UsageEvent{TenantID: a.TenantID, AgentID: a.ID, Metric: metric, Value: value}); err != nil {
+		slog.Warn("record usage", "metric", metric, "err", err)
+	}
+}
+
 func (s *Server) afterMemoryCreated(r *http.Request, a Agent, m *domain.Memory, action string) {
 	s.indexer.Enqueue(m.ID, m.AgentID, m.TenantID, m.Content)
 	s.engine.Cache().InvalidateAgent(a.ID)
 	metrics.MemoriesCreated.Inc()
 	id := m.ID.String()
 	s.audit(r, a, action, &id)
-	if err := s.store.RecordTenantUsage(r.Context(), a.TenantID, "memories_stored", 1); err != nil {
-		slog.Warn("record usage", "err", err)
-	}
+	s.recordUsage(r, a, extension.MetricMemoriesStored, 1)
 	if urls, err := s.store.GetHooks(r.Context(), a.TenantID, "memory_created"); err == nil {
 		hooks.Notify(urls, "memory_created", map[string]any{
 			"event": "memory_created", "memory_id": m.ID, "agent_id": m.AgentID,
@@ -320,8 +340,8 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var warning *string
-	if nodes > s.cfg.MemorySoftCap*8/10 {
-		warning = strPtr(fmt.Sprintf("Approaching memory soft cap (%d). Consider pruning.", s.cfg.MemorySoftCap))
+	if limit := s.quota.SoftLimit(ctx, a.TenantID, a.ID); limit > 0 && nodes > limit*8/10 {
+		warning = strPtr(fmt.Sprintf("Approaching memory soft cap (%d). Consider pruning.", limit))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"reason_calls": counts["mee.reason"], "deep_reason_calls": 0, "evolve_calls": counts["mee.evolve"],

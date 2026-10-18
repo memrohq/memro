@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    name: Server (Go)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: memro
+          POSTGRES_PASSWORD: memro
+          POSTGRES_DB: memro
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U memro"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - run: go vet ./...
+      - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - run: go test -race ./...
+        env:
+          MEMRO_TEST_DATABASE_URL: postgres://memro:memro@localhost:5432/memro
+      - name: Build Docker image
+        run: docker build -t memro:ci .
+
+  sdk-go:
+    name: SDK (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: sdk/go/go.mod
+      - run: go vet ./...
+      - run: go test ./...
+
+  sdk-python:
+    name: SDK (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e "sdk/python[dev]"
+      - run: pytest -q sdk/python/tests
+
+  mcp:
+    name: MCP server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e sdk/python -e mcp
+      - run: python -m compileall -q mcp/src
+      - name: Build Docker image
+        run: docker build -f mcp/Dockerfile -t memro-mcp:ci .

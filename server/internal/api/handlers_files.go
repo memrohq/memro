@@ -250,13 +250,7 @@ func (s *Server) uploadDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	chunks := extract.Chunk(text, docChunkRunes)
-	n, err := s.store.CountMemories(r.Context(), a.ID)
-	if err != nil {
-		httpError(w, http.StatusInternalServerError, "Failed to store memory")
-		return
-	}
-	if n+len(chunks) > s.cfg.MemorySoftCap {
-		httpError(w, http.StatusForbidden, "This document would exceed the memory soft cap for this agent")
+	if !s.allowWrite(w, r, a, len(chunks)) {
 		return
 	}
 	mems := []domain.Memory{}

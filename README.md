@@ -5,6 +5,7 @@
 Open-source memory infrastructure that gives AI agents continuity of self. Install with Docker, scale with managed cloud.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![CI](https://github.com/memrohq/memro/actions/workflows/ci.yml/badge.svg)](https://github.com/memrohq/memro/actions/workflows/ci.yml)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
 
 ---
@@ -30,7 +31,7 @@ memro.co is the **cognitive runtime for persistent AI agents**. It provides:
 ### Prerequisites
 - Docker & Docker Compose
 - 2GB RAM minimum
-- Ports 8081, 5432, 6333 available
+- Ports 8081 and 5432 available
 
 ### Installation
 
@@ -43,17 +44,34 @@ cd memro
 cp .env.example .env
 
 # Start all services
-docker-compose up -d
+docker compose up -d
 
 # Verify it's running
 curl http://localhost:8081/health
-# {"status":"ok"}
+# {"status":"ok","db":"ok","vector_store":"ok",...}
 ```
 
 **That's it!** memro.co is now running on your infrastructure.
 
 - **Backend API**: http://localhost:8081
-- **Infrastructure Explorer**: http://localhost:5174
+- **Developer dashboard**: http://localhost:5173
+
+---
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| [`server/`](server) | Memro API server (Go, Postgres + pgvector) |
+| [`sdk/js`](sdk/js), [`sdk/python`](sdk/python), [`sdk/go`](sdk/go) | Client SDKs |
+| [`mcp/`](mcp) | MCP server for Claude Desktop, Cursor, Zed and other MCP clients |
+| [`integrations/`](integrations) | VS Code and Acode extensions |
+| [`apps/dashboard/`](apps/dashboard) | Developer dashboard |
+| [`deploy/`](deploy), [`docs/deploy/`](docs/deploy) | Self-hosting configs and guides |
+| [`docs/spec/`](docs/spec) | Protocol specification |
+| [`bench/`](bench) | Benchmarks |
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
 ---
 

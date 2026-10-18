@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/memrohq/memro/server/extension"
 	"github.com/memrohq/memro/server/internal/domain"
 	"github.com/memrohq/memro/server/internal/engine"
 	"github.com/memrohq/memro/server/internal/extract"
@@ -74,9 +75,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	}
 	metrics.SearchesTotal.Inc()
 	s.audit(r, a, "memory.search", nil)
-	if err := s.store.RecordTenantUsage(r.Context(), a.TenantID, "memories_searched", 1); err != nil {
-		slog.Warn("record usage", "err", err)
-	}
+	s.recordUsage(r, a, extension.MetricMemoriesSearched, 1)
 	out := *resp
 	out.LatencyMS = time.Since(start).Milliseconds()
 	writeJSON(w, http.StatusOK, out)
