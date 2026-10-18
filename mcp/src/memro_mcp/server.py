@@ -19,7 +19,7 @@ from memro import Agent, MemroClient, MemroError
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.routing import Route, Mount
-from starlette.responses import Response, JSONResponse
+from starlette.responses import Response, JSONResponse, PlainTextResponse
 import uvicorn
 from memro_mcp.webhook_handler import process_webhook_event
 
@@ -700,10 +700,16 @@ async def handle_webhook(request):
     result = process_webhook_event(agent_id, payload)
     return JSONResponse(result)
 
+async def handle_healthz(request):
+    """Liveness probe for load balancers and blue-green deploys."""
+    return PlainTextResponse("ok")
+
 # Final App Assembly
 _base_app = Starlette(
-    debug=True,
+    # Debug pages leak stack traces; enable only for local development.
+    debug=os.getenv("MCP_DEBUG") == "1",
     routes=[
+        Route("/healthz", endpoint=handle_healthz, methods=["GET"]),
         Mount("/sse/messages", app=handle_messages),
         Mount("/sse", app=handle_sse),
         Route("/webhook/{agent_id}", endpoint=handle_webhook, methods=["POST"]),
