@@ -1,4 +1,4 @@
-// Package app builds and runs the Memro server. The open-source binary
+// Package app builds and runs the Memro server. The community binary
 // (cmd/memro-api) calls Run with no options; other distributions, such as
 // Memro Cloud, pass options to plug in their own metering, quotas and routes.
 package app

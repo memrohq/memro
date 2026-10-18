@@ -240,7 +240,7 @@ black .
 
 ## License
 
-Apache License 2.0 - see [LICENSE](../../LICENSE)
+[PolyForm Noncommercial License 1.0.0](../../LICENSE): free for non-commercial use. For commercial use see [memro.co](https://memro.co).
 
 ## Links
 

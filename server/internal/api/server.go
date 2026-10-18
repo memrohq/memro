@@ -59,7 +59,7 @@ type Deps struct {
 	Files   *filestore.Local
 	Email   *email.Sender
 
-	// Optional extension points; nil uses the open-source defaults.
+	// Optional extension points; nil uses the community defaults.
 	Usage  extension.UsageMeter
 	Quota  extension.QuotaPolicy
 	Routes map[string]http.Handler // extra unauthenticated routes, e.g. billing webhooks

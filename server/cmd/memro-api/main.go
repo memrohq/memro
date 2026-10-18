@@ -1,4 +1,4 @@
-// Command memro-api runs the open-source Memro HTTP API.
+// Command memro-api runs the community edition of the Memro HTTP API.
 package main
 
 import (

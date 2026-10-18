@@ -2,9 +2,9 @@
 
 **Memro gives AI agents memory that evolves and reasons over time.**
 
-Open-source memory infrastructure that gives AI agents continuity of self. Install with Docker, scale with managed cloud.
+Source-available memory infrastructure that gives AI agents continuity of self. Free for non-commercial use; commercial use through Memro Cloud.
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](LICENSE)
 [![CI](https://github.com/memrohq/memro/actions/workflows/ci.yml/badge.svg)](https://github.com/memrohq/memro/actions/workflows/ci.yml)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
 
@@ -271,7 +271,14 @@ npm run dev
 
 ## License
 
-Apache License 2.0 - see [LICENSE](LICENSE)
+Memro is **source-available** under the
+[PolyForm Noncommercial License 1.0.0](LICENSE). You can read, run and
+modify it for free for personal projects, research, education and
+non-profit organizations.
+
+**Commercial use is not permitted under this license.** To use Memro in a
+commercial product or service, use [Memro Cloud](https://memro.co) or get a
+commercial license from us via [memro.co](https://memro.co).
 
 ---
 

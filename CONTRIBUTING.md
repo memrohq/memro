@@ -1,7 +1,7 @@
 # Contributing to Memro
 
 Thanks for helping build Memro! This repository holds everything that is
-open source: the server, SDKs, MCP server, integrations, deployment configs
+source-available: the server, SDKs, MCP server, integrations, deployment configs
 and docs.
 
 ## Repository layout
@@ -76,5 +76,7 @@ Please don't open public issues for vulnerabilities; see
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the
-[Apache License 2.0](LICENSE).
+Memro is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+By contributing, you license your contributions to us under the terms of
+the [CLA](CLA.md), which lets us distribute them under this license and
+under commercial licenses.

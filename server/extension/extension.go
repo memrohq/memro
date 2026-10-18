@@ -1,6 +1,6 @@
 // Package extension defines the interfaces a Memro distribution can plug in
 // to customise behaviour without forking the server: usage metering and
-// quotas. The open-source server uses the defaults in this package.
+// quotas. The community server uses the defaults in this package.
 package extension
 
 import (

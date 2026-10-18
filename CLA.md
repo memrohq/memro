@@ -27,7 +27,7 @@ perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable
 copyright license to reproduce, prepare derivative works of, publicly
 display, publicly perform, sublicense and distribute Your Contributions and
 such derivative works, under the license terms of Our choosing, including
-licenses other than the Apache License 2.0.
+the PolyForm Noncommercial License and commercial licenses.
 
 ## 3. Grant of patent license
 
