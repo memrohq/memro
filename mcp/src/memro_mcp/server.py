@@ -41,7 +41,28 @@ except Exception:
     SERVER_VERSION = "0.0.0"
 
 # --- Core Objects (Module Level for Uvicorn Workers) ---
-server = Server("memro-memory")
+# Sent to every client on connect (MCP "instructions"); clients such as Claude
+# Code put it in the agent's context, so tools use Memro without being told.
+# memro-cli writes the same guidance into tools' global instruction files for
+# clients that ignore this; keep the two in step.
+INSTRUCTIONS = """\
+Memro is the user's long-term memory, shared across their AI tools and sessions.
+
+Use it without being asked:
+- At the start of a task or conversation, call `recall` with a short query about \
+the task (project, topic, people involved) and use what comes back.
+- When the user states a preference, makes a decision, corrects you, or you learn \
+a lasting fact about them or their project, call `remember` with one short, \
+self-contained sentence. Use type "semantic" for facts, "profile" for \
+preferences, "procedural" for how-tos, "episodic" for what happened.
+- Before answering questions about earlier work ("what did we decide about X?"), \
+`recall` first.
+
+Do not store secrets (API keys, passwords, tokens, private keys), one-off \
+chatter, or anything the user asks you not to keep. Do not announce routine \
+saves; mention a memory only when it changes your answer."""
+
+server = Server("memro-memory", version=SERVER_VERSION, instructions=INSTRUCTIONS)
 # Use a path that will be appended to our mount point
 sse = SseServerTransport("/messages/")
 
@@ -252,7 +273,11 @@ def _all_tools() -> list[Tool]:
     return [
         Tool(
             name="remember",
-            description="Store a new memory.",
+            description=(
+                "Save something worth knowing in future sessions: a preference, decision, "
+                "correction, or lasting fact about the user or their project. One short, "
+                "self-contained sentence per memory. Never store secrets."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -268,7 +293,10 @@ def _all_tools() -> list[Tool]:
         ),
         Tool(
             name="recall",
-            description="Search memories semantically.",
+            description=(
+                "Search the user's long-term memory. Call it at the start of a task and "
+                "before answering questions about earlier work, preferences or decisions."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -342,7 +370,7 @@ def _all_tools() -> list[Tool]:
         ),
         Tool(
             name="delete_memory",
-            description="Delete a specific memory by ID.",
+            description="Delete one memory by ID, e.g. when the user says it is wrong or asks you to forget it.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -358,7 +386,7 @@ def _all_tools() -> list[Tool]:
         ),
         Tool(
             name="get_recent_memories",
-            description="Get the most recent memories for the agent.",
+            description="List the most recently saved memories (newest first), e.g. to review what was stored.",
             inputSchema={
                 "type": "object",
                 "properties": {
