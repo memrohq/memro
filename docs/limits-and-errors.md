@@ -15,7 +15,7 @@ agent_id does not match authenticated identity
 |---|---|---|
 | `400` | Invalid input (bad JSON, empty content, unknown `memory_type`, query too long) | Fix the request |
 | `401` | Missing, invalid, revoked or expired credential; bad or reused signature; timestamp more than 5 minutes off | Check the key, your clock, and the signing payload |
-| `403` | Acting on another agent; an API key managing keys; memory limit reached | Use your own agent ID; use the dashboard; delete old memories |
+| `403` | Acting on another agent; an API key managing keys; memory limit or a monthly usage limit reached | Use your own agent ID; use the dashboard; delete old memories or wait for the next month |
 | `404` | No such memory, file, webhook or code (or it belongs to another agent) | |
 | `413` | Body larger than 10 MB | |
 | `429` | Rate limited | Back off and retry |
@@ -51,6 +51,15 @@ change the first two with `RATE_LIMIT_MAX` and `RATE_LIMIT_WINDOW_SECONDS`.
 | Request body (uploads included) | 10 MB (`MAX_BODY_BYTES`) |
 | API key name | 60 characters |
 | Webhook `event_type` | 50 characters |
+
+## Monthly usage limits
+
+A server can also limit, per calendar month (UTC), how many queries an agent
+makes (search, temporal search, reasoning, conflict analysis, atom
+generation), how many bytes it uploads, and how much text it stores
+(estimated as one token per four bytes). Over a limit, requests get `403`
+with a message saying which limit. Self-hosted servers have none unless you
+plug in a policy (`extension.UsageGate` in `server/extension`).
 
 ## Memory limit
 

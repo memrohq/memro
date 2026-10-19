@@ -15,7 +15,16 @@ import (
 const (
 	MetricMemoriesStored   = "memories_stored"
 	MetricMemoriesSearched = "memories_searched"
+
+	// Metrics a UsageGate is asked about before an action, and recorded after it.
+	MetricQueries      = "queries"       // search, temporal search, reason, conflict analysis, atom generation: 1 each
+	MetricIngestBytes  = "ingest_bytes"  // size of each uploaded file
+	MetricStoredTokens = "stored_tokens" // estimated tokens of memory text written (see EstimateTokens)
 )
+
+// EstimateTokens approximates the tokens in text as one per four bytes,
+// rounded up. It is the amount used for MetricStoredTokens.
+func EstimateTokens(text string) int64 { return int64((len(text) + 3) / 4) }
 
 // UsageEvent is one billable or reportable action.
 type UsageEvent struct {
@@ -65,6 +74,16 @@ type QuotaPolicy interface {
 	AllowMemoryWrite(ctx context.Context, tenantID uuid.UUID, agentID string, current, adding int) error
 	// SoftLimit is the per-agent memory limit reported to clients (0 = none).
 	SoftLimit(ctx context.Context, tenantID uuid.UUID, agentID string) int
+}
+
+// UsageGate is an optional extension of QuotaPolicy. When the configured
+// QuotaPolicy also implements it, the server calls AllowUsage before each
+// counted action (see the Metric* constants) and refuses the request with 403
+// and the error's message when it returns an error wrapping ErrQuotaExceeded.
+// It only decides: the server records a UsageEvent with the same metric and
+// amount after the action succeeds. agentID is always the caller's own agent.
+type UsageGate interface {
+	AllowUsage(ctx context.Context, tenantID uuid.UUID, agentID, metric string, amount int64) error
 }
 
 // PerAgentCap allows up to Max memories per agent; Max <= 0 means unlimited.

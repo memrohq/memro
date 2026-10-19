@@ -218,6 +218,9 @@ func (s *Server) saveMemory(w http.ResponseWriter, r *http.Request, a Agent, m *
 	if !s.allowWrite(w, r, a, 1) {
 		return false
 	}
+	if !s.gate(w, r, a, extension.MetricStoredTokens, extension.EstimateTokens(m.Content)) {
+		return false
+	}
 	if m.EntityTags == nil {
 		m.EntityTags = extract.Entities(m.Content)
 	}
@@ -250,6 +253,26 @@ func (s *Server) allowWrite(w http.ResponseWriter, r *http.Request, a Agent, n i
 	return true
 }
 
+// gate asks the quota policy, if it implements extension.UsageGate, whether
+// the caller may use amount of metric. It writes the error response (403
+// with the policy's message) and returns false when not.
+func (s *Server) gate(w http.ResponseWriter, r *http.Request, a Agent, metric string, amount int64) bool {
+	g, ok := s.quota.(extension.UsageGate)
+	if !ok || amount <= 0 {
+		return true
+	}
+	if err := g.AllowUsage(r.Context(), a.TenantID, a.ID, metric, amount); err != nil {
+		if errors.Is(err, extension.ErrQuotaExceeded) {
+			httpError(w, http.StatusForbidden, err.Error())
+		} else {
+			slog.Error("usage gate", "metric", metric, "err", err)
+			httpError(w, http.StatusInternalServerError, "Failed to check usage limits")
+		}
+		return false
+	}
+	return true
+}
+
 func (s *Server) recordUsage(r *http.Request, a Agent, metric string, value int64) {
 	if err := s.meter.Record(r.Context(), extension.UsageEvent{TenantID: a.TenantID, AgentID: a.ID, Metric: metric, Value: value}); err != nil {
 		slog.Warn("record usage", "metric", metric, "err", err)
@@ -263,6 +286,7 @@ func (s *Server) afterMemoryCreated(r *http.Request, a Agent, m *domain.Memory, 
 	id := m.ID.String()
 	s.audit(r, a, action, &id)
 	s.recordUsage(r, a, extension.MetricMemoriesStored, 1)
+	s.recordUsage(r, a, extension.MetricStoredTokens, extension.EstimateTokens(m.Content))
 	if urls, err := s.store.GetHooks(r.Context(), a.ID, "memory_created"); err == nil {
 		hooks.Notify(urls, "memory_created", map[string]any{
 			"event": "memory_created", "memory_id": m.ID, "agent_id": m.AgentID,

@@ -64,6 +64,9 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "mode must be one of hybrid, semantic, keyword")
 		return
 	}
+	if !s.gate(w, r, a, extension.MetricQueries, 1) {
+		return
+	}
 	resp, err := s.engine.Search(r.Context(), domain.SearchQuery{
 		AgentID: agentID, Query: query, Limit: intParam(r, "limit", 10, 50),
 		MemoryType: q.Get("memory_type"), Mode: mode,
@@ -76,6 +79,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	metrics.SearchesTotal.Inc()
 	s.audit(r, a, "memory.search", nil)
 	s.recordUsage(r, a, extension.MetricMemoriesSearched, 1)
+	s.recordUsage(r, a, extension.MetricQueries, 1)
 	out := *resp
 	out.LatencyMS = time.Since(start).Milliseconds()
 	writeJSON(w, http.StatusOK, out)
@@ -118,12 +122,16 @@ func (s *Server) searchTemporal(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.ParseFloat(q.Get("temporal_weight"), 32); err == nil {
 		tq.TemporalWeight = float32(min(1, max(0, v)))
 	}
+	if !s.gate(w, r, a, extension.MetricQueries, 1) {
+		return
+	}
 	items, err := s.engine.TemporalSearch(r.Context(), tq, a.TenantID)
 	if err != nil {
 		slog.Error("temporal search", "err", err)
 		httpError(w, http.StatusInternalServerError, "Temporal search failed")
 		return
 	}
+	s.recordUsage(r, a, extension.MetricQueries, 1)
 	writeJSON(w, http.StatusOK, map[string]any{"results": items, "total": len(items)})
 }
 
@@ -140,12 +148,16 @@ func (s *Server) temporalStats(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) analyzeConflicts(w http.ResponseWriter, r *http.Request) {
 	a := agentFrom(r)
+	if !s.gate(w, r, a, extension.MetricQueries, 1) {
+		return
+	}
 	res, err := s.engine.AnalyzeConflicts(r.Context(), a.ID, a.TenantID)
 	if err != nil {
 		slog.Error("analyze conflicts", "err", err)
 		httpError(w, http.StatusInternalServerError, "Conflict analysis failed")
 		return
 	}
+	s.recordUsage(r, a, extension.MetricQueries, 1)
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -170,6 +182,7 @@ func (s *Server) memoryChain(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) generateAtoms(w http.ResponseWriter, r *http.Request) {
+	a := agentFrom(r)
 	var req struct {
 		Chunk   string  `json:"chunk"`
 		Context *string `json:"context"`
@@ -178,11 +191,16 @@ func (s *Server) generateAtoms(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !s.gate(w, r, a, extension.MetricQueries, 1) {
+		return
+	}
 	preview := req.Chunk
 	if runes := []rune(preview); len(runes) > 100 {
 		preview = string(runes[:100]) + "..."
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"atomic_memories": extract.Atoms(req.Chunk), "chunk_preview": preview})
+	atoms := extract.Atoms(req.Chunk)
+	s.recordUsage(r, a, extension.MetricQueries, 1)
+	writeJSON(w, http.StatusOK, map[string]any{"atomic_memories": atoms, "chunk_preview": preview})
 }
 
 // --- MEE (cognitive engine) -----------------------------------------------------------
@@ -196,6 +214,9 @@ func (s *Server) reason(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "query is required")
 		return
 	}
+	if !s.gate(w, r, a, extension.MetricQueries, 1) {
+		return
+	}
 	s.audit(r, a, "mee.reason", nil)
 	res, err := s.engine.Reason(r.Context(), a.ID, a.TenantID, req.Query)
 	if err != nil {
@@ -203,6 +224,7 @@ func (s *Server) reason(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.recordUsage(r, a, extension.MetricQueries, 1)
 	writeJSON(w, http.StatusOK, res)
 }
 

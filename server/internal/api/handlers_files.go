@@ -70,6 +70,9 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !s.gate(w, r, a, extension.MetricIngestBytes, int64(len(data))) {
+		return
+	}
 	id := uuid.New()
 	path, err := s.files.Save(id, h.Filename, data)
 	if err != nil {
@@ -89,6 +92,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fid := id.String()
+	s.recordUsage(r, a, extension.MetricIngestBytes, int64(len(data)))
 	s.audit(r, a, "file.upload", &fid)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"file_id": fid, "file_name": h.Filename, "file_type": fileType,
@@ -205,6 +209,13 @@ func (s *Server) storeChunks(w http.ResponseWriter, r *http.Request, a Agent, f 
 	if !s.allowWrite(w, r, a, len(chunks)) {
 		return nil, false
 	}
+	var tokens int64
+	for _, c := range chunks {
+		tokens += extension.EstimateTokens(c)
+	}
+	if !s.gate(w, r, a, extension.MetricStoredTokens, tokens) {
+		return nil, false
+	}
 	mems := make([]domain.Memory, 0, len(chunks))
 	for i, c := range chunks {
 		now := time.Now().UTC()
@@ -225,6 +236,7 @@ func (s *Server) storeChunks(w http.ResponseWriter, r *http.Request, a Agent, f 
 	fid := f.ID.String()
 	s.audit(r, a, action, &fid)
 	s.recordUsage(r, a, extension.MetricMemoriesStored, int64(len(mems)))
+	s.recordUsage(r, a, extension.MetricStoredTokens, tokens)
 	return mems, true
 }
 
@@ -236,6 +248,9 @@ func (s *Server) uploadImage(w http.ResponseWriter, r *http.Request) {
 	data, h, _, err := formFile(r, "image")
 	if err != nil {
 		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.gate(w, r, a, extension.MetricIngestBytes, int64(len(data))) {
 		return
 	}
 	mimeType := mimeOf(h)
@@ -264,6 +279,7 @@ func (s *Server) uploadImage(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, "Failed to register file")
 		return
 	}
+	s.recordUsage(r, a, extension.MetricIngestBytes, int64(len(data)))
 	asset := s.cfg.BaseURL + "/assets/" + id.String()
 	now := time.Now().UTC()
 	m := &domain.Memory{ID: uuid.New(), AgentID: a.ID, TenantID: a.TenantID, Content: "[IMAGE ANALYSIS] " + desc,
@@ -282,6 +298,9 @@ func (s *Server) uploadDocument(w http.ResponseWriter, r *http.Request) {
 	data, h, _, err := formFile(r, "document")
 	if err != nil {
 		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.gate(w, r, a, extension.MetricIngestBytes, int64(len(data))) {
 		return
 	}
 	fileType := extract.DetectType(h.Filename, data)
@@ -319,6 +338,7 @@ func (s *Server) uploadDocument(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	s.recordUsage(r, a, extension.MetricIngestBytes, int64(len(data)))
 	writeJSON(w, http.StatusOK, mems)
 }
 

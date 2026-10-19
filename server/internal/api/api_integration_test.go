@@ -972,3 +972,92 @@ func TestMemoryFromLongFileIsChunked(t *testing.T) {
 		t.Fatalf("end of the document was lost: %s", body)
 	}
 }
+
+// gatePolicy is a QuotaPolicy that also implements extension.UsageGate: it
+// records every check and refuses queries once maxQueries have been allowed.
+type gatePolicy struct {
+	extension.PerAgentCap
+	mu         sync.Mutex
+	checks     []extension.UsageEvent
+	maxQueries int
+	queries    int
+}
+
+func (g *gatePolicy) AllowUsage(_ context.Context, tenantID uuid.UUID, agentID, metric string, amount int64) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.checks = append(g.checks, extension.UsageEvent{TenantID: tenantID, AgentID: agentID, Metric: metric, Value: amount})
+	if metric == extension.MetricQueries {
+		if g.queries >= g.maxQueries {
+			return &extension.QuotaError{Message: "Monthly query limit reached"}
+		}
+		g.queries++
+	}
+	return nil
+}
+
+func TestUsageGate(t *testing.T) {
+	var mu sync.Mutex
+	recorded := map[string]int64{}
+	meter := extension.UsageMeterFunc(func(_ context.Context, ev extension.UsageEvent) error {
+		mu.Lock()
+		defer mu.Unlock()
+		recorded[ev.Metric] += ev.Value
+		return nil
+	})
+	policy := &gatePolicy{maxQueries: 2}
+	e := setup(t, func(d *api.Deps) { d.Usage = meter; d.Quota = policy })
+	a := newAgent(t)
+	e.register(a)
+
+	e.remember(a, "deploys happen on tuesdays", "semantic") // 26 bytes -> 7 tokens
+	code, body := e.uploadForm(&a, "/upload", "file", "n.txt", []byte("twenty bytes of text"), map[string]string{"agent_id": a.id})
+	e.must(200, code, body, "upload")
+
+	code, body = e.do(&a, "v2", "GET", "/search?query=deploys&mode=keyword", nil, nil)
+	e.must(200, code, body, "first query")
+	code, body = e.do(&a, "v2", "GET", "/search/temporal?query=deploys", nil, nil)
+	e.must(200, code, body, "second query")
+	code, body = e.do(&a, "v2", "POST", "/mee/reason", j(map[string]string{"query": "when do deploys happen"}), nil)
+	e.must(403, code, body, "third query over the limit")
+	if !strings.Contains(string(body), "Monthly query limit reached") {
+		t.Fatalf("message = %s", body)
+	}
+
+	policy.mu.Lock()
+	for _, c := range policy.checks {
+		if c.AgentID != a.id {
+			t.Errorf("gate got agent %q, want %q", c.AgentID, a.id)
+		}
+	}
+	checks := append([]extension.UsageEvent(nil), policy.checks...)
+	policy.mu.Unlock()
+	want := map[string]int64{extension.MetricStoredTokens: 7, extension.MetricIngestBytes: 20, extension.MetricQueries: 3}
+	got := map[string]int64{}
+	for _, c := range checks {
+		got[c.Metric] += c.Value
+	}
+	for m, v := range want {
+		if got[m] != v {
+			t.Errorf("gate %s = %d, want %d (checks %+v)", m, got[m], v, checks)
+		}
+	}
+
+	// Only successful actions are recorded: two queries, not the refused third.
+	mu.Lock()
+	defer mu.Unlock()
+	if recorded[extension.MetricQueries] != 2 || recorded[extension.MetricStoredTokens] != 7 || recorded[extension.MetricIngestBytes] != 20 {
+		t.Fatalf("recorded = %v", recorded)
+	}
+}
+
+// A policy without UsageGate is never asked about usage.
+func TestQuotaPolicyWithoutGateIsUnchanged(t *testing.T) {
+	e := setup(t, func(d *api.Deps) { d.Quota = extension.PerAgentCap{Max: 100} })
+	a := newAgent(t)
+	e.register(a)
+	for i := range 3 {
+		code, body := e.do(&a, "v2", "GET", fmt.Sprintf("/search?query=q%d&mode=keyword", i), nil, nil)
+		e.must(200, code, body, "search")
+	}
+}
