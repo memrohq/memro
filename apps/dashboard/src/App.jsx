@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Login from "./components/Login";
 import CommandPalette from "./components/CommandPalette";
+import ExtensionView from "./views/ExtensionView";
+import { loadExtensions, withExtensions } from "./lib/extensions";
 import { Icon, Logo, Modal, Field, StatusPill, MEMORY_TYPES, TYPE_INFO } from "./components/ui";
 import { api } from "./lib/api";
 import Overview from "./views/Overview";
@@ -33,7 +35,6 @@ const NAV = [
     { id: "settings", label: "Settings", icon: "tune" },
   ] },
 ];
-const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items.map((i) => [i.id, i.label])));
 const DOCS_URL = "https://github.com/memrohq/memro/tree/main/docs#readme";
 
 // Files the server can turn into memories: images are described, documents chunked.
@@ -64,6 +65,8 @@ export default function App() {
   const [email, setEmail] = useState(() => store.get("memro_email"));
   const [connectCode, setConnectCode] = useState(initialConnectCode);
   const [theme, setTheme] = useTheme();
+  const [extensions, setExtensions] = useState([]);
+  const [systemDark, setSystemDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
 
   const [view, setView] = useState(() => (window.location.pathname.startsWith("/connect") ? "connect" : "overview"));
   const [navOpen, setNavOpen] = useState(false);
@@ -156,6 +159,30 @@ export default function App() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => setSystemDark(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  const dark = theme === "dark" || (theme === "system" && systemDark);
+
+  // Views a deployment adds through /extensions.json; /<id> or /x/<id> opens one.
+  useEffect(() => {
+    let alive = true;
+    loadExtensions(NAV.flatMap((g) => g.items.map((i) => i.id))).then((views) => {
+      if (!alive) return;
+      setExtensions(views);
+      const m = window.location.pathname.match(/^\/(?:x\/)?([a-z0-9-]+)\/?$/);
+      const hit = m && views.find((v) => v.id === m[1]);
+      if (hit) setView(`x:${hit.id}`);
+    });
+    return () => { alive = false; };
+  }, []);
+  const nav = useMemo(() => withExtensions(NAV, extensions), [extensions]);
+  const titles = useMemo(() => Object.fromEntries(nav.flatMap((g) => g.items.map((i) => [i.id, i.label]))), [nav]);
+  const activeExtension = extensions.find((v) => `x:${v.id}` === view);
+
   // ⌘K / Ctrl+K opens the command palette; "/" too, outside text fields.
   useEffect(() => {
     const onKey = (e) => {
@@ -171,6 +198,7 @@ export default function App() {
 
   const go = useCallback((id) => {
     setView(id); setNavOpen(false);
+    if (id.startsWith("x:")) { setConnectCode(null); window.history.replaceState(null, "", `/${id.slice(2)}`); return; }
     if (id !== "connect" && window.location.pathname !== "/") { setConnectCode(null); window.history.replaceState(null, "", "/"); }
   }, []);
 
@@ -265,7 +293,7 @@ export default function App() {
   const themeIcon = theme === "light" ? "light_mode" : theme === "dark" ? "dark_mode" : "contrast";
 
   const commands = useMemo(() => [
-    ...NAV.flatMap((g) => g.items.map((i) => ({ id: `go-${i.id}`, label: i.label, icon: i.icon, group: "Go to", run: () => go(i.id) }))),
+    ...nav.flatMap((g) => g.items.map((i) => ({ id: `go-${i.id}`, label: i.label, icon: i.icon, group: "Go to", run: () => go(i.id) }))),
     { id: "add", label: "Add memory", icon: "add", group: "Actions", hint: "N", run: () => setAddOpen(true) },
     { id: "upload", label: "Upload files", icon: "upload", group: "Actions", run: () => fileRef.current?.click() },
     { id: "export", label: "Export all memories", icon: "download", group: "Actions", run: exportData },
@@ -273,7 +301,7 @@ export default function App() {
     { id: "docs", label: "Open documentation", icon: "menu_book", group: "Help", run: () => window.open(DOCS_URL, "_blank", "noopener") },
     { id: "signout", label: "Sign out", icon: "logout", group: "Account", run: signOut },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [go, theme, signOut, agentId]);
+  ], [go, theme, signOut, agentId, nav]);
 
   if (!sessionToken) {
     return (
@@ -313,7 +341,7 @@ export default function App() {
         </div>
 
         <nav className="flex-1 overflow-y-auto scroll-thin px-3 pb-3">
-          {NAV.map((g) => (
+          {nav.map((g) => (
             <div key={g.group} className="mt-4">
               <p className="label px-3 mb-1.5">{g.group}</p>
               {g.items.map((item) => {
@@ -380,7 +408,7 @@ export default function App() {
           <nav className="flex items-center gap-1.5 text-[13px] min-w-0" aria-label="Breadcrumb">
             <span className="text-subtle hidden sm:inline">Dashboard</span>
             <Icon name="chevron_right" className="text-subtle !text-[16px] hidden sm:inline" />
-            <span className="font-medium truncate">{TITLES[view]}</span>
+            <span className="font-medium truncate">{titles[view]}</span>
           </nav>
           <div className="ml-auto flex items-center gap-2">
             <StatusPill ok={health.api === "ok"} okText="Operational" badText="Offline" />
@@ -393,7 +421,9 @@ export default function App() {
         <main className="flex-1 overflow-y-auto scroll-thin">
           <div className="max-w-[1240px] mx-auto px-4 md:px-8 py-6 md:py-8">
             <div key={view} className="fade-in">
-              {view === "connect" ? (
+              {activeExtension ? (
+                <ExtensionView view={activeExtension} dark={dark} />
+              ) : view === "connect" ? (
                 <Connect apiBase={apiBase} auth={auth} code={connectCode} onDone={() => go("overview")} onCopy={copy} notify={notify} />
               ) : view === "keys" ? (
                 <Keys apiBase={apiBase} auth={auth} onCopy={copy} notify={notify} />
