@@ -47,6 +47,7 @@ type Server struct {
 
 	ipLimiter    *RateLimiter
 	agentLimiter *RateLimiter
+	otpLimiter   *RateLimiter // sign-in codes requested per email
 	meeLimiters  map[string]*RateLimiter
 }
 
@@ -86,6 +87,7 @@ func NewServer(d Deps) *Server {
 		meter: usage, quota: quota, extra: d.Routes,
 		ipLimiter:    NewRateLimiter(d.Config.RateLimitMax, d.Config.RateLimitWindow),
 		agentLimiter: NewRateLimiter(d.Config.RateLimitMax, d.Config.RateLimitWindow),
+		otpLimiter:   NewRateLimiter(otpCodesPerHour, time.Hour),
 		// Per-agent limits for the expensive cognitive endpoints.
 		meeLimiters: map[string]*RateLimiter{
 			"/mee/reason":  NewRateLimiter(20, time.Minute),
@@ -399,14 +401,20 @@ func recoverPanics(next http.Handler) http.Handler {
 	})
 }
 
+// clientIP returns the caller's address. Behind a trusted proxy it prefers
+// X-Real-IP, which the proxy sets itself, and otherwise the last
+// X-Forwarded-For entry, the one the proxy appended. Earlier entries come
+// from the client and can be forged.
 func (s *Server) clientIP(r *http.Request) string {
 	if s.cfg.TrustProxyHeaders {
-		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-			first, _, _ := strings.Cut(fwd, ",")
-			return strings.TrimSpace(first)
-		}
-		if real := r.Header.Get("X-Real-Ip"); real != "" {
+		if real := strings.TrimSpace(r.Header.Get("X-Real-Ip")); real != "" {
 			return real
+		}
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			parts := strings.Split(fwd, ",")
+			if last := strings.TrimSpace(parts[len(parts)-1]); last != "" {
+				return last
+			}
 		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)

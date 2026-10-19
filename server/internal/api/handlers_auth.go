@@ -15,6 +15,8 @@ const (
 	otpTTL         = 15 * time.Minute
 	sessionTTL     = 7 * 24 * time.Hour
 	maxOTPAttempts = 5
+	// With 5 attempts per code this allows 25 guesses an hour per email.
+	otpCodesPerHour = 5
 )
 
 type authMessage struct {
@@ -44,6 +46,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	code, err := auth.NewOTP()
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "Failed to generate code")
+		return
+	}
+	if !s.otpLimiter.Allow(email) {
+		httpError(w, http.StatusTooManyRequests, "Too many sign-in codes requested. Try again later.")
 		return
 	}
 	ctx, tenant := r.Context(), domain.DefaultTenantID
@@ -94,20 +100,33 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusUnauthorized, "Invalid OTP")
 		return
 	}
-	if user.OTPAttempts >= maxOTPAttempts {
-		httpError(w, http.StatusTooManyRequests, "Too many attempts. Request a new code.")
-		return
-	}
 	if time.Now().After(*user.OTPExpiresAt) {
 		httpError(w, http.StatusUnauthorized, "OTP expired")
 		return
 	}
-	if !auth.EqualHash(*user.OTPHash, auth.HashOTP(email, code)) {
-		_ = s.store.IncrementOTPAttempts(ctx, user.ID)
+	// The attempt is counted before the code is compared, atomically, so
+	// parallel guesses share the same small budget.
+	allowed, err := s.store.ReserveOTPAttempt(ctx, user.ID, maxOTPAttempts)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, "Database error")
+		return
+	}
+	if !allowed {
+		httpError(w, http.StatusTooManyRequests, "Too many attempts. Request a new code.")
+		return
+	}
+	hash := auth.HashOTP(email, code)
+	if !auth.EqualHash(*user.OTPHash, hash) {
 		httpError(w, http.StatusUnauthorized, "Invalid OTP")
 		return
 	}
-	_ = s.store.ClearUserOTP(ctx, user.ID)
+	if ok, err := s.store.ConsumeUserOTP(ctx, user.ID, hash); err != nil {
+		httpError(w, http.StatusInternalServerError, "Database error")
+		return
+	} else if !ok {
+		httpError(w, http.StatusUnauthorized, "Invalid OTP")
+		return
+	}
 
 	token, hash, err := auth.NewSessionToken()
 	if err != nil {

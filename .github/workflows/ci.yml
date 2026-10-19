@@ -77,8 +77,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e sdk/python -e mcp
+      - run: pip install -e sdk/python -e mcp pytest httpx
       - run: python -m compileall -q mcp/src
+      - run: pytest -q mcp/tests
       - name: Build Docker image
         run: docker build -f mcp/Dockerfile -t memro-mcp:ci .
 

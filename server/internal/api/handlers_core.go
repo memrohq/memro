@@ -251,7 +251,7 @@ func (s *Server) afterMemoryCreated(r *http.Request, a Agent, m *domain.Memory, 
 	id := m.ID.String()
 	s.audit(r, a, action, &id)
 	s.recordUsage(r, a, extension.MetricMemoriesStored, 1)
-	if urls, err := s.store.GetHooks(r.Context(), a.TenantID, "memory_created"); err == nil {
+	if urls, err := s.store.GetHooks(r.Context(), a.ID, "memory_created"); err == nil {
 		hooks.Notify(urls, "memory_created", map[string]any{
 			"event": "memory_created", "memory_id": m.ID, "agent_id": m.AgentID,
 			"content": m.Content, "memory_type": m.MemoryType,
@@ -462,7 +462,7 @@ func (s *Server) registerHook(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.store.RegisterHook(r.Context(), a.TenantID, req.EventType, req.URL); err != nil {
+	if err := s.store.RegisterHook(r.Context(), a.TenantID, a.ID, req.EventType, req.URL); err != nil {
 		slog.Error("register hook", "err", err)
 		httpError(w, http.StatusInternalServerError, "Failed to register hook")
 		return
@@ -471,7 +471,7 @@ func (s *Server) registerHook(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getHooks(w http.ResponseWriter, r *http.Request) {
-	urls, err := s.store.GetHooks(r.Context(), agentFrom(r).TenantID, r.PathValue("event_type"))
+	urls, err := s.store.GetHooks(r.Context(), agentFrom(r).ID, r.PathValue("event_type"))
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "Failed to retrieve hooks")
 		return

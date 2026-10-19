@@ -13,6 +13,7 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0005](0005-request-signing.md) | Request signing v1/v2 and key formats | 2026-10-18 | Accepted |
 | [0006](0006-api-keys-and-device-login.md) | API keys and device-code login for `memro connect` | 2026-10-19 | Accepted |
 | [0007](0007-no-private-keys-in-the-browser.md) | No private keys in the browser; one credential per surface | 2026-10-19 | Accepted |
+| [0008](0008-security-review-fixes.md) | Per-agent webhooks, credentialed MCP connections, real client IPs | 2026-10-19 | Accepted |
 
 Template:
 

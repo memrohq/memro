@@ -38,6 +38,10 @@ type Indexer struct {
 	provider *embed.Provider
 	queue    chan task
 	wg       sync.WaitGroup
+
+	// OnIndexed, if set, is called with each agent whose memories just got
+	// embeddings, so cached search results that predate them are dropped.
+	OnIndexed func(agentID string)
 }
 
 func New(s *store.Store, p *embed.Provider) *Indexer {
@@ -119,9 +123,17 @@ func (ix *Indexer) process(ctx context.Context, tasks []task) {
 		slog.Error("embedding batch failed; will retry on backfill", "size", len(tasks), "err", err)
 		return
 	}
+	indexed := map[string]bool{}
 	for i, t := range tasks {
 		if err := ix.store.UpsertEmbedding(cctx, t.memoryID, t.tenantID, t.agentID, ix.provider.Model(), vecs[i]); err != nil {
 			slog.Error("store embedding failed", "memory_id", t.memoryID, "err", err)
+			continue
+		}
+		indexed[t.agentID] = true
+	}
+	if ix.OnIndexed != nil {
+		for agentID := range indexed {
+			ix.OnIndexed(agentID)
 		}
 	}
 }

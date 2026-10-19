@@ -18,7 +18,7 @@ Memories, the knowledge graph and embeddings all live in that database.
 ## Configuration
 
 All configuration is through environment variables; see [`../.env.example`](../.env.example).
-Behind a reverse proxy or load balancer, set `TRUST_PROXY_HEADERS=true` so rate limits use the real client IP.
+Behind a reverse proxy or load balancer, set `TRUST_PROXY_HEADERS=true` so rate limits use the real client IP. The proxy should set `X-Real-IP` to the client address (Caddy: `header_up X-Real-IP {client_ip}`; nginx: `proxy_set_header X-Real-IP $remote_addr`). Without it the last `X-Forwarded-For` entry is used, so the proxy must append the client address.
 
 ## Backups
 

@@ -23,7 +23,6 @@ from starlette.requests import Request
 from starlette.routing import Route, Mount
 from starlette.responses import Response, JSONResponse, PlainTextResponse
 import uvicorn
-from memro_mcp.webhook_handler import process_webhook_event
 
 try:
     import uvloop
@@ -39,31 +38,57 @@ sse = SseServerTransport("/messages/")
 # Context variables for request-scoped state
 current_session_id: ContextVar[str] = ContextVar("session_id", default="default")
 current_auth_info: ContextVar[dict] = ContextVar("auth_info", default={})
+# The agent an SSE connection authenticated as; tool calls on that connection
+# run in its context.
+current_agent: ContextVar = ContextVar("agent", default=None)
+# The end user's address, passed on to the API so its per-IP rate limit
+# applies per user rather than to the MCP server as a whole.
+current_client_ip: ContextVar = ContextVar("client_ip", default=None)
 
-# In SaaS/Managed mode, we store agents per session
-_session_agents = {}
+# Over HTTP every request must bring its own credential. The environment
+# fallbacks (MEMRO_API_KEY, MEMRO_AGENT_ID/MEMRO_PRIVATE_KEY, a throwaway
+# identity) are only for a local stdio server, where there is one user.
+HTTP_MODE = os.getenv("MCP_TRANSPORT", "stdio").lower() != "stdio"
+# Legacy: accept an agent's private key as the SSE token. Off by default,
+# since the key travels in the URL.
+ALLOW_PRIVATE_KEY_AUTH = os.getenv("MCP_ALLOW_PRIVATE_KEY_AUTH") == "1"
+
+
+class AuthRequired(Exception):
+    pass
 
 # API key (memro_sk_...) -> Agent, so whoami is resolved once per key.
 _api_key_agents: dict = {}
 API_KEY_PREFIX = "memro_sk_"
 
 
+class ForwardingClient(MemroClient):
+    """MemroClient that tells the API which end user a request is for."""
+
+    def _auth_headers(self, agent_id: str, private_key: str, body: bytes) -> dict:
+        headers = super()._auth_headers(agent_id, private_key, body)
+        ip = current_client_ip.get()
+        if ip:
+            headers["X-Real-IP"] = ip
+        return headers
+
+
 def agent_for_api_key(api_key: str) -> Agent:
     agent = _api_key_agents.get(api_key)
     if agent is None:
         base_url = os.getenv("MEMRO_BASE_URL", "http://localhost:8081")
-        agent = Agent.from_api_key(api_key, client=MemroClient(base_url, api_key=api_key))
+        agent = Agent.from_api_key(api_key, client=ForwardingClient(base_url, api_key=api_key))
         if len(_api_key_agents) > 10_000:
             _api_key_agents.clear()
         _api_key_agents[api_key] = agent
     return agent
 
-# Global logging setup
+# Logs go to stderr (stdout is the stdio transport). Tool arguments contain
+# memory content and are never logged.
 logging.basicConfig(
-    filename='/tmp/memro_mcp_debug.log',
-    level=logging.DEBUG,
+    stream=sys.stderr,
+    level=os.getenv("MCP_LOG_LEVEL", "INFO").upper(),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    filemode='a'
 )
 logger = logging.getLogger("memro_mcp")
 
@@ -142,46 +167,38 @@ class CoordinationEngine:
 
 # --- Helper Functions ---
 
-def get_agent_for_session(session_id: str = None, agent_id: str = None, token: str = None):
-    """Resolves the Agent with Stateless Auth priority."""
-    global _session_agents
-    
-    if not agent_id or not token:
-        auth = current_auth_info.get()
-        agent_id = agent_id or auth.get("agent_id")
-        token = token or auth.get("token")
+def resolve_agent(agent_id: str = None, token: str = None) -> Agent:
+    """Return the agent for a credential. Raises AuthRequired over HTTP when
+    the request has no usable credential."""
+    if token and token.startswith(API_KEY_PREFIX):
+        return agent_for_api_key(token)
 
-    # API keys identify the agent by themselves (hosted /mcp, MEMRO_API_KEY).
-    api_key = token if token and token.startswith(API_KEY_PREFIX) else os.getenv("MEMRO_API_KEY")
-    if api_key:
-        return agent_for_api_key(api_key)
-    
-    if session_id and session_id in _session_agents:
-        cached_agent = _session_agents[session_id]
-        if not agent_id or cached_agent.agent_id == agent_id:
-            return cached_agent
-        
     base_url = os.getenv("MEMRO_BASE_URL", "http://localhost:8081")
-    client = MemroClient(base_url)
-    
-    if token and agent_id:
-        clean_token = token[3:] if token.startswith("sk_") else token
-        agent = Agent(agent_id=agent_id, private_key=clean_token, client=client)
-        if session_id:
-            _session_agents[session_id] = agent
+    if HTTP_MODE:
+        if ALLOW_PRIVATE_KEY_AUTH and token and agent_id:
+            key = token[3:] if token.startswith("sk_") else token
+            return Agent(agent_id=agent_id, private_key=key, client=ForwardingClient(base_url))
+        raise AuthRequired("Send a memro_sk_ API key (Authorization: Bearer ...). Run `npx memro connect` to get one.")
+
+    if os.getenv("MEMRO_API_KEY"):
+        return agent_for_api_key(os.getenv("MEMRO_API_KEY"))
+    if os.getenv("MEMRO_AGENT_ID") and os.getenv("MEMRO_PRIVATE_KEY"):
+        return Agent.from_env(client=ForwardingClient(base_url))
+    global _local_agent
+    if _local_agent is None:
+        _local_agent = Agent.create(client=ForwardingClient(base_url))
+    return _local_agent
+
+
+_local_agent = None
+
+
+def current_request_agent() -> Agent:
+    agent = current_agent.get()
+    if agent is not None:
         return agent
-            
-    env_agent_id = os.getenv("MEMRO_AGENT_ID")
-    env_private_key = os.getenv("MEMRO_PRIVATE_KEY")
-    
-    if env_agent_id and env_private_key:
-        agent = Agent.from_env(client=client)
-    else:
-        agent = Agent.create(client=client)
-        
-    if session_id:
-        _session_agents[session_id] = agent
-    return agent
+    auth = current_auth_info.get()
+    return resolve_agent(auth.get("agent_id"), auth.get("token"))
 
 # --- MCP Tool Handlers ---
 
@@ -359,9 +376,8 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
     """Standard Tool Execution with Session/Agent scoping."""
     try:
         session_id = current_session_id.get()
-        agent = get_agent_for_session(session_id=session_id)
-        logger.info(f"Tool call: {name} | session={session_id} | agent={agent.agent_id}")
-        logger.debug(f"Arguments: {arguments}")
+        agent = current_request_agent()
+        logger.info(f"Tool call: {name} | agent={agent.agent_id[:12]}")
         
         if name == "remember":
             content = arguments.get("content")
@@ -660,8 +676,11 @@ class AuthMiddleware:
             agent_id = agent_id or request.query_params.get("agent_id")
             token = token or request.query_params.get("token") or request.headers.get("Authorization", "")[7:]
 
-        logger.debug(f"AuthMiddleware: {scope['method']} {path} | agent={agent_id} session={session_id}")
 
+        # The edge proxy sets X-Real-IP to the caller's address.
+        headers = dict(scope.get("headers") or [])
+        client_ip = headers.get(b"x-real-ip", b"").decode().strip() or (scope.get("client") or [None])[0]
+        t_ip = current_client_ip.set(client_ip)
         t_sid = current_session_id.set(session_id or "default")
         t_auth = current_auth_info.set({"agent_id": agent_id, "token": token})
         
@@ -670,27 +689,46 @@ class AuthMiddleware:
         finally:
             current_auth_info.reset(t_auth)
             current_session_id.reset(t_sid)
+            current_client_ip.reset(t_ip)
 
 # --- ASGI SSE Handler ---
 
-async def handle_sse(scope, receive, send):
-    """Refined SSE stream handler with heartbeats."""
+def _unauthorized(message: str) -> JSONResponse:
+    return JSONResponse({"error": "unauthorized", "message": message}, status_code=401,
+                        headers={"WWW-Authenticate": 'Bearer realm="memro"'})
+
+
+async def _authenticate_request():
+    """Resolve the caller's agent, or return an error response."""
     auth = current_auth_info.get()
-    agent_id = auth.get("agent_id")
-    token = auth.get("token")
+    try:
+        return await asyncio.to_thread(resolve_agent, auth.get("agent_id"), auth.get("token")), None
+    except AuthRequired as e:
+        return None, _unauthorized(str(e))
+    except MemroError as e:
+        if e.status_code in (401, 403):
+            return None, _unauthorized(str(e))
+        return None, JSONResponse({"error": "upstream_error", "message": str(e)}, status_code=502)
+    except Exception:
+        logger.exception("Memro API unreachable while checking credentials")
+        return None, JSONResponse({"error": "upstream_error", "message": "Memro API is unreachable"}, status_code=502)
+
+
+async def handle_sse(scope, receive, send):
+    """Legacy SSE transport. The connection is bound to the agent it
+    authenticated as; tool calls on it run as that agent."""
+    agent, error = await _authenticate_request()
+    if error is not None:
+        return await error(scope, receive, send)
+    current_agent.set(agent)
+    agent_id = agent.agent_id[:12]
 
     async def wrapped_send(message):
         if message.get("type") == "http.response.body":
             body = message.get("body", b"").decode(errors="ignore")
             if "event: endpoint" in body:
-                # Use a cleaner endpoint path
-                auth_params = f"&agent_id={agent_id or 'default'}&token={token or ''}"
-                # The data portion usually looks like 'data: /messages/?session_id=...'
-                # We want it to be '/sse/messages/?session_id=...'
-                new_body = re.sub(r"data: /messages/", "data: /sse/messages/", body)
-                new_body = re.sub(r"(data: [^\n\s?]+(\?[^\n\s]+)?)", r"\1" + auth_params, new_body)
-                message["body"] = new_body.encode()
-                logger.debug(f"Sent endpoint event: {new_body.strip()}")
+                # The transport advertises /messages/; it is mounted at /sse/messages/.
+                message["body"] = re.sub(r"data: /messages/", "data: /sse/messages/", body).encode()
         await send(message)
 
     async with sse.connect_sse(scope, receive, wrapped_send) as (read_stream, write_stream):
@@ -721,16 +759,6 @@ async def handle_messages(scope, receive, send):
     logger.debug(f"Proxying POST message for session {current_session_id.get()}")
     await sse.handle_post_message(scope, receive, send)
 
-async def handle_webhook(request):
-    agent_id = request.path_params.get("agent_id")
-    try:
-        payload = await request.json()
-    except Exception:
-        payload = {}
-    
-    result = process_webhook_event(agent_id, payload)
-    return JSONResponse(result)
-
 async def handle_healthz(request):
     """Liveness probe for load balancers and blue-green deploys."""
     return PlainTextResponse("ok")
@@ -748,22 +776,10 @@ class StreamableHTTPApp:
     async def __call__(self, scope, receive, send):
         token = current_auth_info.get().get("token") or ""
         if not token.startswith(API_KEY_PREFIX):
-            response = JSONResponse(
-                {"error": "unauthorized", "message": "Send Authorization: Bearer <memro_sk_ API key>. Run `npx memro connect` to get one."},
-                status_code=401,
-                headers={"WWW-Authenticate": 'Bearer realm="memro"'},
-            )
-            return await response(scope, receive, send)
-        try:
-            await asyncio.to_thread(agent_for_api_key, token)
-        except MemroError as e:
-            status = 401 if e.status_code in (401, 403) else 502
-            response = JSONResponse({"error": "unauthorized" if status == 401 else "upstream_error", "message": str(e)}, status_code=status)
-            return await response(scope, receive, send)
-        except Exception:
-            logger.exception("Memro API unreachable while checking API key")
-            response = JSONResponse({"error": "upstream_error", "message": "Memro API is unreachable"}, status_code=502)
-            return await response(scope, receive, send)
+            return await _unauthorized("Send Authorization: Bearer <memro_sk_ API key>. Run `npx memro connect` to get one.")(scope, receive, send)
+        _, error = await _authenticate_request()
+        if error is not None:
+            return await error(scope, receive, send)
         await session_manager.handle_request(scope, receive, send)
 
 
@@ -783,7 +799,6 @@ _base_app = Starlette(
         Route("/mcp", endpoint=StreamableHTTPApp(), methods=["GET", "POST", "DELETE"]),
         Mount("/sse/messages", app=handle_messages),
         Mount("/sse", app=handle_sse),
-        Route("/webhook/{agent_id}", endpoint=handle_webhook, methods=["POST"]),
     ]
 )
 starlette_app = AuthMiddleware(_base_app)

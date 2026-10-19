@@ -15,8 +15,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/memrohq/memro/server/extension"
 	"github.com/memrohq/memro/server/internal/domain"
 	"github.com/memrohq/memro/server/internal/extract"
+	"github.com/memrohq/memro/server/internal/metrics"
 	"github.com/memrohq/memro/server/internal/store"
 )
 
@@ -268,7 +270,9 @@ func (s *Server) uploadDocument(w http.ResponseWriter, r *http.Request) {
 		mems = append(mems, m)
 	}
 	s.engine.Cache().InvalidateAgent(a.ID)
+	metrics.MemoriesCreated.Add(float64(len(mems)))
 	s.audit(r, a, "memory.doc_upload", nil)
+	s.recordUsage(r, a, extension.MetricMemoriesStored, int64(len(mems)))
 	writeJSON(w, http.StatusOK, mems)
 }
 

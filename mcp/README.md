@@ -90,5 +90,14 @@ docker-compose up -d
 | `MEMRO_AGENT_ID` | No* | auto-created | Your agent's public key |
 | `MEMRO_PRIVATE_KEY` | No* | auto-created | Your agent's private key |
 | `MEMRO_BASE_URL` | No | `http://localhost:8081` | memro backend URL |
+| `MEMRO_API_KEY` | No* | — | A `memro_sk_` API key (stdio only) |
+| `MCP_TRANSPORT` | No | `stdio` | `stdio`, or `sse` to serve `/mcp` and `/sse` over HTTP |
+| `MCP_LOG_LEVEL` | No | `INFO` | Log level; logs go to stderr and never include tool arguments |
+| `MCP_ALLOW_PRIVATE_KEY_AUTH` | No | off | HTTP only: accept `agent_id` + private key on `/sse` (legacy, self-hosting) |
 
-*First run will auto-create and print credentials. Save them for future runs.
+*Stdio only. First run will auto-create and print credentials. Save them for future runs.
+
+Over HTTP every connection must authenticate with its own API key:
+`Authorization: Bearer memro_sk_...` (or `?token=memro_sk_...` for SSE
+clients that cannot send headers). The server's own environment
+credentials are never used for HTTP requests. See ADR 0008.

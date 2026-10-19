@@ -129,7 +129,9 @@ func setup(t *testing.T, customize ...func(*api.Deps)) *env {
 	go ix.Run(ctx)
 	files, _ := filestore.NewLocal(cfg.FileStoragePath)
 	cfg.BaseURL = "http://example.test"
-	deps := api.Deps{Config: cfg, Store: st, Engine: engine.New(pool, prov, ix), Embed: prov,
+	eng := engine.New(pool, prov, ix)
+	ix.OnIndexed = eng.Cache().InvalidateAgent
+	deps := api.Deps{Config: cfg, Store: st, Engine: eng, Embed: prov,
 		Indexer: ix, Files: files, Email: email.New("", 0, "", "", "")}
 	for _, c := range customize {
 		c(&deps)
@@ -675,4 +677,88 @@ func TestSignInDoesNotReturnPrivateKey(t *testing.T) {
 	}
 	code, body = e.do(nil, "", "POST", "/memory", j(map[string]any{"content": "saved with a session"}), bearer)
 	e.must(200, code, body, "memory via session")
+}
+
+// Webhooks belong to the agent that registered them, even when agents share
+// a tenant.
+func TestHooksAreScopedToTheAgent(t *testing.T) {
+	e := setup(t)
+	a, b := newAgent(t), newAgent(t)
+	e.register(a)
+	e.register(b)
+	code, body := e.do(&a, "v1", "POST", "/hooks", j(map[string]string{"event_type": "memory_created", "url": "https://a.example.com/hook"}), nil)
+	e.must(201, code, body, "register hook as A")
+
+	code, body = e.do(&b, "v1", "GET", "/hooks/memory_created", nil, nil)
+	e.must(200, code, body, "list hooks as B")
+	if strings.Contains(string(body), "a.example.com") {
+		t.Fatalf("B sees A's hook: %s", body)
+	}
+	if urls, err := e.st.GetHooks(context.Background(), b.id, "memory_created"); err != nil || len(urls) != 0 {
+		t.Fatalf("B's memories would notify %v (err %v)", urls, err)
+	}
+	if urls, _ := e.st.GetHooks(context.Background(), a.id, "memory_created"); len(urls) != 1 {
+		t.Fatalf("A's hooks = %v", urls)
+	}
+}
+
+func (e *env) userWithCode(code string) string {
+	e.t.Helper()
+	ctx := context.Background()
+	email := fmt.Sprintf("otp-%d@example.com", time.Now().UnixNano())
+	if err := e.st.EnsureUser(ctx, email, uuid.Nil); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := e.st.SetUserOTP(ctx, email, uuid.Nil, auth.HashOTP(email, code), time.Now().Add(time.Minute)); err != nil {
+		e.t.Fatal(err)
+	}
+	return email
+}
+
+// Parallel guesses must not get past the attempt limit.
+func TestOTPAttemptLimitHoldsUnderConcurrency(t *testing.T) {
+	e := setup(t)
+	email := e.userWithCode("123456")
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	checked := 0
+	for i := range 40 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			code, _ := e.do(nil, "", "POST", "/auth/verify", j(map[string]string{"email": email, "code": fmt.Sprintf("9%05d", i)}), nil)
+			if code == 401 {
+				mu.Lock()
+				checked++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if checked > 5 {
+		t.Fatalf("%d guesses were checked, want at most 5", checked)
+	}
+	code, body := e.do(nil, "", "POST", "/auth/verify", j(map[string]string{"email": email, "code": "123456"}), nil)
+	e.must(429, code, body, "right code after the limit")
+}
+
+func TestOTPIsSingleUse(t *testing.T) {
+	e := setup(t)
+	email := e.userWithCode("654321")
+	code, body := e.do(nil, "", "POST", "/auth/verify", j(map[string]string{"email": email, "code": "654321"}), nil)
+	e.must(200, code, body, "first use")
+	code, body = e.do(nil, "", "POST", "/auth/verify", j(map[string]string{"email": email, "code": "654321"}), nil)
+	e.must(401, code, body, "second use")
+}
+
+func TestSignInCodesAreThrottledPerEmail(t *testing.T) {
+	e := setup(t, func(d *api.Deps) { d.Config.DevLogOTP = true })
+	for i := range 5 {
+		code, body := e.do(nil, "", "POST", "/auth/login", j(map[string]string{"email": "throttle@example.com"}), nil)
+		e.must(200, code, body, fmt.Sprintf("code %d", i+1))
+	}
+	code, body := e.do(nil, "", "POST", "/auth/login", j(map[string]string{"email": "throttle@example.com"}), nil)
+	e.must(429, code, body, "sixth code within the hour")
+	code, body = e.do(nil, "", "POST", "/auth/login", j(map[string]string{"email": "other@example.com"}), nil)
+	e.must(200, code, body, "another email")
 }

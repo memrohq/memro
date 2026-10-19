@@ -86,14 +86,21 @@ func (s *Store) SetUserOTP(ctx context.Context, email string, tenantID uuid.UUID
 	return err
 }
 
-func (s *Store) IncrementOTPAttempts(ctx context.Context, userID uuid.UUID) error {
-	_, err := s.Pool.Exec(ctx, `UPDATE users SET otp_attempts = otp_attempts + 1 WHERE id = $1`, userID)
-	return err
+// ReserveOTPAttempt counts a verification attempt before the code is
+// checked. It reports false once max attempts have been used, so concurrent
+// guesses cannot get past the limit.
+func (s *Store) ReserveOTPAttempt(ctx context.Context, userID uuid.UUID, max int) (bool, error) {
+	tag, err := s.Pool.Exec(ctx, `UPDATE users SET otp_attempts = otp_attempts + 1
+		WHERE id = $1 AND otp_code IS NOT NULL AND otp_attempts < $2`, userID, max)
+	return tag.RowsAffected() > 0, err
 }
 
-func (s *Store) ClearUserOTP(ctx context.Context, userID uuid.UUID) error {
-	_, err := s.Pool.Exec(ctx, `UPDATE users SET otp_code = NULL, otp_expires_at = NULL, otp_attempts = 0 WHERE id = $1`, userID)
-	return err
+// ConsumeUserOTP clears the code if it is still the given one, so each code
+// signs in at most once.
+func (s *Store) ConsumeUserOTP(ctx context.Context, userID uuid.UUID, otpHash string) (bool, error) {
+	tag, err := s.Pool.Exec(ctx, `UPDATE users SET otp_code = NULL, otp_expires_at = NULL, otp_attempts = 0
+		WHERE id = $1 AND otp_code = $2`, userID, otpHash)
+	return tag.RowsAffected() > 0, err
 }
 
 func (s *Store) CreateSession(ctx context.Context, userID, tenantID uuid.UUID, tokenHash string, expires time.Time) error {
@@ -426,14 +433,16 @@ func (s *Store) RecordTenantUsage(ctx context.Context, tenantID uuid.UUID, metri
 
 // --- Hooks ------------------------------------------------------------------------
 
-func (s *Store) RegisterHook(ctx context.Context, tenantID uuid.UUID, eventType, url string) error {
-	_, err := s.Pool.Exec(ctx, `INSERT INTO hooks (tenant_id, event_type, url) VALUES ($1, $2, $3)
-		ON CONFLICT (tenant_id, event_type, url) DO NOTHING`, tenantID, eventType, url)
+// Hooks belong to the agent that registered them and only fire for its own
+// memories.
+func (s *Store) RegisterHook(ctx context.Context, tenantID uuid.UUID, agentID, eventType, url string) error {
+	_, err := s.Pool.Exec(ctx, `INSERT INTO hooks (tenant_id, agent_id, event_type, url) VALUES ($1, $2, $3, $4)
+		ON CONFLICT DO NOTHING`, tenantID, agentID, eventType, url)
 	return err
 }
 
-func (s *Store) GetHooks(ctx context.Context, tenantID uuid.UUID, eventType string) ([]string, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT url FROM hooks WHERE tenant_id = $1 AND event_type = $2 ORDER BY created_at`, tenantID, eventType)
+func (s *Store) GetHooks(ctx context.Context, agentID, eventType string) ([]string, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT url FROM hooks WHERE agent_id = $1 AND event_type = $2 ORDER BY created_at`, agentID, eventType)
 	if err != nil {
 		return nil, err
 	}
