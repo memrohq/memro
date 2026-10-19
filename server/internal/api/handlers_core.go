@@ -362,12 +362,13 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var warning *string
-	if limit := s.quota.SoftLimit(ctx, a.TenantID, a.ID); limit > 0 && nodes > limit*8/10 {
+	limit := s.quota.SoftLimit(ctx, a.TenantID, a.ID)
+	if limit > 0 && nodes > limit*8/10 {
 		warning = strPtr(fmt.Sprintf("Approaching memory soft cap (%d). Consider pruning.", limit))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"reason_calls": counts["mee.reason"], "deep_reason_calls": 0, "evolve_calls": counts["mee.evolve"],
-		"memory_nodes": nodes, "graph_edges": edges, "warning": warning,
+		"memory_nodes": nodes, "memory_limit": limit, "graph_edges": edges, "warning": warning,
 	})
 }
 

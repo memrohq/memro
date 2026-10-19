@@ -31,11 +31,12 @@ optional, it defaults to the authenticated agent.
 Today's usage for the agent.
 
 ```json
-{ "memory_nodes": 128, "graph_edges": 14, "reason_calls": 3, "deep_reason_calls": 0,
-  "evolve_calls": 1, "warning": null }
+{ "memory_nodes": 128, "memory_limit": 1000, "graph_edges": 14, "reason_calls": 3,
+  "deep_reason_calls": 0, "evolve_calls": 1, "warning": null }
 ```
 
-`warning` is set when the agent passes 80% of its memory limit.
+`memory_limit` is 0 when there is no limit. `warning` is set when the agent
+passes 80% of it.
 
 ### 🔒 `GET /stats/temporal`
 
