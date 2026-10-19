@@ -14,7 +14,7 @@ endpoints.
 
 ## API keys
 
-- Create: `npx memro connect`, or dashboard → **API keys** → **New key**.
+- Create: `npx memro-cli connect`, or dashboard → **API keys** → **New key**.
   The key is shown once; Memro stores only its SHA-256 hash.
 - Use: `Authorization: Bearer memro_sk_…`. The SDKs read `MEMRO_API_KEY`.
 - Revoke: dashboard → **API keys** → **Revoke**. It stops working immediately.
@@ -70,7 +70,7 @@ A self-owned agent can mint API keys for its own tools with a signed
 don't cover the method or URL. Servers accept them while
 `ALLOW_LEGACY_SIGNATURES=true` (the default for now); new code should use v2.
 
-## Device login (how `npx memro connect` works)
+## Device login (how `npx memro-cli connect` works)
 
 The CLI never sees your email or session. It follows the OAuth device flow
 ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)):

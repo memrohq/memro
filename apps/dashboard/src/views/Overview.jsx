@@ -184,7 +184,7 @@ export default function Overview({ email, stats, usage, memories, loaded, onOpen
         <Panel title="Get started" description="Three steps to give your AI tools a memory.">
           <ol>
             <Step icon="cable" title="Connect your coding tools" action={<button className="btn-primary h-8" onClick={onConnect}>Connect</button>}>
-              Run <code className="font-mono text-[12px] px-1.5 py-0.5 rounded-md bg-panel border border-line">npx memro connect</code> or set up a tool by hand.
+              Run <code className="font-mono text-[12px] px-1.5 py-0.5 rounded-md bg-panel border border-line">npx memro-cli connect</code> or set up a tool by hand.
             </Step>
             <Step icon="edit_note" title="Add your first memory" action={<button className="btn-secondary h-8" onClick={onAdd}>Add</button>}>
               A preference, a project fact, or how your team works.

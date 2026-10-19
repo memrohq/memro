@@ -54,7 +54,7 @@ export default function Keys({ apiBase, auth, onCopy, notify }) {
 
   return (
     <div className="space-y-6 max-w-3xl">
-      <PageHeader title="API keys" description="Keys let your tools, SDKs and MCP clients use this account's memory. npx memro connect creates one for you.">
+      <PageHeader title="API keys" description="Keys let your tools, SDKs and MCP clients use this account's memory. npx memro-cli connect creates one for you.">
         <button className="btn-primary" onClick={() => setCreateOpen(true)}><Icon name="add" className="!text-[18px]" /> New key</button>
       </PageHeader>
 
@@ -76,7 +76,7 @@ export default function Keys({ apiBase, auth, onCopy, notify }) {
         {keys === null ? (
           <div className="p-5 space-y-3"><Skeleton className="h-4 w-1/2" /><Skeleton className="h-4 w-1/3" /></div>
         ) : keys.length === 0 ? (
-          <Empty icon="key" title="No API keys yet">Run npx memro connect, or create a key to connect a tool.</Empty>
+          <Empty icon="key" title="No API keys yet">Run npx memro-cli connect, or create a key to connect a tool.</Empty>
         ) : (
           <ul>
             {keys.map((k) => (

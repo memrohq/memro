@@ -7,7 +7,7 @@ it by meaning, keyword or time, and reason over how memories connect.
 |---|---|
 | [Quickstart](quickstart.md) | Connect your coding tools in one command, or call Memro from code in five minutes. |
 | [Concepts](concepts.md) | Agents, memories, memory types, search modes and the memory engine. |
-| [Authentication](authentication.md) | API keys, signed requests and the device login behind `npx memro connect`. |
+| [Authentication](authentication.md) | API keys, signed requests and the device login behind `npx memro-cli connect`. |
 | [MCP server](mcp.md) | Use Memro from Claude Code, Codex, Cursor, VS Code and any MCP client. |
 | [API reference](api-reference.md) | Every HTTP endpoint with request and response shapes. |
 | SDKs | [Python](sdks/python.md) · [JavaScript / TypeScript](sdks/javascript.md) · [Go](sdks/go.md) |

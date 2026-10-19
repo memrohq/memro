@@ -10,7 +10,7 @@ to have one:
 
 - **Account agent.** Signing in to the dashboard with your email creates
   one agent for your account. Your tools reach it with
-  [API keys](authentication.md#api-keys) from `npx memro connect` or the
+  [API keys](authentication.md#api-keys) from `npx memro-cli connect` or the
   dashboard. This is what most people use.
 - **Self-owned agent.** An SDK generates a key pair on your machine
   (`Agent.create()`) and registers only the public key. Requests are

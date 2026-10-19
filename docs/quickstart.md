@@ -2,17 +2,16 @@
 
 ## Give your coding tools a memory (1 minute)
 
-> **Before the packages are published** (`memro` and `@memro/sdk` on npm,
-> `memro` on PyPI), use the source instead:
+> **Until the SDKs are published** (`@memro/sdk` on npm, `memro` on PyPI),
+> install them from source:
 > ```bash
-> git clone https://github.com/memrohq/memro && node memro/cli/bin/memro.js connect
 > pip install "git+https://github.com/memrohq/memro#subdirectory=sdk/python"
-> (cd memro/sdk/js && npm install && npm run build) && npm install ./memro/sdk/js
+> git clone https://github.com/memrohq/memro && (cd memro/sdk/js && npm install && npm run build) && npm install ./memro/sdk/js
 > ```
-> The Go SDK installs from GitHub as shown below.
+> The CLI (`npx memro-cli`) is published, and the Go SDK installs from GitHub as shown below.
 
 ```bash
-npx memro connect
+npx memro-cli connect
 ```
 
 This opens the dashboard so you can sign in with your email, asks you to
@@ -28,10 +27,10 @@ Memro's `recall` and answers from memory.
 
 | Command | |
 |---|---|
-| `npx memro connect --client cursor,claude-code` | Only these tools |
-| `npx memro status` | Show the account and which tools are configured |
-| `npx memro disconnect` | Remove Memro from your tools and delete the local key |
-| `npx memro connect --api http://localhost:8081` | Use a self-hosted server |
+| `npx memro-cli connect --client cursor,claude-code` | Only these tools |
+| `npx memro-cli status` | Show the account and which tools are configured |
+| `npx memro-cli disconnect` | Remove Memro from your tools and delete the local key |
+| `npx memro-cli connect --api http://localhost:8081` | Use a self-hosted server |
 
 Setting a tool up by hand instead? See [MCP server](mcp.md).
 
@@ -39,7 +38,7 @@ Setting a tool up by hand instead? See [MCP server](mcp.md).
 
 ### 1. Get an API key
 
-Run `npx memro connect` (the key is saved in `~/.memro/credentials.json`), or
+Run `npx memro-cli connect` (the key is saved in `~/.memro/credentials.json`), or
 open [app.memro.co](https://app.memro.co) → **API keys** → **New key**.
 Keys look like `memro_sk_…` and are shown once.
 

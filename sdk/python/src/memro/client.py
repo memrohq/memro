@@ -57,7 +57,7 @@ class MemroClient:
         self.base_url = (base_url or os.getenv("MEMRO_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
         self.api_key = api_key or os.getenv("MEMRO_API_KEY") or None
         if self.api_key and not self.api_key.startswith(API_KEY_PREFIX):
-            raise ValueError("API keys start with memro_sk_. Create one with `npx memro connect` or in the dashboard.")
+            raise ValueError("API keys start with memro_sk_. Create one with `npx memro-cli connect` or in the dashboard.")
         self.timeout = timeout
         self.max_retries = max_retries
         self._session = requests.Session()

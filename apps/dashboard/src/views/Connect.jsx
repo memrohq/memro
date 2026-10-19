@@ -92,7 +92,7 @@ export default function Connect({ apiBase, auth, code, onDone, onCopy, notify })
   const tools = TOOLS(url);
   const [tool, setTool] = useState(tools[0].id);
   const current = tools.find((t) => t.id === tool);
-  const command = `npx memro connect${connectFlags()}`;
+  const command = `npx memro-cli connect${connectFlags()}`;
 
   return (
     <div className="space-y-6 max-w-3xl">

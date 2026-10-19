@@ -109,7 +109,7 @@ type request struct {
 // signature covers the exact path, query string and body sent.
 func (c *Client) do(ctx context.Context, r request, out any) error {
 	if c.apiKey != "" && !strings.HasPrefix(c.apiKey, APIKeyPrefix) {
-		return errors.New("memro: API keys start with memro_sk_; create one with `npx memro connect` or in the dashboard")
+		return errors.New("memro: API keys start with memro_sk_; create one with `npx memro-cli connect` or in the dashboard")
 	}
 	pathAndQuery := r.path
 	if qs := r.query.Encode(); qs != "" {

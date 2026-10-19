@@ -27,7 +27,7 @@ export class Agent {
 
   // ── Constructors ────────────────────────────────────────────────────────
 
-  /** Connect with an API key (memro_sk_...) from `npx memro connect` or the dashboard. */
+  /** Connect with an API key (memro_sk_...) from `npx memro-cli connect` or the dashboard. */
   static async fromApiKey(apiKey: string, options: Omit<MemroClientOptions, 'apiKey'> = {}): Promise<Agent> {
     const client = new MemroClient({ ...options, apiKey });
     const who = await client.whoami();

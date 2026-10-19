@@ -151,7 +151,7 @@ jobs:
         run: docker build -f mcp/Dockerfile -t memro-mcp:ci .
 
   cli:
-    name: CLI (npx memro)
+    name: CLI (npx memro-cli)
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:

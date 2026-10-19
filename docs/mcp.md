@@ -18,7 +18,7 @@ memories. Requests without a valid key get `401`.
 
 ## Set up
 
-`npx memro connect` configures every tool it finds. To do it by hand:
+`npx memro-cli connect` configures every tool it finds. To do it by hand:
 
 **Claude Code**
 

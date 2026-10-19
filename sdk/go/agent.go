@@ -32,7 +32,7 @@ func NewAgent(agentID, privateKey string, client *Client) *Agent {
 }
 
 // AgentFromAPIKey connects with an API key (memro_sk_...) from
-// `npx memro connect` or the dashboard. opts.APIKey is ignored.
+// `npx memro-cli connect` or the dashboard. opts.APIKey is ignored.
 func AgentFromAPIKey(ctx context.Context, apiKey string, opts *ClientOptions) (*Agent, error) {
 	o := ClientOptions{}
 	if opts != nil {

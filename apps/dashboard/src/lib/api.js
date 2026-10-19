@@ -32,7 +32,7 @@ export function mcpUrl() {
   return "http://localhost:8080/mcp";
 }
 
-/** `npx memro connect` flags that target this dashboard's environment. */
+/** `npx memro-cli connect` flags that target this dashboard's environment. */
 export function connectFlags() {
   const host = window.location.hostname;
   if (host === "app.memro.co") return "";

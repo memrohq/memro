@@ -17,7 +17,7 @@ class Agent:
     """
     An AI agent with persistent, self-owned memory.
 
-    Memro Cloud (API key from `npx memro connect` or the dashboard):
+    Memro Cloud (API key from `npx memro-cli connect` or the dashboard):
         agent = Agent.from_api_key("memro_sk_...")
         agent = Agent.from_env()            # MEMRO_API_KEY
 

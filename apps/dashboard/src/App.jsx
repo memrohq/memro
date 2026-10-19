@@ -40,7 +40,7 @@ const DOCS_URL = "https://github.com/memrohq/memro/tree/main/docs#readme";
 const IMAGE_TYPES = /^image\//;
 const DOC_EXT = /\.(pdf|docx|pptx|xlsx|txt|md|markdown|csv|json|ya?ml|html?)$/i;
 
-// `npx memro connect` opens /connect?code=XXXX-XXXX.
+// `npx memro-cli connect` opens /connect?code=XXXX-XXXX.
 const initialConnectCode = () =>
   window.location.pathname.startsWith("/connect") ? new URLSearchParams(window.location.search).get("code") : null;
 

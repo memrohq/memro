@@ -72,7 +72,7 @@ export class MemroClient {
     this.baseUrl = (options.baseUrl ?? env('MEMRO_BASE_URL') ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
     this.apiKey = options.apiKey ?? env('MEMRO_API_KEY');
     if (this.apiKey && !this.apiKey.startsWith(API_KEY_PREFIX)) {
-      throw new Error('memro: API keys start with memro_sk_. Create one with `npx memro connect` or in the dashboard.');
+      throw new Error('memro: API keys start with memro_sk_. Create one with `npx memro-cli connect` or in the dashboard.');
     }
     this.timeout = options.timeout ?? 30_000;
     this.maxRetries = options.maxRetries ?? 2;
