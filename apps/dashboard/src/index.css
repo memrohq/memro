@@ -1,19 +1,28 @@
 @import "tailwindcss";
 
-/* Warm, monochrome palette: off-white canvas, white surfaces, ink for
-   primary actions; color only for status. */
+/* Cool neutral palette with the logo's indigo (#5746d5) as the accent for
+   primary actions, selection and charts; memory types get their own hues. */
 @theme {
-  --color-canvas: #efeeeb;
+  --color-canvas: #eef0f4;
   --color-surface: #ffffff;
-  --color-panel: #f7f6f3;
-  --color-line: #e5e3de;
-  --color-line-strong: #d6d3cc;
-  --color-ink: #141414;
-  --color-muted: #6b6965;
-  --color-subtle: #9b9893;
-  --color-ok: #1f8a4c;
-  --color-warn: #b7791f;
-  --color-danger: #b9382b;
+  --color-panel: #f6f7f9;
+  --color-line: #e6e8ee;
+  --color-line-strong: #d5d9e2;
+  --color-ink: #0f172a;
+  --color-muted: #5b6475;
+  --color-subtle: #8c93a3;
+  --color-accent: #5746d5;
+  --color-accent-strong: #4535bd;
+  --color-accent-soft: #f0eefc;
+  --color-accent-line: #dcd7f8;
+  --color-ok: #16a34a;
+  --color-warn: #d97706;
+  --color-danger: #dc2626;
+
+  --color-episodic: #8b5cf6;
+  --color-semantic: #2563eb;
+  --color-procedural: #059669;
+  --color-profile: #d97706;
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -25,8 +34,8 @@
     @apply bg-canvas text-ink font-sans antialiased;
     font-feature-settings: "cv11", "ss01";
   }
-  ::selection { background: #141414; color: #fff; }
-  :focus-visible { outline: 2px solid #141414; outline-offset: 2px; }
+  ::selection { background: #5746d5; color: #fff; }
+  :focus-visible { outline: 2px solid #5746d5; outline-offset: 2px; }
 }
 
 @layer components {
@@ -47,17 +56,17 @@
     @apply bg-surface border border-line rounded-xl;
   }
   .input {
-    @apply w-full h-9 px-3 rounded-lg bg-surface border border-line text-[13px] placeholder:text-subtle outline-none focus:border-ink transition-colors;
+    @apply w-full h-9 px-3 rounded-lg bg-surface border border-line text-[13px] placeholder:text-subtle outline-none focus:border-accent focus:ring-3 focus:ring-accent/15 transition-[border-color,box-shadow];
   }
   .scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
-  .scroll-thin::-webkit-scrollbar-thumb { background: #d6d3cc; border-radius: 8px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: #d5d9e2; border-radius: 8px; }
 }
 
 /* Buttons are utilities so variants can build on the base with @apply. */
 @utility btn {
   @apply inline-flex items-center justify-center gap-1.5 h-9 px-3.5 rounded-lg text-[13px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
 }
-@utility btn-primary { @apply btn bg-ink text-white hover:bg-black; }
+@utility btn-primary { @apply btn bg-accent text-white hover:bg-accent-strong shadow-[0_1px_2px_rgba(87,70,213,0.25)]; }
 @utility btn-secondary { @apply btn bg-surface text-ink border border-line hover:bg-panel; }
 @utility btn-ghost { @apply btn text-muted hover:text-ink hover:bg-panel; }
 @utility btn-danger { @apply btn bg-surface text-danger border border-line hover:bg-red-50; }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Icon, Logo } from "./ui";
+import { Icon, Wordmark } from "./ui";
 import { api } from "../lib/api";
 
 export default function Login({ apiBaseUrl, onLoginSuccess }) {
@@ -41,8 +41,7 @@ export default function Login({ apiBaseUrl, onLoginSuccess }) {
     <div className="min-h-full flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-[380px]">
         <div className="flex items-center gap-2.5 mb-8 justify-center">
-          <div className="size-9 rounded-lg bg-ink text-white flex items-center justify-center"><Logo className="size-5" /></div>
-          <span className="text-[18px] font-semibold tracking-tight">memro</span>
+          <Wordmark className="h-8" />
         </div>
 
         <div className="card bg-panel overflow-hidden">

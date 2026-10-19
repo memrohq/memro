@@ -4,13 +4,14 @@ export const Icon = ({ name, className = "" }) => (
   <span className={`icon ${className}`} aria-hidden="true">{name}</span>
 );
 
+/** The Memro "M" mark (memrologo), as an image so it keeps its colours. */
 export const Logo = ({ className = "size-5" }) => (
-  <svg className={className} viewBox="0 0 32 32" fill="none" aria-hidden="true">
-    <path d="M15 3.5 6.2 7.8 3.4 17.3l5.5 8.1 6.1 3V20l-3.6-2.6V12.6L15 10V3.5Z" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
-    <path d="M17 3.5l8.8 4.3 2.8 9.5-5.5 8.1-6.1 3v-6.6l5.2-3.8v-4.2L17 11V3.5Z" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" />
-    <circle cx="8.6" cy="12.6" r="1.6" fill="currentColor" />
-    <circle cx="8.6" cy="17.6" r="1.6" fill="currentColor" />
-  </svg>
+  <img src="/memro-mark.png" alt="" aria-hidden="true" className={`${className} object-contain`} />
+);
+
+/** The full "memro.co" wordmark; swaps to light text on dark surfaces. */
+export const Wordmark = ({ className = "h-6" }) => (
+  <img src="/memro-wordmark-dark.png" alt="memro.co" className={`${className} w-auto`} />
 );
 
 /** Bordered section with a small monospace title bar, like the reference. */
@@ -27,10 +28,18 @@ export const Panel = ({ title, action, children, className = "", bodyClass = "p-
 );
 
 const TYPE_STYLES = {
-  episodic: "bg-[#f1efff] text-[#5b4bc4] border-[#e2ddff]",
-  semantic: "bg-[#edf5ff] text-[#2a62b8] border-[#d9e8ff]",
-  procedural: "bg-[#ecf7f0] text-[#1f7a46] border-[#d5eedd]",
-  profile: "bg-[#fdf4e6] text-[#9a5b12] border-[#f6e3c4]",
+  episodic: "bg-episodic/10 text-episodic border-episodic/20",
+  semantic: "bg-semantic/10 text-semantic border-semantic/20",
+  procedural: "bg-procedural/10 text-procedural border-procedural/20",
+  profile: "bg-profile/10 text-profile border-profile/20",
+};
+
+/** Solid fill per memory type, for bars and dots. */
+export const TYPE_FILL = {
+  episodic: "bg-episodic",
+  semantic: "bg-semantic",
+  procedural: "bg-procedural",
+  profile: "bg-profile",
 };
 
 export const TypePill = ({ type }) => (
@@ -58,7 +67,7 @@ export const Modal = ({ open, title, onClose, children, width = "max-w-lg" }) =>
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 backdrop-blur-[2px] p-4" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
@@ -87,8 +96,8 @@ export const Field = ({ label, hint, children }) => (
 
 export const Empty = ({ icon = "inbox", title, children }) => (
   <div className="flex flex-col items-center justify-center text-center py-14 px-6">
-    <div className="size-10 rounded-full bg-panel border border-line flex items-center justify-center mb-3">
-      <Icon name={icon} className="text-muted" />
+    <div className="size-10 rounded-full bg-accent-soft border border-accent-line flex items-center justify-center mb-3">
+      <Icon name={icon} className="text-accent" />
     </div>
     <p className="text-[14px] font-medium">{title}</p>
     {children && <p className="text-[13px] text-muted mt-1 max-w-sm">{children}</p>}

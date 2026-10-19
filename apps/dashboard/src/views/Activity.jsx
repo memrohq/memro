@@ -17,7 +17,7 @@ export default function Activity({ events }) {
                 <span className="font-mono text-[12px] text-subtle w-20 shrink-0">
                   {new Date(e.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
                 </span>
-                <span className={`size-1.5 rounded-full shrink-0 ${e.error ? "bg-danger" : "bg-ink"}`} />
+                <span className={`size-1.5 rounded-full shrink-0 ${e.error ? "bg-danger" : "bg-accent"}`} />
                 <span className="font-medium w-36 shrink-0 truncate">{e.title}</span>
                 <span className="text-muted truncate">{e.detail}</span>
               </li>

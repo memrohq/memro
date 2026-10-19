@@ -252,7 +252,7 @@ export default function App() {
         >
           <div className="p-3">
             <div className="card flex items-center gap-2.5 px-2.5 py-2">
-              <div className="size-8 rounded-lg bg-ink text-white flex items-center justify-center"><Logo className="size-[18px]" /></div>
+              <div className="size-8 rounded-lg bg-surface border border-line flex items-center justify-center"><Logo className="size-6" /></div>
               <div className="min-w-0 flex-1">
                 <p className="text-[11px] text-subtle leading-tight">Workspace</p>
                 <p className="text-[13px] font-medium leading-tight truncate">Memro</p>
@@ -270,10 +270,10 @@ export default function App() {
                     key={item.id}
                     onClick={() => go(item.id)}
                     className={`w-full flex items-center gap-2.5 h-9 px-2 rounded-lg text-[13px] transition-colors ${
-                      view === item.id ? "bg-surface border border-line text-ink font-medium shadow-[0_1px_0_rgba(0,0,0,0.02)]" : "text-muted hover:text-ink border border-transparent"
+                      view === item.id ? "bg-accent-soft border border-accent-line text-accent-strong font-medium" : "text-muted hover:text-ink hover:bg-surface border border-transparent"
                     }`}
                   >
-                    <Icon name={item.icon} className={view === item.id ? "text-ink" : "text-subtle"} />
+                    <Icon name={item.icon} className={view === item.id ? "text-accent" : "text-subtle"} />
                     {item.label}
                   </button>
                 ))}
@@ -290,7 +290,7 @@ export default function App() {
 
           <div className="p-3 border-t border-line">
             <div className="card flex items-center gap-2.5 px-2.5 py-2">
-              <div className="size-8 rounded-full bg-panel border border-line flex items-center justify-center text-[13px] font-medium">{initial}</div>
+              <div className="size-8 rounded-full bg-accent-soft border border-accent-line text-accent-strong flex items-center justify-center text-[13px] font-medium">{initial}</div>
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-medium truncate">{email || "Signed in"}</p>
                 <p className="text-[11px] text-subtle truncate font-mono">{initialized ? `${agentId.slice(0, 10)}…` : "No agent yet"}</p>
@@ -391,7 +391,7 @@ export default function App() {
 
       {toast && (
         <div role="status" className="fixed bottom-4 right-4 z-50 card px-4 py-3 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.3)] max-w-sm flex gap-3 items-start">
-          <span className={`mt-1.5 size-1.5 rounded-full shrink-0 ${toast.error ? "bg-danger" : "bg-ok"}`} />
+          <span className={`mt-1.5 size-2 rounded-full shrink-0 ${toast.error ? "bg-danger" : "bg-ok"}`} />
           <div className="min-w-0">
             <p className="text-[13px] font-medium">{toast.title}</p>
             {toast.detail && <p className="text-[12px] text-muted truncate">{toast.detail}</p>}

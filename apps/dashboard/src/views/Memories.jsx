@@ -47,7 +47,7 @@ export function MemoryTable({ memories, onDelete, compact = false, showScore = f
                 <td className="py-3 px-3">
                   <div className="flex items-center gap-2">
                     <div className="h-1.5 w-16 rounded-full bg-panel overflow-hidden">
-                      <div className="h-full bg-ink rounded-full" style={{ width: `${Math.round((m.score || 0) * 100)}%` }} />
+                      <div className="h-full bg-accent rounded-full" style={{ width: `${Math.round((m.score || 0) * 100)}%` }} />
                     </div>
                     <span className="font-mono text-[12px] text-muted">{Math.round((m.score || 0) * 100)}%</span>
                   </div>

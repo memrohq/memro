@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Panel, Icon } from "../components/ui";
+import { Panel, Icon, TYPE_FILL } from "../components/ui";
 import { MemoryTable } from "./Memories";
 
 const TYPES = ["episodic", "semantic", "procedural", "profile"];
@@ -27,7 +27,7 @@ const MiniBars = ({ values }) => {
       {values.map((v, i) => (
         <span
           key={i}
-          className={`w-[3px] rounded-full ${i === values.length - 1 ? "bg-ink" : "bg-line-strong"}`}
+          className={`w-[3px] rounded-full ${i === values.length - 1 ? "bg-accent" : "bg-accent/25"}`}
           style={{ height: `${Math.max(12, (v / max) * 100)}%` }}
         />
       ))}
@@ -35,10 +35,13 @@ const MiniBars = ({ values }) => {
   );
 };
 
-const StatCard = ({ label, value, unit, foot, bars }) => (
+const StatCard = ({ label, icon, tint = "text-accent bg-accent-soft", value, unit, foot, bars }) => (
   <div className="card bg-panel overflow-hidden">
     <div className="bg-surface border-b border-line rounded-xl -mx-px -mt-px px-4 pt-3.5 pb-4">
-      <p className="label">{label}</p>
+      <div className="flex items-center justify-between">
+        <p className="label">{label}</p>
+        {icon && <span className={`size-7 rounded-lg flex items-center justify-center ${tint}`}><Icon name={icon} className="!text-[16px]" /></span>}
+      </div>
       <div className="flex items-end justify-between gap-3 mt-2">
         <p className="font-mono text-[26px] leading-none tracking-tight">
           {value ?? "—"}
@@ -88,9 +91,10 @@ const ActivityGrid = ({ memories }) => {
               {Array.from({ length: ROWS }, (_, r) => (
                 <span
                   key={r}
-                  className={`flex-1 rounded-[2px] ${
-                    r < filled ? (hover === col ? "bg-black" : "bg-ink") : hover === col ? "bg-line-strong" : "bg-panel"
+                  className={`flex-1 rounded-[2px] transition-colors ${
+                    r < filled ? (hover === col ? "bg-accent-strong" : "bg-accent") : hover === col ? "bg-accent-line" : "bg-panel"
                   }`}
+                  style={r < filled && hover !== col ? { opacity: 0.45 + 0.55 * (n / max) } : undefined}
                 />
               ))}
             </div>
@@ -128,11 +132,11 @@ const TypeBreakdown = ({ distribution, total }) => (
       return (
         <div key={t}>
           <div className="flex justify-between text-[13px] mb-1.5">
-            <span className="capitalize">{t}</span>
+            <span className="capitalize flex items-center gap-2"><span className={`size-2 rounded-full ${TYPE_FILL[t]}`} />{t}</span>
             <span className="font-mono text-muted">{n}</span>
           </div>
           <div className="h-2 rounded-full bg-panel overflow-hidden">
-            <div className="h-full rounded-full bg-ink" style={{ width: `${pct}%` }} />
+            <div className={`h-full rounded-full ${TYPE_FILL[t]}`} style={{ width: `${pct}%` }} />
           </div>
         </div>
       );
@@ -164,10 +168,10 @@ export default function Overview({ email, stats, usage, memories, onOpenMemories
       </div>
 
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total memories" value={stats?.total_memories} foot={`+${stats?.memories_today ?? 0} today`} bars={week} />
-        <StatCard label="This week" value={stats?.memories_this_week} unit="new" foot={`${stats?.memories_this_month ?? 0} this month`} bars={week} />
-        <StatCard label="Graph edges" value={usage?.graph_edges} unit="links" foot="between memories" />
-        <StatCard label="Reasoning calls" value={usage?.reason_calls} unit="today" foot={`${usage?.evolve_calls ?? 0} evolve runs today`} />
+        <StatCard label="Total memories" icon="stacks" value={stats?.total_memories} foot={`+${stats?.memories_today ?? 0} today`} bars={week} />
+        <StatCard label="This week" icon="trending_up" tint="text-procedural bg-procedural/10" value={stats?.memories_this_week} unit="new" foot={`${stats?.memories_this_month ?? 0} this month`} bars={week} />
+        <StatCard label="Graph edges" icon="hub" tint="text-episodic bg-episodic/10" value={usage?.graph_edges} unit="links" foot="between memories" />
+        <StatCard label="Reasoning calls" icon="psychology" tint="text-profile bg-profile/10" value={usage?.reason_calls} unit="today" foot={`${usage?.evolve_calls ?? 0} evolve runs today`} />
       </div>
 
       {usage?.warning && (
