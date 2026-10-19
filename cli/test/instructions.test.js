@@ -48,3 +48,21 @@ test("a file Memro created holds only the block and is deleted on uninstall", ()
   assert.equal(uninstallInstructions(file), true);
   assert.equal(fs.existsSync(file), false);
 });
+
+test("a file with the user's own Memro guidance is left in charge", async () => {
+  const { hasOwnMemroGuidance } = await import("../src/instructions.js");
+  const own = "# Memory (Memro)\n\nCall recall before tasks; remember decisions.\n";
+  assert.equal(hasOwnMemroGuidance(own), true);
+  assert.equal(hasOwnMemroGuidance(mine), false);
+  assert.equal(hasOwnMemroGuidance(upsertBlock(mine)), false, "our own block does not count");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "memro-rules-"));
+  const file = path.join(dir, "CLAUDE.md");
+  fs.writeFileSync(file, own);
+  assert.equal(installInstructions(file), "kept-own");
+  assert.equal(fs.readFileSync(file, "utf8"), own);
+  // An older block of ours next to the user's guidance is removed, not doubled.
+  fs.writeFileSync(file, upsertBlock(own));
+  assert.equal(installInstructions(file), "kept-own");
+  assert.equal(fs.readFileSync(file, "utf8"), own);
+});

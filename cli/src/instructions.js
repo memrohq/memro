@@ -53,11 +53,30 @@ function writeText(file, text) {
   }
 }
 
-/** Add or refresh the block in a tool's instructions file. */
+/** Whether text already tells the agent to use Memro, outside our block
+ * (e.g. guidance the user wrote themselves). */
+export function hasOwnMemroGuidance(text) {
+  const rest = removeBlock(text);
+  return /memro/i.test(rest) && /\brecall\b/i.test(rest);
+}
+
+/**
+ * Add or refresh the block in a tool's instructions file. If the file already
+ * has its own Memro guidance, leave that in charge: add nothing, and drop an
+ * older block of ours so the agent never gets the rules twice. Returns
+ * "added", "updated", "unchanged" or "kept-own".
+ */
 export function installInstructions(file) {
   const before = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+  if (hasOwnMemroGuidance(before)) {
+    const after = removeBlock(before);
+    if (after !== before) writeText(file, after);
+    return "kept-own";
+  }
   const after = upsertBlock(before);
-  if (after !== before) writeText(file, after);
+  if (after === before) return "unchanged";
+  writeText(file, after);
+  return before.includes(START) ? "updated" : "added";
 }
 
 /** Remove the block; returns whether there was one. Deletes the file if

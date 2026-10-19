@@ -224,8 +224,9 @@ async function connect(opts) {
       ok++;
       console.log(`  \x1b[32m✔\x1b[0m ${c.name.padEnd(15)} ${tilde(c.file())}`);
       if (opts.instructions && c.rules) {
-        installInstructions(c.rules());
-        console.log(`  \x1b[32m✔\x1b[0m ${"".padEnd(15)} ${tilde(c.rules())} (use Memro automatically)`);
+        const result = installInstructions(c.rules());
+        const note = result === "kept-own" ? "already tells it to use Memro; left as is" : "use Memro automatically";
+        console.log(`  \x1b[32m✔\x1b[0m ${"".padEnd(15)} ${tilde(c.rules())} (${note})`);
       }
     } catch (err) {
       console.log(`  \x1b[33m!\x1b[0m ${c.name.padEnd(15)} ${err.message}`);
