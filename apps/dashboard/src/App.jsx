@@ -59,7 +59,7 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [draft, setDraft] = useState({ content: "", type: "episodic", visibility: "private" });
-  const [searchSeed, setSearchSeed] = useState("");
+  const [searchSeed, setSearchSeed] = useState({ q: "", n: 0 });
   const searchRef = useRef(null);
 
   const auth = { sessionToken };
@@ -281,7 +281,7 @@ export default function App() {
             ))}
             <div className="mt-3">
               <p className="text-[12px] font-medium text-muted px-2 mb-1">Resources</p>
-              <a href="https://github.com/memrohq/memro" target="_blank" rel="noopener" className="w-full flex items-center gap-2.5 h-9 px-2 rounded-lg text-[13px] text-muted hover:text-ink">
+              <a href="https://github.com/memrohq/memro/tree/main/docs#readme" target="_blank" rel="noopener" className="w-full flex items-center gap-2.5 h-9 px-2 rounded-lg text-[13px] text-muted hover:text-ink">
                 <Icon name="menu_book" className="text-subtle" /> Docs & SDKs
                 <Icon name="north_east" className="ml-auto text-subtle !text-[14px]" />
               </a>
@@ -314,7 +314,7 @@ export default function App() {
               onSubmit={(e) => {
                 e.preventDefault();
                 const q = searchRef.current.value.trim();
-                if (q) { setSearchSeed(q); setView("search"); searchRef.current.value = ""; }
+                if (q) { setSearchSeed((s) => ({ q, n: s.n + 1 })); setView("search"); searchRef.current.value = ""; }
               }}
             >
               <Icon name="search" className="absolute left-2.5 top-1/2 -translate-y-1/2 text-subtle !text-[16px]" />
@@ -339,7 +339,7 @@ export default function App() {
               ) : view === "memories" ? (
                 <Memories memories={memories} onAdd={() => setAddOpen(true)} onDelete={deleteMemory} onUpload={upload} uploading={uploading} />
               ) : view === "search" ? (
-                <Search key={searchSeed} initialQuery={searchSeed} onSearch={search} />
+                <Search key={searchSeed.n} initialQuery={searchSeed.q} onSearch={search} />
               ) : view === "agent" ? (
                 <Agent agentId={agentId} email={email} onCopy={copy} onExport={exportData} onSignOut={signOut} onOpenKeys={() => go("keys")} />
               ) : view === "activity" ? (

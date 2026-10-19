@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Panel, Icon, Empty } from "../components/ui";
 import { MemoryTable } from "./Memories";
 
@@ -28,6 +28,12 @@ export default function Search({ initialQuery = "", onSearch }) {
       setBusy(false);
     }
   };
+
+  // A query from the header search box runs straight away.
+  useEffect(() => {
+    if (initialQuery) run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="space-y-4">
