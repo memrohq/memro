@@ -14,20 +14,20 @@ const ENVIRONMENTS = {
 
 const CREDENTIALS = () => path.join(os.homedir(), ".memro", "credentials.json");
 
-const HELP = `memro — connect your AI tools to Memro memory
+const HELP = `memro-cli — connect your AI tools to Memro memory
 
 Usage
-  npx memro connect      Sign in and add Memro to Claude Code, Codex, Cursor,
-                         Antigravity, OpenCode, Gemini CLI, VS Code, Windsurf
-                         and Claude Desktop
-  npx memro status       Show the connected account and configured tools
-  npx memro disconnect   Remove Memro from your tools and forget the key
+  npx memro-cli connect      Sign in and add Memro to Claude Code, Codex, Cursor,
+                             Antigravity, OpenCode, Gemini CLI, VS Code, Windsurf
+                             and Claude Desktop
+  npx memro-cli status       Show the connected account and configured tools
+  npx memro-cli disconnect   Remove Memro from your tools and forget the key
 
 Options
-  --client <ids>         Only these tools, comma-separated (${CLIENTS.map((c) => c.id).join(", ")})
-  --yes, -y              Don't ask before writing configs
-  --staging | --local    Use staging or a local server instead of Memro Cloud
-  --api <url>            Use a specific Memro API (self-hosted)
+  --client <ids>             Only these tools, comma-separated (${CLIENTS.map((c) => c.id).join(", ")})
+  --yes, -y                  Don't ask before writing configs
+  --staging | --local        Use staging or a local server instead of Memro Cloud
+  --api <url>                Use a specific Memro API (self-hosted)
 `;
 
 function parseArgs(argv) {
@@ -121,11 +121,11 @@ async function deviceLogin(api) {
     if (code === "slow_down") { wait += 2000; continue; }
     if (res.status >= 500 || res.status === 429) { wait = Math.min(wait * 2, 30_000); continue; }
     process.stdout.write("\n");
-    if (code === "expired_token") throw new Error("The code expired. Run `npx memro connect` again.");
+    if (code === "expired_token") throw new Error("The code expired. Run `npx memro-cli connect` again.");
     throw new Error(`Sign-in failed: ${res.data?.message || code || res.status}`);
   }
   process.stdout.write("\n");
-  throw new Error("Timed out waiting for approval. Run `npx memro connect` again.");
+  throw new Error("Timed out waiting for approval. Run `npx memro-cli connect` again.");
 }
 
 function saveCredentials(creds) {
@@ -215,14 +215,14 @@ function printManual(creds) {
 async function status(opts) {
   const creds = loadCredentials();
   if (!creds) {
-    console.log("Not connected. Run `npx memro connect`.");
+    console.log("Not connected. Run `npx memro-cli connect`.");
     return;
   }
   const who = await request(creds.api_url, "/auth/whoami", { key: creds.api_key });
   console.log(`API:    ${creds.api_url}`);
   console.log(`MCP:    ${creds.mcp_url}`);
   console.log(`Agent:  ${creds.agent_id}`);
-  console.log(`Key:    ${who.ok ? "valid" : `not valid (${who.status}) — run \`npx memro connect\``}`);
+  console.log(`Key:    ${who.ok ? "valid" : `not valid (${who.status}) — run \`npx memro-cli connect\``}`);
   const configured = CLIENTS.filter((c) => {
     try {
       const text = fs.existsSync(c.file()) ? fs.readFileSync(c.file(), "utf8") : "";
@@ -258,6 +258,6 @@ export async function main(argv) {
     case "disconnect": return disconnect(opts);
     case null:
     case "help": console.log(HELP); return;
-    default: throw new Error(`Unknown command "${opts.command}". Try \`npx memro --help\`.`);
+    default: throw new Error(`Unknown command "${opts.command}". Try \`npx memro-cli --help\`.`);
   }
 }

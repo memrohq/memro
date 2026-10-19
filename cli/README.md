@@ -3,7 +3,7 @@
 Connect your AI tools to [Memro](https://memro.co) memory with one command.
 
 ```bash
-npx memro connect
+npx memro-cli connect
 ```
 
 1. Shows a code and opens the Memro dashboard. Sign in and press **Connect**.
@@ -29,9 +29,9 @@ once as `<file>.memro-backup`. Restart the tool afterwards.
 ## Commands
 
 ```
-npx memro connect [--client cursor,codex] [--yes]
-npx memro status
-npx memro disconnect [--client ...]
+npx memro-cli connect [--client cursor,codex] [--yes]
+npx memro-cli status
+npx memro-cli disconnect [--client ...]
 ```
 
 `--staging`, `--local` or `--api <url>` target another Memro server

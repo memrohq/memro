@@ -35,7 +35,7 @@ function coordinationPath(uri: vscode.Uri): string | undefined {
 /** Asks for an API key and stores it in VS Code's secret storage (the OS keychain). */
 async function promptForApiKey(): Promise<string | undefined> {
   const key = await vscode.window.showInputBox({
-    prompt: 'Paste a Memro API key (memro_sk_…). Get one with `npx memro connect` or Dashboard → API keys.',
+    prompt: 'Paste a Memro API key (memro_sk_…). Get one with `npx memro-cli connect` or Dashboard → API keys.',
     password: true,
     ignoreFocusOut: true,
     validateInput: (v) => (v.trim().startsWith('memro_sk_') ? undefined : 'API keys start with memro_sk_'),

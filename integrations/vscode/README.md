@@ -10,10 +10,9 @@ A VS Code extension that provides persistent memory capabilities via the Memro M
 - Delete Memory
 - Export Memories
 - Query Knowledge Graph
-ssssss
 ## Setup
 
-1. Get an API key: run `npx memro connect`, or create one in the dashboard
+1. Get an API key: run `npx memro-cli connect`, or create one in the dashboard
    (app.memro.co → API keys).
 2. Open this folder in VS Code and run the extension (F5).
 3. Run **Memro: Set API Key** and paste the `memro_sk_…` key. It is stored in

@@ -211,7 +211,7 @@ def resolve_agent(agent_id: str = None, token: str = None) -> Agent:
         if ALLOW_PRIVATE_KEY_AUTH and token and agent_id:
             key = token[3:] if token.startswith("sk_") else token
             return Agent(agent_id=agent_id, private_key=key, client=ForwardingClient(base_url))
-        raise AuthRequired("Send a memro_sk_ API key (Authorization: Bearer ...). Run `npx memro connect` to get one.")
+        raise AuthRequired("Send a memro_sk_ API key (Authorization: Bearer ...). Run `npx memro-cli connect` to get one.")
 
     if os.getenv("MEMRO_API_KEY"):
         return agent_for_api_key(os.getenv("MEMRO_API_KEY"))
@@ -687,7 +687,7 @@ class StreamableHTTPApp:
     async def __call__(self, scope, receive, send):
         token = current_auth_info.get().get("token") or ""
         if not token.startswith(API_KEY_PREFIX):
-            return await _unauthorized("Send Authorization: Bearer <memro_sk_ API key>. Run `npx memro connect` to get one.")(scope, receive, send)
+            return await _unauthorized("Send Authorization: Bearer <memro_sk_ API key>. Run `npx memro-cli connect` to get one.")(scope, receive, send)
         _, error = await _authenticate_request()
         if error is not None:
             return await error(scope, receive, send)
