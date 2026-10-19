@@ -4,12 +4,24 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
+	"time"
+)
+
+const (
+	// DefaultBaseURL is Memro Cloud's API.
+	DefaultBaseURL = "https://api.memro.co"
+	// APIKeyPrefix starts every Memro API key.
+	APIKeyPrefix = "memro_sk_"
 )
 
 // MemroError is returned when the server responds with a non-2xx status.
@@ -18,274 +30,401 @@ type MemroError struct {
 	Message    string
 }
 
-func (e *MemroError) Error() string {
-	return fmt.Sprintf("[%d] %s", e.StatusCode, e.Message)
+func (e *MemroError) Error() string { return fmt.Sprintf("[%d] %s", e.StatusCode, e.Message) }
+
+// IsNotFound reports whether err is a 404 from the API.
+func IsNotFound(err error) bool {
+	var e *MemroError
+	return errors.As(err, &e) && e.StatusCode == http.StatusNotFound
 }
 
-// ClientOptions configures the low-level HTTP client.
+// IsRateLimited reports whether err is a 429 from the API.
+func IsRateLimited(err error) bool {
+	var e *MemroError
+	return errors.As(err, &e) && e.StatusCode == http.StatusTooManyRequests
+}
+
+// ClientOptions configures a Client.
 type ClientOptions struct {
-	BaseURL    string       // defaults to MEMRO_BASE_URL or http://localhost:8081
-	HTTPClient *http.Client // defaults to http.DefaultClient
+	BaseURL    string       // default MEMRO_BASE_URL, then https://api.memro.co
+	APIKey     string       // memro_sk_...; default MEMRO_API_KEY
+	HTTPClient *http.Client // default: 30 s timeout
+	MaxRetries *int         // retries for rate limits and gateway errors on safe requests (default 2)
 }
 
-// Client is the low-level HTTP client for the memro protocol API.
+// Client is the low-level HTTP client: one method per endpoint. Most code
+// should use Agent, which keeps the credentials.
 type Client struct {
 	baseURL    string
+	apiKey     string
 	httpClient *http.Client
+	maxRetries int
 }
 
-// NewClient creates a new low-level memro API client.
+// Signer is a self-owned agent's credentials, used when there is no API key.
+type Signer struct {
+	AgentID    string
+	PrivateKey string
+}
+
+// NewClient creates a client. opts may be nil.
 func NewClient(opts *ClientOptions) *Client {
-	baseURL := "http://localhost:8081"
-	var httpClient *http.Client
-
-	if opts != nil {
-		if opts.BaseURL != "" {
-			baseURL = opts.BaseURL
-		}
-		if opts.HTTPClient != nil {
-			httpClient = opts.HTTPClient
-		}
+	if opts == nil {
+		opts = &ClientOptions{}
 	}
-	if baseURL == "http://localhost:8081" {
-		if envURL := os.Getenv("MEMRO_BASE_URL"); envURL != "" {
-			baseURL = envURL
-		}
+	c := &Client{baseURL: opts.BaseURL, apiKey: opts.APIKey, httpClient: opts.HTTPClient, maxRetries: 2}
+	if c.baseURL == "" {
+		c.baseURL = os.Getenv("MEMRO_BASE_URL")
 	}
-	if httpClient == nil {
-		httpClient = http.DefaultClient
+	if c.baseURL == "" {
+		c.baseURL = DefaultBaseURL
 	}
-
-	return &Client{baseURL: baseURL, httpClient: httpClient}
+	c.baseURL = strings.TrimRight(c.baseURL, "/")
+	if c.apiKey == "" {
+		c.apiKey = os.Getenv("MEMRO_API_KEY")
+	}
+	if c.httpClient == nil {
+		c.httpClient = &http.Client{Timeout: 30 * time.Second}
+	}
+	if opts.MaxRetries != nil {
+		c.maxRetries = *opts.MaxRetries
+	}
+	return c
 }
 
-// --- helpers ---
+// BaseURL returns the API base URL.
+func (c *Client) BaseURL() string { return c.baseURL }
 
-func (c *Client) doRequest(ctx context.Context, method, path string, headers map[string]string, body []byte) ([]byte, int, error) {
-	u := c.baseURL + path
+type request struct {
+	method string
+	path   string
+	query  url.Values
+	body   []byte
+	ctype  string
+	signer *Signer
+	noAuth bool
+}
 
-	var bodyReader io.Reader
+// do sends a request and decodes a JSON response into out (if non-nil). The
+// signature covers the exact path, query string and body sent.
+func (c *Client) do(ctx context.Context, r request, out any) error {
+	if c.apiKey != "" && !strings.HasPrefix(c.apiKey, APIKeyPrefix) {
+		return errors.New("memro: API keys start with memro_sk_; create one with `npx memro connect` or in the dashboard")
+	}
+	pathAndQuery := r.path
+	if qs := r.query.Encode(); qs != "" {
+		pathAndQuery += "?" + qs
+	}
+	for attempt := 0; ; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, r.method, c.baseURL+pathAndQuery, bytes.NewReader(r.body))
+		if err != nil {
+			return fmt.Errorf("memro: build request: %w", err)
+		}
+		req.Header.Set("Accept", "application/json")
+		if r.ctype != "" {
+			req.Header.Set("Content-Type", r.ctype)
+		}
+		signed := false
+		switch {
+		case r.noAuth:
+		case c.apiKey != "":
+			req.Header.Set("Authorization", "Bearer "+c.apiKey)
+		case r.signer != nil:
+			h, err := SignRequest(r.signer.AgentID, r.signer.PrivateKey, r.method, pathAndQuery, r.body)
+			if err != nil {
+				return err
+			}
+			for k, v := range h {
+				req.Header.Set(k, v)
+			}
+			signed = true
+		}
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("memro: %s %s: %w", r.method, r.path, err)
+		}
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return fmt.Errorf("memro: read response: %w", err)
+		}
+		if resp.StatusCode < 300 {
+			if out != nil && len(data) > 0 {
+				return json.Unmarshal(data, out)
+			}
+			return nil
+		}
+		if attempt < c.maxRetries {
+			var wait time.Duration
+			retry := true
+			switch {
+			case resp.StatusCode == http.StatusUnauthorized && signed && bytes.Contains(data, []byte("already used")):
+				// Signatures are deterministic: re-sign an identical request in the next second.
+				wait = time.Second - time.Duration(time.Now().Nanosecond()) + 50*time.Millisecond
+			case resp.StatusCode == http.StatusTooManyRequests,
+				(resp.StatusCode >= 502 && resp.StatusCode <= 504) && (r.method == http.MethodGet || r.method == http.MethodDelete):
+				wait = time.Duration(500<<attempt) * time.Millisecond
+				if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s >= 0 {
+					wait = min(time.Duration(s)*time.Second, 30*time.Second)
+				}
+			default:
+				retry = false
+			}
+			if retry {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(wait):
+				}
+				continue
+			}
+		}
+		msg := strings.TrimSpace(string(data))
+		var j struct{ Message, Error string }
+		if json.Unmarshal(data, &j) == nil && (j.Message != "" || j.Error != "") {
+			msg = j.Message
+			if msg == "" {
+				msg = j.Error
+			}
+		}
+		return &MemroError{StatusCode: resp.StatusCode, Message: msg}
+	}
+}
+
+func (c *Client) jsonReq(method, path string, body any, signer *Signer) (request, error) {
+	r := request{method: method, path: path, signer: signer}
 	if body != nil {
-		bodyReader = bytes.NewReader(body)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, u, bodyReader)
-	if err != nil {
-		return nil, 0, fmt.Errorf("memro: build request: %w", err)
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("memro: request %s %s: %w", method, path, err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("memro: read response: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		return nil, resp.StatusCode, &MemroError{
-			StatusCode: resp.StatusCode,
-			Message:    string(respBody),
+		b, err := json.Marshal(body)
+		if err != nil {
+			return r, err
 		}
+		r.body, r.ctype = b, "application/json"
 	}
-
-	return respBody, resp.StatusCode, nil
+	return r, nil
 }
 
-func (c *Client) authHeaders(agentID, privateKey string, body []byte) (map[string]string, error) {
-	sh, err := SignBody(agentID, privateKey, body)
-	if err != nil {
-		return nil, err
-	}
-	return sh.Headers(), nil
-}
-
-// ── Identity ────────────────────────────────────────────────────────────────
-
-// CreateIdentity registers a new agent identity on the server.
-func (c *Client) CreateIdentity(ctx context.Context) (*AgentIdentity, error) {
-	data, _, err := c.doRequest(ctx, http.MethodPost, "/identity", nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	var resp createIdentityResponse
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("memro: decode identity: %w", err)
-	}
-	return &AgentIdentity{AgentID: resp.AgentID, PrivateKey: resp.PrivateKey}, nil
-}
-
-// GetIdentity looks up an identity by agent ID.
-func (c *Client) GetIdentity(ctx context.Context, agentID string) (*getIdentityResponse, error) {
-	data, _, err := c.doRequest(ctx, http.MethodGet, "/identity/"+agentID, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	var resp getIdentityResponse
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("memro: decode identity: %w", err)
-	}
-	return &resp, nil
-}
-
-// DeleteIdentity permanently deletes an agent and all its memories.
-func (c *Client) DeleteIdentity(ctx context.Context, agentID, privateKey string) error {
-	headers, err := c.authHeaders(agentID, privateKey, nil)
+func (c *Client) call(ctx context.Context, method, path string, query url.Values, body any, signer *Signer, out any) error {
+	r, err := c.jsonReq(method, path, body, signer)
 	if err != nil {
 		return err
 	}
-	_, _, err = c.doRequest(ctx, http.MethodDelete, "/identity/"+agentID, headers, nil)
-	return err
+	r.query = query
+	return c.do(ctx, r, out)
 }
 
-// ── Memory ──────────────────────────────────────────────────────────────────
+// ── Account ───────────────────────────────────────────────────────────────
 
-// CreateMemory stores a new memory.
-func (c *Client) CreateMemory(ctx context.Context, agentID, privateKey, content string, memoryType MemoryType, visibility Visibility) (*Memory, error) {
-	reqBody := createMemoryRequest{
-		AgentID:    agentID,
-		Content:    content,
-		MemoryType: memoryType,
-		Visibility: visibility,
-	}
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("memro: marshal request: %w", err)
-	}
-
-	headers, err := c.authHeaders(agentID, privateKey, bodyBytes)
-	if err != nil {
-		return nil, err
-	}
-
-	data, _, err := c.doRequest(ctx, http.MethodPost, "/memory", headers, bodyBytes)
-	if err != nil {
-		return nil, err
-	}
-
-	var mem Memory
-	if err := json.Unmarshal(data, &mem); err != nil {
-		return nil, fmt.Errorf("memro: decode memory: %w", err)
-	}
-	return &mem, nil
+// WhoAmI returns the agent a credential acts as.
+func (c *Client) WhoAmI(ctx context.Context, signer *Signer) (*WhoAmI, error) {
+	var out WhoAmI
+	return &out, c.call(ctx, http.MethodGet, "/auth/whoami", nil, nil, signer, &out)
 }
 
-// GetMemories retrieves memories for an agent with optional filters.
-func (c *Client) GetMemories(ctx context.Context, agentID string, opts *GetRecentOptions) ([]Memory, error) {
-	params := url.Values{}
-	if opts != nil {
-		if opts.Type != "" {
-			params.Set("memory_type", string(opts.Type))
-		}
-		if opts.Visibility != "" {
-			params.Set("visibility", string(opts.Visibility))
-		}
-		if opts.Limit > 0 {
-			limit := opts.Limit
-			if limit > 100 {
-				limit = 100
-			}
-			params.Set("limit", strconv.Itoa(limit))
-		}
-	}
-
-	path := "/memory/" + agentID
-	if len(params) > 0 {
-		path += "?" + params.Encode()
-	}
-
-	data, _, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var memories []Memory
-	if err := json.Unmarshal(data, &memories); err != nil {
-		return nil, fmt.Errorf("memro: decode memories: %w", err)
-	}
-	return memories, nil
-}
-
-// DeleteMemory deletes a specific memory. Returns true if deleted, false if not found.
-func (c *Client) DeleteMemory(ctx context.Context, agentID, privateKey, memoryID string) (bool, error) {
-	headers, err := c.authHeaders(agentID, privateKey, nil)
-	if err != nil {
-		return false, err
-	}
-
-	_, status, err := c.doRequest(ctx, http.MethodDelete, "/memory/"+memoryID, headers, nil)
-	if err != nil {
-		if me, ok := err.(*MemroError); ok && me.StatusCode == 404 {
-			return false, nil
-		}
-		return false, err
-	}
-	return status == 204 || status == 200, nil
-}
-
-// ── Search ──────────────────────────────────────────────────────────────────
-
-// Search performs a semantic search over an agent's memories.
-func (c *Client) Search(ctx context.Context, agentID, query string, limit int, memoryType MemoryType) ([]SearchResult, error) {
-	params := url.Values{
-		"agent_id": {agentID},
-		"query":    {query},
-	}
-	if limit <= 0 {
-		limit = 10
-	}
-	if limit > 100 {
-		limit = 100
-	}
-	params.Set("limit", strconv.Itoa(limit))
-	if memoryType != "" {
-		params.Set("memory_type", string(memoryType))
-	}
-
-	data, _, err := c.doRequest(ctx, http.MethodGet, "/search?"+params.Encode(), nil, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var resp searchResponse
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("memro: decode search: %w", err)
-	}
-	return resp.Results, nil
-}
-
-// ── Export ───────────────────────────────────────────────────────────────────
-
-// Export retrieves all memories for an agent.
-func (c *Client) Export(ctx context.Context, agentID string) (*ExportData, error) {
-	data, _, err := c.doRequest(ctx, http.MethodGet, "/export/"+agentID, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	var export ExportData
-	if err := json.Unmarshal(data, &export); err != nil {
-		return nil, fmt.Errorf("memro: decode export: %w", err)
-	}
-	return &export, nil
-}
-
-// ── Health ───────────────────────────────────────────────────────────────────
-
-// Health checks the server health.
+// Health reports server, database and embedding status.
 func (c *Client) Health(ctx context.Context) (*HealthStatus, error) {
-	data, _, err := c.doRequest(ctx, http.MethodGet, "/health", nil, nil)
+	var out HealthStatus
+	return &out, c.do(ctx, request{method: http.MethodGet, path: "/health", noAuth: true}, &out)
+}
+
+// ── Identity ──────────────────────────────────────────────────────────────
+
+// CreateIdentity generates a key pair locally and registers only the public key.
+func (c *Client) CreateIdentity(ctx context.Context) (*AgentIdentity, error) {
+	kp, err := GenerateKeypair()
 	if err != nil {
 		return nil, err
 	}
-	var status HealthStatus
-	if err := json.Unmarshal(data, &status); err != nil {
-		return nil, fmt.Errorf("memro: decode health: %w", err)
+	r, _ := c.jsonReq(http.MethodPost, "/identity", map[string]string{"public_key": kp.PublicKey}, nil)
+	r.noAuth = true
+	if err := c.do(ctx, r, nil); err != nil {
+		return nil, err
 	}
-	return &status, nil
+	return &AgentIdentity{AgentID: kp.PublicKey, PrivateKey: kp.PrivateKey}, nil
+}
+
+// DeleteIdentity deletes the agent and all of its memories, files, keys and webhooks.
+func (c *Client) DeleteIdentity(ctx context.Context, agentID string, signer *Signer) error {
+	return c.call(ctx, http.MethodDelete, "/identity/"+agentID, nil, nil, signer, nil)
+}
+
+// ── Memories ──────────────────────────────────────────────────────────────
+
+// CreateMemory stores a memory (POST /memory).
+func (c *Client) CreateMemory(ctx context.Context, body map[string]any, signer *Signer) (*Memory, error) {
+	var out Memory
+	return &out, c.call(ctx, http.MethodPost, "/memory", nil, body, signer, &out)
+}
+
+// ListMemories returns an agent's recent memories.
+func (c *Client) ListMemories(ctx context.Context, agentID string, query url.Values, signer *Signer) ([]Memory, error) {
+	var out []Memory
+	return out, c.call(ctx, http.MethodGet, "/memory/agent/"+agentID, query, nil, signer, &out)
+}
+
+// DeleteMemory deletes a memory; it returns false if the memory does not exist.
+func (c *Client) DeleteMemory(ctx context.Context, memoryID string, signer *Signer) (bool, error) {
+	err := c.call(ctx, http.MethodDelete, "/memory/"+memoryID, nil, nil, signer, nil)
+	if IsNotFound(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// Export returns every memory of an agent.
+func (c *Client) Export(ctx context.Context, agentID string, signer *Signer) (*ExportData, error) {
+	var out ExportData
+	return &out, c.call(ctx, http.MethodGet, "/export/"+agentID, nil, nil, signer, &out)
+}
+
+// ── Search ────────────────────────────────────────────────────────────────
+
+// Search runs GET /search.
+func (c *Client) Search(ctx context.Context, query url.Values, signer *Signer) ([]SearchResult, error) {
+	var out struct {
+		Results []SearchResult `json:"results"`
+	}
+	return out.Results, c.call(ctx, http.MethodGet, "/search", query, nil, signer, &out)
+}
+
+// SearchTemporal runs GET /search/temporal.
+func (c *Client) SearchTemporal(ctx context.Context, query url.Values, signer *Signer) ([]TemporalResult, error) {
+	var out struct {
+		Results []TemporalResult `json:"results"`
+	}
+	return out.Results, c.call(ctx, http.MethodGet, "/search/temporal", query, nil, signer, &out)
+}
+
+// ── Memory engine ─────────────────────────────────────────────────────────
+
+func (c *Client) Reason(ctx context.Context, query string, signer *Signer) (*ReasoningResult, error) {
+	var out ReasoningResult
+	return &out, c.call(ctx, http.MethodPost, "/mee/reason", nil, map[string]string{"query": query}, signer, &out)
+}
+
+func (c *Client) ResolveConflict(ctx context.Context, a, b string, signer *Signer) (*ResolutionResult, error) {
+	var out ResolutionResult
+	return &out, c.call(ctx, http.MethodPost, "/mee/resolve", nil, map[string]string{"memory_a_id": a, "memory_b_id": b}, signer, &out)
+}
+
+func (c *Client) Evolve(ctx context.Context, signer *Signer) (*EvolutionResult, error) {
+	var out EvolutionResult
+	return &out, c.call(ctx, http.MethodPost, "/mee/evolve", nil, nil, signer, &out)
+}
+
+func (c *Client) Timeline(ctx context.Context, memoryID string, signer *Signer) (*MemoryTimeline, error) {
+	var out MemoryTimeline
+	return &out, c.call(ctx, http.MethodGet, "/mee/timeline/"+memoryID, nil, nil, signer, &out)
+}
+
+func (c *Client) MemoryChain(ctx context.Context, memoryID string, signer *Signer) (*MemoryChain, error) {
+	var out MemoryChain
+	return &out, c.call(ctx, http.MethodGet, "/memory/chain/"+memoryID, nil, nil, signer, &out)
+}
+
+func (c *Client) AnalyzeConflicts(ctx context.Context, signer *Signer) (*ConflictAnalysis, error) {
+	var out ConflictAnalysis
+	return &out, c.call(ctx, http.MethodGet, "/analyze/conflicts", nil, nil, signer, &out)
+}
+
+func (c *Client) Stats(ctx context.Context, signer *Signer) (*TemporalStats, error) {
+	var out TemporalStats
+	return &out, c.call(ctx, http.MethodGet, "/stats/temporal", nil, nil, signer, &out)
+}
+
+func (c *Client) Usage(ctx context.Context, signer *Signer) (*Usage, error) {
+	var out Usage
+	return &out, c.call(ctx, http.MethodGet, "/usage", nil, nil, signer, &out)
+}
+
+// ── Files ─────────────────────────────────────────────────────────────────
+
+func multipartBody(field, name, contentType string, data []byte, extra map[string]string) ([]byte, string, error) {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	h := textproto.MIMEHeader{}
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name=%q; filename=%q`, field, name))
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+	h.Set("Content-Type", contentType)
+	part, err := w.CreatePart(h)
+	if err != nil {
+		return nil, "", err
+	}
+	if _, err := part.Write(data); err != nil {
+		return nil, "", err
+	}
+	for k, v := range extra {
+		if err := w.WriteField(k, v); err != nil {
+			return nil, "", err
+		}
+	}
+	if err := w.Close(); err != nil {
+		return nil, "", err
+	}
+	return buf.Bytes(), w.FormDataContentType(), nil
+}
+
+func (c *Client) upload(ctx context.Context, path, field, name, contentType string, data []byte, extra map[string]string, signer *Signer, out any) error {
+	body, ctype, err := multipartBody(field, name, contentType, data, extra)
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, request{method: http.MethodPost, path: path, body: body, ctype: ctype, signer: signer}, out)
+}
+
+// UploadFile stores a file and extracts its text.
+func (c *Client) UploadFile(ctx context.Context, agentID, name, contentType string, data []byte, signer *Signer) (*UploadedFile, error) {
+	var out UploadedFile
+	return &out, c.upload(ctx, "/upload", "file", name, contentType, data, map[string]string{"agent_id": agentID}, signer, &out)
+}
+
+// MemoryFromFile stores an uploaded file's text as a memory and returns its ID.
+func (c *Client) MemoryFromFile(ctx context.Context, agentID, fileID string, memoryType MemoryType, signer *Signer) (string, error) {
+	var out struct {
+		MemoryID string `json:"memory_id"`
+	}
+	body := map[string]any{"agent_id": agentID, "file_id": fileID, "memory_type": memoryType}
+	return out.MemoryID, c.call(ctx, http.MethodPost, "/memory/from-file", nil, body, signer, &out)
+}
+
+// UploadImage describes an image with vision and stores the description.
+func (c *Client) UploadImage(ctx context.Context, name, contentType string, data []byte, signer *Signer) (*Memory, error) {
+	var out Memory
+	return &out, c.upload(ctx, "/upload/image", "image", name, contentType, data, nil, signer, &out)
+}
+
+// UploadDocument stores a PDF as ~1,500-character memories.
+func (c *Client) UploadDocument(ctx context.Context, name string, data []byte, signer *Signer) ([]Memory, error) {
+	var out []Memory
+	return out, c.upload(ctx, "/upload/document", "document", name, "application/pdf", data, nil, signer, &out)
+}
+
+// ── Webhooks ──────────────────────────────────────────────────────────────
+
+func (c *Client) RegisterWebhook(ctx context.Context, eventType, hookURL string, signer *Signer) error {
+	return c.call(ctx, http.MethodPost, "/hooks", nil, map[string]string{"event_type": eventType, "url": hookURL}, signer, nil)
+}
+
+// DeleteWebhook removes a webhook; it returns false if it was not registered.
+func (c *Client) DeleteWebhook(ctx context.Context, eventType, hookURL string, signer *Signer) (bool, error) {
+	err := c.call(ctx, http.MethodDelete, "/hooks", nil, map[string]string{"event_type": eventType, "url": hookURL}, signer, nil)
+	if IsNotFound(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (c *Client) ListWebhooks(ctx context.Context, eventType string, signer *Signer) ([]string, error) {
+	var out []string
+	return out, c.call(ctx, http.MethodGet, "/hooks/"+eventType, nil, nil, signer, &out)
+}
+
+// CreateAPIKey mints an API key for a self-owned agent (signed requests only;
+// API keys cannot create keys).
+func (c *Client) CreateAPIKey(ctx context.Context, name string, signer *Signer) (string, error) {
+	var out struct {
+		Key string `json:"key"`
+	}
+	return out.Key, c.call(ctx, http.MethodPost, "/api-keys", nil, map[string]string{"name": name}, signer, &out)
 }

@@ -1,191 +1,89 @@
-# memro Go SDK
-
-Official Go SDK for the memro protocol — AI agent memory infrastructure.
-
-## Installation
+# Go SDK
 
 ```bash
 go get github.com/memrohq/memro/sdk/go
 ```
 
-## Quick Start
-
 ```go
-package main
-
-import (
-	"context"
-	"fmt"
-	"log"
-
-	memro "github.com/memrohq/memro/sdk/go"
-)
-
-func main() {
-	ctx := context.Background()
-
-	// Create a new agent identity
-	agent, err := memro.CreateAgent(nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("Agent ID: %s\n", agent.AgentID)
-
-	// Store a memory
-	mem, err := agent.Remember(ctx, "User prefers Go over Python", &memro.RememberOptions{
-		Type: memro.MemoryTypeProfile,
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("Stored: %s\n", mem.ID)
-
-	// Recall memories semantically
-	results, err := agent.Recall(ctx, "what does the user prefer?", &memro.RecallOptions{
-		Limit: 5,
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, r := range results {
-		fmt.Printf("[%.2f] %s\n", r.Score, r.Content)
-	}
-
-	// Get recent memories
-	recent, err := agent.GetRecent(ctx, &memro.GetRecentOptions{
-		Limit: 10,
-		Type:  memro.MemoryTypeEpisodic,
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, m := range recent {
-		fmt.Printf("• %s\n", m.Content)
-	}
-
-	// Save identity to file (keep secret!)
-	if err := agent.Save("identity.json"); err != nil {
-		log.Fatal(err)
-	}
-}
+import memro "github.com/memrohq/memro/sdk/go"
 ```
 
-## Features
+No dependencies outside the standard library. Go 1.21+.
 
-- **Cryptographic Identity**: ed25519 key generation and management
-- **Memory Storage**: Create and manage episodic, semantic, procedural, and profile memories
-- **Semantic Search**: Vector-based similarity search
-- **Request Signing**: Automatic ed25519 signature generation for authenticated requests
-- **Data Export**: Full data portability
-- **Zero Dependencies**: Only uses `golang.org/x/crypto` (standard ed25519)
-
-## Configuration
-
-### Connect to memro server
+## Connect
 
 ```go
-// Custom server URL
-client := memro.NewClient(&memro.ClientOptions{
-    BaseURL: "https://api.memro.co",
+ctx := context.Background()
+
+agent, err := memro.AgentFromAPIKey(ctx, os.Getenv("MEMRO_API_KEY"), nil)       // Memro Cloud
+agent, err := memro.AgentFromAPIKey(ctx, key, &memro.ClientOptions{BaseURL: "http://localhost:8081"})
+agent, err := memro.AgentFromEnv(nil)  // MEMRO_API_KEY, or MEMRO_AGENT_ID + MEMRO_PRIVATE_KEY
+```
+
+Self-owned identity:
+
+```go
+agent, err := memro.CreateAgent(nil)        // key pair generated locally
+err = agent.Save("identity.json")           // 0600; keep secret
+agent, err = memro.AgentFromFile("identity.json", nil)
+```
+
+## Memories and search
+
+```go
+m, err := agent.Remember(ctx, "The billing service was rewritten in Go", &memro.RememberOptions{
+	Type:      memro.MemoryTypeSemantic, // empty or MemoryTypeAuto: server classifies
+	EventDate: "2026-03-01T00:00:00Z",
+	Metadata:  map[string]any{"source": "standup"},
 })
-agent, err := memro.CreateAgent(client)
 
-// Or use environment variable
-// export MEMRO_BASE_URL=https://api.memro.co
-agent, err := memro.CreateAgent(nil)
+results, err := agent.Recall(ctx, "what language is billing in?", &memro.RecallOptions{Limit: 5, Mode: memro.SearchHybrid})
+recent, err := agent.RecallTemporal(ctx, "deploy incidents", &memro.TemporalOptions{AfterDate: "2026-09-01T00:00:00Z"})
+
+mems, err := agent.GetRecent(ctx, &memro.GetRecentOptions{Limit: 20})
+ok, err := agent.DeleteMemory(ctx, m.ID) // false if it didn't exist
+export, err := agent.Export(ctx)
 ```
 
-### Load existing identity
+## Memory engine
 
 ```go
-// From file
-agent, err := memro.AgentFromFile("identity.json", nil)
-
-// From environment variables
-// export MEMRO_AGENT_ID=...
-// export MEMRO_PRIVATE_KEY=...
-agent, err := memro.AgentFromEnv(nil)
-
-// From identity struct
-agent := memro.AgentFromIdentity(memro.AgentIdentity{
-    AgentID:    "5bd80dd5...",
-    PrivateKey: "x1y2z3...",
-}, nil)
+ans, err := agent.Reason(ctx, "why did 500s spike after the billing release?")
+evo, err := agent.Evolve(ctx)
+res, err := agent.ResolveConflict(ctx, aID, bID)
+chain, err := agent.MemoryChain(ctx, m.ID)
+tl, err := agent.Timeline(ctx, m.ID)
+st, err := agent.Stats(ctx)
 ```
 
-## API Reference
-
-### Agent (high-level)
-
-| Method | Description |
-|--------|-------------|
-| `CreateAgent(client)` | Create a new agent identity |
-| `AgentFromFile(path, client)` | Load from JSON file |
-| `AgentFromEnv(client)` | Load from env vars |
-| `agent.Remember(ctx, content, opts)` | Store a memory |
-| `agent.Recall(ctx, query, opts)` | Semantic search |
-| `agent.GetRecent(ctx, opts)` | Get recent memories |
-| `agent.DeleteMemory(ctx, id)` | Delete a memory |
-| `agent.Export(ctx)` | Export all data |
-| `agent.DeleteAgent(ctx)` | Delete agent + data |
-| `agent.Save(path)` | Save identity to file |
-
-### Client (low-level)
-
-| Method | Description |
-|--------|-------------|
-| `CreateIdentity(ctx)` | Register new identity |
-| `GetIdentity(ctx, agentID)` | Look up identity |
-| `DeleteIdentity(ctx, agentID, key)` | Delete identity |
-| `CreateMemory(ctx, ...)` | Store memory |
-| `GetMemories(ctx, agentID, opts)` | List memories |
-| `DeleteMemory(ctx, ...)` | Delete memory |
-| `Search(ctx, agentID, query, ...)` | Semantic search |
-| `Export(ctx, agentID)` | Export data |
-| `Health(ctx)` | Health check |
-
-### Types
+## Files and webhooks
 
 ```go
-type MemoryType string // "episodic", "semantic", "procedural", "profile"
-type Visibility string // "private", "shared", "public"
+data, _ := os.ReadFile("notes.pdf")
+up, err := agent.UploadFile(ctx, "notes.pdf", "application/pdf", data, true) // true: also store a memory
+mem, err := agent.UploadImage(ctx, "board.png", "image/png", png)
+chunks, err := agent.UploadDocument(ctx, "handbook.pdf", pdf)
 
-type Memory struct {
-    ID         string     `json:"id"`
-    AgentID    string     `json:"agent_id"`
-    Content    string     `json:"content"`
-    MemoryType MemoryType `json:"memory_type"`
-    Visibility Visibility `json:"visibility"`
-    CreatedAt  string     `json:"created_at"`
-}
-
-type SearchResult struct {
-    MemoryID   string     `json:"memory_id"`
-    Content    string     `json:"content"`
-    Score      float64    `json:"score"`
-    MemoryType MemoryType `json:"memory_type"`
-    CreatedAt  string     `json:"created_at"`
-}
+err = agent.AddWebhook(ctx, "https://example.com/memro-hook")
+hooks, err := agent.Webhooks(ctx)
+ok, err = agent.RemoveWebhook(ctx, "https://example.com/memro-hook")
 ```
 
-## Development
+## Errors and retries
 
-```bash
-# Run tests
-go test ./...
-
-# Run tests with race detector
-go test -race ./...
-
-# Check for issues
-go vet ./...
+```go
+if memro.IsRateLimited(err) { /* 429 after retries */ }
+if memro.IsNotFound(err) { … }
+var apiErr *memro.MemroError
+if errors.As(err, &apiErr) { log.Println(apiErr.StatusCode, apiErr.Message) }
 ```
 
-## Requirements
+`ClientOptions{BaseURL, APIKey, HTTPClient, MaxRetries}`. The default HTTP
+client has a 30-second timeout. 429s are retried (honouring `Retry-After`);
+gateway errors only for `GET` and `DELETE`. Without an API key, requests are
+signed with [v2 signatures](https://github.com/memrohq/memro/blob/main/docs/authentication.md#signed-requests)
+(`memro.SignRequest`).
 
-- Go 1.21+
-- `golang.org/x/crypto` (for ed25519, included via go.mod)
+---
 
-## License
-
-MIT
+Full documentation: https://github.com/memrohq/memro/tree/main/docs · License: PolyForm Noncommercial 1.0.0

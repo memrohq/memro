@@ -1,260 +1,117 @@
-# memro Python SDK
-
-Official Python SDK for the memro protocol - AI agent memory infrastructure.
-
-## Installation
+# Python SDK
 
 ```bash
-pip install memro
+pip install memro    # Python 3.8+
 ```
 
-**From source:**
-```bash
-git clone https://github.com/memrohq/memro
-cd memro/sdk/python
-pip install -e .
-```
-
-## Quick Start
+## Connect
 
 ```python
 from memro import Agent
 
-# Create a new agent identity
-agent = Agent.create()
-print(f"Agent ID: {agent.agent_id}")
-
-# Store a memory
-agent.remember("User prefers Python over JavaScript", type="profile")
-
-# Recall memories semantically
-results = agent.recall("what does the user prefer?", limit=5)
-for memory in results:
-    print(f"[{memory.score:.2f}] {memory.content}")
-
-# Get recent memories
-recent = agent.get_recent(limit=10, type="episodic")
-for memory in recent:
-    print(f"• {memory.content}")
-
-# Export all data
-export_data = agent.export()
-print(f"Exported {len(export_data['memories'])} memories")
+agent = Agent.from_env()                       # MEMRO_API_KEY (and optional MEMRO_BASE_URL)
+agent = Agent.from_api_key("memro_sk_...")     # explicit key, Memro Cloud
+agent = Agent.connect("memro_sk_...", base_url="http://localhost:8081")  # self-hosted
 ```
 
-## Features
-
-- ✅ **Cryptographic Identity**: ed25519 key generation and management
-- ✅ **Memory Storage**: Create and manage episodic, semantic, procedural, and profile memories
-- ✅ **Semantic Search**: Vector-based similarity search
-- ✅ **Request Signing**: Automatic signature generation for authenticated requests
-- ✅ **Data Export**: Full data portability
-- ✅ **Type Hints**: Full typing support for IDE autocomplete
-
-## Configuration
-
-### Connect to memro server
+Self-owned identity (the private key is generated here and never sent):
 
 ```python
-from memro import Agent, MemroClient
-
-# Connect to custom server
-client = MemroClient(base_url="https://api.memro.co")
-agent = Agent.create(client=client)
-
-# Or use environment variable
-# export MEMRO_BASE_URL=https://api.memro.co
-agent = Agent.create()
+agent = Agent.create()                 # registers the public key
+agent.save("identity.json")            # keep secret; it can't be recovered
+agent = Agent.from_file("identity.json")
 ```
 
-### Load existing identity
+`Agent.from_env()` also accepts `MEMRO_AGENT_ID` + `MEMRO_PRIVATE_KEY`.
+
+## Memories
 
 ```python
-# From file
-agent = Agent.from_file("agent_identity.json")
-
-# From environment variables
-# export MEMRO_AGENT_ID=...
-# export MEMRO_PRIVATE_KEY=...
-agent = Agent.from_env()
-
-# From dict
-identity = {
-    "agent_id": "5bd80dd5...",
-    "private_key": "x1y2z3..."
-}
-agent = Agent.from_dict(identity)
-```
-
-## API Reference
-
-### Agent
-
-#### `Agent.create(client=None)`
-Create a new agent identity.
-
-#### `Agent.from_file(path)`
-Load agent from JSON file.
-
-#### `Agent.from_env()`
-Load agent from environment variables.
-
-#### `agent.remember(content, type="episodic", visibility="private", metadata=None)`
-Store a new memory.
-
-**Parameters:**
-- `content` (str): Memory content (max 10,000 chars)
-- `type` (str): Memory type - "episodic", "semantic", "procedural", or "profile"
-- `visibility` (str): "private", "shared", or "public"
-- `metadata` (dict): Optional metadata
-
-**Returns:** `Memory` object
-
-#### `agent.recall(query, limit=10, type=None, min_score=None)`
-Search memories semantically.
-
-**Parameters:**
-- `query` (str): Search query
-- `limit` (int): Max results (default: 10, max: 100)
-- `type` (str): Filter by memory type
-- `min_score` (float): Minimum similarity score (0-1)
-
-**Returns:** List of `SearchResult` objects
-
-#### `agent.get_recent(limit=10, type=None, visibility=None)`
-Get recent memories without semantic search.
-
-**Parameters:**
-- `limit` (int): Max results
-- `type` (str): Filter by memory type
-- `visibility` (str): Filter by visibility
-
-**Returns:** List of `Memory` objects
-
-#### `agent.delete_memory(memory_id)`
-Delete a specific memory.
-
-**Returns:** `DeletionProof` object
-
-#### `agent.export(format="json")`
-Export all agent data.
-
-**Returns:** Dict with all memories and metadata
-
-#### `agent.save(path)`
-Save agent identity to file.
-
-### Memory
-
-```python
-class Memory:
-    id: str
-    agent_id: str
-    content: str
-    type: str
-    visibility: str
-    created_at: datetime
-    metadata: dict
-```
-
-### SearchResult
-
-```python
-class SearchResult:
-    memory: Memory
-    score: float
-    rank: int
-```
-
-## Examples
-
-### Profile Memory
-
-```python
-agent.remember("User timezone is UTC+5:30", type="profile")
-agent.remember("User prefers dark mode", type="profile")
-
-# Search profile
-preferences = agent.recall("user preferences", type="profile")
-```
-
-### Episodic Memory
-
-```python
-agent.remember("User asked about deployment at 10:30 AM", type="episodic")
-agent.remember("Fixed bug in authentication flow", type="episodic")
-
-# Get recent conversations
-recent = agent.get_recent(type="episodic", limit=20)
-```
-
-### Semantic Memory
-
-```python
-agent.remember("Docker Compose orchestrates multi-container apps", type="semantic")
-agent.remember("Kubernetes is a container orchestration platform", type="semantic")
-
-# Search knowledge
-knowledge = agent.recall("container orchestration", type="semantic")
-```
-
-### Procedural Memory
-
-```python
-agent.remember(
-    "To deploy: 1) Build image 2) Push to registry 3) Update manifest",
-    type="procedural"
+m = agent.remember(
+    "The billing service was rewritten in Go",
+    type="semantic",                     # episodic | semantic | procedural | profile | None (auto)
+    visibility="private",
+    event_date="2026-03-01T00:00:00Z",   # optional
+    session_id=None,                     # optional UUID
+    metadata={"source": "standup"},
 )
-
-# Search procedures
-deploy_steps = agent.recall("how to deploy", type="procedural")
+agent.get_recent(limit=20, type="profile")      # list[Memory], newest first
+agent.delete_memory(m.id)                       # True, or False if it didn't exist
+agent.export()                                  # ExportData(total, memories, ...)
 ```
 
-## Development
+## Search
 
-```bash
-# Clone repository
-git clone https://github.com/memrohq/memro
-cd memro/sdk/python
+```python
+for r in agent.recall("what language is billing in?", limit=5, mode="hybrid", min_score=0.3):
+    print(r.score, r.content)                    # SearchResult
 
-# Install dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Run linter
-ruff check .
-
-# Format code
-black .
+agent.recall_temporal("deploy incidents", after_date="2026-09-01T00:00:00Z", temporal_weight=0.6)
 ```
 
-## Requirements
+`mode` is `hybrid` (default), `semantic` or `keyword`.
 
-- Python 3.8+
-- Dependencies:
-  - `pynacl` - ed25519 signatures
-  - `requests` - HTTP client
-  - `pydantic` - Data validation
+## Memory engine
 
-## License
+```python
+ans = agent.reason("why did 500s spike after the billing release?")
+print(ans.answer, ans.confidence, ans.based_on)
 
-[PolyForm Noncommercial License 1.0.0](../../LICENSE): free for non-commercial use. For commercial use see [memro.co](https://memro.co).
+agent.evolve()                          # EvolutionResult
+agent.resolve_conflict(a_id, b_id)      # {"Resolved": id} or {"Ambiguous": [...]}
+agent.memory_chain(m.id)                # MemoryChain
+agent.timeline(m.id)                    # MemoryTimeline
+agent.stats()                           # TemporalStats
+agent.usage()                           # dict
+```
 
-## Links
+## Files and webhooks
 
-- **Documentation**: https://docs.memro.co/sdk/python
-- **Protocol Spec**: https://github.com/memrohq/memro/tree/main/docs/spec
-- **Issues**: https://github.com/memrohq/memro/issues
-- **PyPI**: https://pypi.org/project/memro/
+```python
+up = agent.upload_file("notes.pdf")                    # stores the file and a memory of its text
+up = agent.upload_file(("notes.txt", b"...", "text/plain"), remember=False)
+agent.upload_image("whiteboard.png")                   # Memory with a description
+agent.upload_document("handbook.pdf")                  # list[Memory], ~1,500 chars each
 
-## Contributing
+agent.add_webhook("https://example.com/memro-hook")
+agent.webhooks()
+agent.remove_webhook("https://example.com/memro-hook")
+```
 
-Contributions welcome! Please read CONTRIBUTING.md first.
+## Errors and retries
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
+```python
+from memro import MemroError, RateLimitError
+
+try:
+    agent.remember("...")
+except RateLimitError:
+    ...                     # 429 after the automatic retries
+except MemroError as e:
+    print(e.status_code, e.message)
+```
+
+`MemroClient(timeout=30, max_retries=2)`: rate-limited requests are retried
+(honouring `Retry-After`); gateway errors are retried only for `GET` and
+`DELETE`, so a memory is never stored twice.
+
+## LangChain
+
+```python
+from memro.integrations.langchain import MemroMemory   # pip install "memro[langchain]"
+memory = MemroMemory(agent=agent)
+```
+
+## Low-level client
+
+`agent.client` is a `MemroClient` with one method per endpoint
+(`search`, `search_temporal`, `reason`, `upload_file`, …) and
+`request(method, path, params=, json_body=, files=)` for anything else.
+Requests are signed with [v2 signatures](https://github.com/memrohq/memro/blob/main/docs/authentication.md#signed-requests)
+when there is no API key.
+
+See the [API reference](https://github.com/memrohq/memro/blob/main/docs/api-reference.md) for response fields.
+
+---
+
+Full documentation: https://github.com/memrohq/memro/tree/main/docs · License: PolyForm Noncommercial 1.0.0

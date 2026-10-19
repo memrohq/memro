@@ -4,20 +4,31 @@ memro — AI agent memory infrastructure SDK for Python.
 Quickstart:
     from memro import Agent
 
-    agent = Agent.create()
+    agent = Agent.from_env()            # MEMRO_API_KEY=memro_sk_...
     agent.remember("User prefers dark mode", type="profile")
     results = agent.recall("user preferences")
-    agent.save("identity.json")
 """
 from .agent import Agent
-from .client import MemroClient, MemroError
-from .models import Memory, SearchResult, ExportData, HealthStatus
-from .crypto import generate_keypair
+from .client import MemroClient, MemroError, RateLimitError
+from .models import (
+    Memory, SearchResult, ExportData, HealthStatus, TemporalSearchResult,
+    ReasoningResult, EvolutionResult, MemoryTimeline, MemoryChain, TemporalStats, UploadedFile,
+)
+from .crypto import generate_keypair, sign_request
 
 __all__ = [
     "Agent",
     "MemroClient",
     "MemroError",
+    "RateLimitError",
+    "TemporalSearchResult",
+    "ReasoningResult",
+    "EvolutionResult",
+    "MemoryTimeline",
+    "MemoryChain",
+    "TemporalStats",
+    "UploadedFile",
+    "sign_request",
     "Memory",
     "SearchResult",
     "ExportData",
@@ -25,4 +36,4 @@ __all__ = [
     "generate_keypair",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

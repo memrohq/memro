@@ -1,64 +1,60 @@
 {
-    "name": "@memro/sdk",
-    "version": "0.1.0",
-    "description": "Official JavaScript/TypeScript SDK for the memro protocol - AI agent memory infrastructure",
-    "main": "dist/index.js",
-    "module": "dist/index.esm.js",
-    "types": "dist/index.d.ts",
-    "files": [
-        "dist",
-        "README.md",
-        "LICENSE"
-    ],
-    "scripts": {
-        "build": "rollup -c",
-        "dev": "rollup -c -w",
-        "test": "jest",
-        "test:watch": "jest --watch",
-        "lint": "eslint src --ext .ts,.js",
-        "format": "prettier --write \"src/**/*.{ts,js}\"",
-        "typecheck": "tsc --noEmit",
-        "prepublishOnly": "npm run build"
-    },
-    "keywords": [
-        "ai",
-        "agents",
-        "memory",
-        "vector-database",
-        "embeddings",
-        "memro"
-    ],
-    "author": "memro Team <sdk@memro.co>",
-    "license": "PolyForm-Noncommercial-1.0.0",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/memrohq/memro",
-        "directory": "sdk/js"
-    },
-    "bugs": {
-        "url": "https://github.com/memrohq/memro/issues"
-    },
-    "homepage": "https://memro.co",
-    "dependencies": {
-        "tweetnacl": "^1.0.3",
-        "axios": "^1.6.0"
-    },
-    "devDependencies": {
-        "@rollup/plugin-commonjs": "^25.0.0",
-        "@rollup/plugin-node-resolve": "^15.0.0",
-        "@rollup/plugin-typescript": "^11.0.0",
-        "@types/jest": "^29.0.0",
-        "@types/node": "^20.0.0",
-        "@typescript-eslint/eslint-plugin": "^6.0.0",
-        "@typescript-eslint/parser": "^6.0.0",
-        "eslint": "^8.0.0",
-        "jest": "^29.0.0",
-        "prettier": "^3.0.0",
-        "rollup": "^4.0.0",
-        "ts-jest": "^29.0.0",
-        "typescript": "^5.0.0"
-    },
-    "engines": {
-        "node": ">=16.0.0"
+  "name": "@memro/sdk",
+  "version": "0.2.0",
+  "description": "Official JavaScript/TypeScript SDK for Memro: long-term memory for AI agents",
+  "main": "dist/cjs/index.js",
+  "types": "dist/esm/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json','{\\\"type\\\":\\\"commonjs\\\"}');require('fs').writeFileSync('dist/esm/package.json','{\\\"type\\\":\\\"module\\\"}')\"",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test",
+    "prepublishOnly": "npm test"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "memory",
+    "vector-database",
+    "embeddings",
+    "memro"
+  ],
+  "author": "Memro <sdk@memro.co>",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/memrohq/memro",
+    "directory": "sdk/js"
+  },
+  "bugs": {
+    "url": "https://github.com/memrohq/memro/issues"
+  },
+  "homepage": "https://memro.co",
+  "dependencies": {
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
     }
+  },
+  "sideEffects": false
 }

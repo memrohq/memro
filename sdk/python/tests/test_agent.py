@@ -123,28 +123,98 @@ def test_export(mock_agent):
     assert len(export.memories) == 1
 
 
-def test_delete_signs_empty_body():
-    """DELETE sends no body, so the signature must cover an empty body."""
-    from memro.crypto import generate_keypair
-    import nacl.signing
-    agent_id, private_key = generate_keypair()
-    client = MemroClient(base_url="http://example.test")
-    captured = {}
+class _Recorder:
+    """Stands in for requests.Session.request and records what was sent."""
 
-    def fake_delete(url, headers=None, **kw):
-        captured.update(headers)
-        resp = MagicMock(status_code=204)
+    def __init__(self, status=200, body=b"{}", headers=None):
+        self.calls = []
+        self.status, self.body, self.headers = status, body, headers or {}
+
+    def __call__(self, method, url, data=None, headers=None, timeout=None):
+        self.calls.append({"method": method, "url": url, "data": data or b"", "headers": headers})
+        resp = MagicMock(status_code=self.status, ok=200 <= self.status < 300, content=self.body,
+                         text=self.body.decode(), reason="", headers=self.headers)
+        resp.json.side_effect = lambda: json.loads(self.body)
         return resp
 
-    client._session.delete = fake_delete
-    client.delete_memory(agent_id, private_key, "11111111-1111-1111-1111-111111111111")
-    verify_key = nacl.signing.VerifyKey(bytes.fromhex(agent_id))
-    verify_key.verify(captured["X-Timestamp"].encode(), bytes.fromhex(captured["X-Signature"]))
+
+def _verify_v2(agent_id, call, path_and_query):
+    import nacl.signing
+    h = call["headers"]
+    assert h["X-Signature-Version"] == "2" and h["X-Agent-Id"] == agent_id
+    payload = f"{h['X-Timestamp']}\n{call['method']}\n{path_and_query}\n".encode() + (call["data"] or b"")
+    nacl.signing.VerifyKey(bytes.fromhex(agent_id)).verify(payload, bytes.fromhex(h["X-Signature"]))
 
 
-def test_api_key_uses_bearer_header():
-    """With an API key the client sends Authorization: Bearer instead of signing."""
+def test_delete_is_signed_with_v2_over_an_empty_body():
+    agent_id, private_key = generate_keypair()
+    client = MemroClient(base_url="http://example.test")
+    client._session.request = rec = _Recorder(status=204, body=b"")
+    assert client.delete_memory(agent_id, private_key, "11111111-1111-1111-1111-111111111111")
+    _verify_v2(agent_id, rec.calls[0], "/memory/11111111-1111-1111-1111-111111111111")
+
+
+def test_signature_covers_the_exact_query_string():
+    agent_id, private_key = generate_keypair()
+    client = MemroClient(base_url="http://example.test/api")
+    client._session.request = rec = _Recorder(body=b'{"results": []}')
+    client.search(agent_id, "what & why?", limit=5, private_key=private_key, mode="keyword")
+    url = rec.calls[0]["url"]
+    assert url.startswith("http://example.test/api/search?")
+    _verify_v2(agent_id, rec.calls[0], url[len("http://example.test/api"):])
+
+
+def test_signature_covers_the_json_body():
+    agent_id, private_key = generate_keypair()
+    client = MemroClient(base_url="http://example.test")
+    client._session.request = rec = _Recorder(body=json.dumps({**FAKE_MEMORY, "agent_id": agent_id}).encode())
+    client.create_memory(agent_id, private_key, "hello", "semantic")
+    _verify_v2(agent_id, rec.calls[0], "/memory")
+    assert json.loads(rec.calls[0]["data"])["content"] == "hello"
+
+
+def test_multipart_upload_is_signed():
+    agent_id, private_key = generate_keypair()
+    client = MemroClient(base_url="http://example.test")
+    client._session.request = rec = _Recorder(body=b'{"file_id": "f", "file_name": "a.txt", "file_type": "text", "file_size": 2}')
+    client.upload_file(agent_id, private_key, ("a.txt", b"hi"))
+    assert rec.calls[0]["headers"]["Content-Type"].startswith("multipart/form-data")
+    _verify_v2(agent_id, rec.calls[0], "/upload")
+
+
+def test_api_key_uses_bearer_header_and_no_signature():
     client = MemroClient(base_url="http://example.test", api_key="memro_sk_test")
-    headers = client._auth_headers("ignored", "", b"{}")
-    assert headers["Authorization"] == "Bearer memro_sk_test"
-    assert "X-Signature" not in headers
+    client._session.request = rec = _Recorder(body=b'{"agent_id": "a"}')
+    client.whoami()
+    h = rec.calls[0]["headers"]
+    assert h["Authorization"] == "Bearer memro_sk_test" and "X-Signature" not in h
+
+
+def test_rejects_keys_that_are_not_api_keys():
+    with pytest.raises(ValueError):
+        MemroClient(api_key="0" * 64)
+
+
+def test_default_base_url_is_memro_cloud(monkeypatch):
+    monkeypatch.delenv("MEMRO_BASE_URL", raising=False)
+    assert MemroClient().base_url == "https://api.memro.co"
+
+
+def test_rate_limited_requests_are_retried():
+    client = MemroClient(base_url="http://example.test", api_key="memro_sk_test", max_retries=2)
+    responses = [_Recorder(status=429, body=b"Rate limit exceeded", headers={"Retry-After": "0"}), _Recorder(body=b'{"agent_id": "a"}')]
+    calls = []
+    def fake(*a, **kw):
+        calls.append(1)
+        return responses[min(len(calls), 2) - 1](*a, **kw)
+    client._session.request = fake
+    assert client.whoami()["agent_id"] == "a" and len(calls) == 2
+
+
+def test_post_is_not_retried_after_a_gateway_error():
+    from memro import MemroError
+    client = MemroClient(base_url="http://example.test", api_key="memro_sk_test")
+    client._session.request = rec = _Recorder(status=502, body=b"bad gateway")
+    with pytest.raises(MemroError):
+        client.create_memory("a", None, "x")
+    assert len(rec.calls) == 1

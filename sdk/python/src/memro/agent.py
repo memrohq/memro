@@ -7,22 +7,28 @@ from typing import Optional, List, Dict, Any
 
 from .client import MemroClient
 from .crypto import generate_keypair
-from .models import Memory, SearchResult, ExportData, TemporalSearchResult
+from .models import (
+    Memory, SearchResult, ExportData, TemporalSearchResult, ReasoningResult,
+    EvolutionResult, MemoryTimeline, MemoryChain, TemporalStats, UploadedFile,
+)
 
 
 class Agent:
     """
     An AI agent with persistent, self-owned memory.
 
-    Quickstart:
+    Memro Cloud (API key from `npx memro connect` or the dashboard):
+        agent = Agent.from_api_key("memro_sk_...")
+        agent = Agent.from_env()            # MEMRO_API_KEY
+
+    Self-owned identity (ed25519 key generated on this machine):
         agent = Agent.create()
+        agent.save("identity.json")         # keep this file secret
+        agent = Agent.from_file("identity.json")
+
+    Then:
         agent.remember("User prefers dark mode", type="profile")
         results = agent.recall("user preferences")
-        agent.save("identity.json")
-
-    Load existing:
-        agent = Agent.from_file("identity.json")
-        agent = Agent.from_env()   # MEMRO_AGENT_ID + MEMRO_PRIVATE_KEY
     """
 
     def __init__(
@@ -61,6 +67,14 @@ class Agent:
         c = client or MemroClient(api_key=api_key)
         c.api_key = api_key
         return cls(agent_id=c.whoami()["agent_id"], client=c)
+
+    @classmethod
+    def connect(cls, api_key: Optional[str] = None, base_url: Optional[str] = None) -> "Agent":
+        """Shortcut for Agent.from_api_key with an optional self-hosted base URL."""
+        key = api_key or os.environ.get("MEMRO_API_KEY")
+        if not key:
+            raise EnvironmentError("Pass an API key or set MEMRO_API_KEY")
+        return cls.from_api_key(key, client=MemroClient(base_url, api_key=key))
 
     @classmethod
     def from_env(cls, client: Optional[MemroClient] = None) -> "Agent":
@@ -107,7 +121,7 @@ class Agent:
     def remember(
         self,
         content: str,
-        type: str = "episodic",
+        type: Optional[str] = "episodic",
         visibility: str = "private",
         event_date: Optional[str] = None,
         session_id: Optional[str] = None,
@@ -119,7 +133,8 @@ class Agent:
 
         Args:
             content:    What to remember (max 10,000 chars)
-            type:       episodic | semantic | procedural | profile
+            type:       episodic | semantic | procedural | profile, or None to
+                        let the server classify it
             visibility: private | shared | public
             event_date: When the event occurred (ISO 8601)
             session_id: Session identifier for multi-session reasoning
@@ -221,6 +236,63 @@ class Agent:
         """Export all memories for this agent."""
         data = self.client.export(self.agent_id, self._private_key)
         return ExportData(**data)
+
+    # ── Memory engine ───────────────────────────────────────────────────────
+
+    def reason(self, query: str) -> ReasoningResult:
+        """Answer a question from memory, with the memories and paths it used."""
+        return ReasoningResult(**self.client.reason(self.agent_id, self._private_key, query))
+
+    def resolve_conflict(self, memory_a_id: str, memory_b_id: str) -> dict:
+        """{"Resolved": id} or {"Ambiguous": [a, b, expires_at]}."""
+        return self.client.resolve_conflict(self.agent_id, self._private_key, memory_a_id, memory_b_id)
+
+    def evolve(self) -> EvolutionResult:
+        """Consolidate repeated episodes into semantic memories."""
+        return EvolutionResult(**self.client.evolve(self.agent_id, self._private_key))
+
+    def timeline(self, memory_id: str) -> MemoryTimeline:
+        return MemoryTimeline(**self.client.timeline(self.agent_id, self._private_key, memory_id))
+
+    def memory_chain(self, memory_id: str) -> MemoryChain:
+        return MemoryChain(**self.client.memory_chain(self.agent_id, self._private_key, memory_id))
+
+    def stats(self) -> TemporalStats:
+        return TemporalStats(**self.client.stats(self.agent_id, self._private_key))
+
+    def usage(self) -> dict:
+        return self.client.usage(self.agent_id, self._private_key)
+
+    # ── Files ───────────────────────────────────────────────────────────────
+
+    def upload_file(self, file, remember: bool = True, type: str = "semantic") -> UploadedFile:
+        """Upload a file (path or (name, bytes[, content_type])) and, by default,
+        store its extracted text as a memory."""
+        up = UploadedFile(**self.client.upload_file(self.agent_id, self._private_key, file))
+        if remember:
+            res = self.client.memory_from_file(self.agent_id, self._private_key, up.file_id, memory_type=type)
+            up.memory_id = res.get("memory_id")
+        return up
+
+    def upload_image(self, file) -> Memory:
+        """Describe an image with vision and store the description."""
+        return Memory(**self.client.upload_image(self.agent_id, self._private_key, file))
+
+    def upload_document(self, file) -> List[Memory]:
+        """Store a PDF as ~1,500-character memories."""
+        return [Memory(**m) for m in self.client.upload_document(self.agent_id, self._private_key, file)]
+
+    # ── Webhooks ────────────────────────────────────────────────────────────
+
+    def add_webhook(self, url: str, event_type: str = "memory_created") -> None:
+        """POST each new memory of this agent to url (public http(s) only)."""
+        self.client.register_webhook(self.agent_id, self._private_key, url, event_type)
+
+    def remove_webhook(self, url: str, event_type: str = "memory_created") -> bool:
+        return self.client.delete_webhook(self.agent_id, self._private_key, url, event_type)
+
+    def webhooks(self, event_type: str = "memory_created") -> List[str]:
+        return self.client.list_webhooks(self.agent_id, self._private_key, event_type)
 
     def delete_agent(self) -> None:
         """Permanently delete this agent and all its memories."""
