@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 
 export const SERVER_NAME = "memro";
+export const MCP_REMOTE_VERSION = "0.15.1";
 
 const home = () => os.homedir();
 const appData = () => process.env.APPDATA || path.join(home(), "AppData", "Roaming");
@@ -36,14 +37,23 @@ export function readJSON(file) {
 }
 
 /** Write a config, keeping a one-time backup of the original and restricting
- * permissions, since the file now holds an API key. */
+ * permissions, since the file now holds an API key. The new text goes to a
+ * temporary file that replaces the config in one rename, so a crash or a
+ * concurrent reader never sees a half-written file. */
 export function writeFileSafely(file, text) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   if (fs.existsSync(file) && !fs.existsSync(`${file}.memro-backup`)) {
     fs.copyFileSync(file, `${file}.memro-backup`);
+    try { fs.chmodSync(`${file}.memro-backup`, 0o600); } catch { /* not supported on this FS */ }
   }
-  fs.writeFileSync(file, text, { mode: 0o600 });
-  try { fs.chmodSync(file, 0o600); } catch { /* not supported on this FS */ }
+  const tmp = `${file}.memro-tmp-${process.pid}`;
+  try {
+    fs.writeFileSync(tmp, text, { mode: 0o600 });
+    try { fs.chmodSync(tmp, 0o600); } catch { /* not supported on this FS */ }
+    fs.renameSync(tmp, file);
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
 }
 
 const writeJSON = (file, data) => writeFileSafely(file, JSON.stringify(data, null, 2) + "\n");
@@ -145,7 +155,9 @@ const hasClaudeCLI = () => !process.env.MEMRO_NO_CLAUDE_CLI && claudeCLI("--vers
 const claudeCode = {
   ...claudeJSON,
   add(conn) {
-    if (hasClaudeCLI()) {
+    // On Windows the CLI runs through cmd.exe, which splits the header at its
+    // spaces, so edit the file there instead.
+    if (process.platform !== "win32" && hasClaudeCLI()) {
       claudeCLI("mcp", "remove", "--scope", "user", SERVER_NAME);
       if (claudeCLI("mcp", "add", "--transport", "http", "--scope", "user", SERVER_NAME, conn.mcpUrl,
         "--header", `Authorization: Bearer ${conn.apiKey}`)) return;
@@ -213,7 +225,8 @@ export const CLIENTS = [
     // Claude Desktop only launches local servers; mcp-remote bridges to /mcp.
     entry: ({ mcpUrl, apiKey }) => ({
       command: "npx",
-      args: ["-y", "mcp-remote", mcpUrl, "--header", "Authorization:${MEMRO_AUTH}"],
+      // Pinned: npx would otherwise run whatever version is published next.
+      args: ["-y", `mcp-remote@${MCP_REMOTE_VERSION}`, mcpUrl, "--header", "Authorization:${MEMRO_AUTH}"],
       env: { MEMRO_AUTH: `Bearer ${apiKey}` },
     }),
   }),

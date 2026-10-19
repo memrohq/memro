@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import * as vscode from 'vscode';
 
 export class MemoryWebviewProvider implements vscode.WebviewViewProvider {
@@ -25,18 +26,18 @@ export class MemoryWebviewProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.onDidReceiveMessage(async (data) => {
             switch (data.type) {
-                case 'search': await this._handleSearch(data.query); break;
+                case 'search': await this._handleSearch(String(data.query ?? '')); break;
                 case 'getRecent': await this._handleGetRecent(); break;
                 case 'getFeed': await this._handleGetFeed(); break;
-                case 'insert': this._handleInsert(data.text); break;
+                case 'insert': await this._handleInsert(data.text); break;
                 case 'evolve': await this._handleEvolve(); break;
-                case 'reason': await this._handleReason(data.query); break;
+                case 'reason': await this._handleReason(typeof data.query === 'string' ? data.query : undefined); break;
                 case 'intent': await this._handleLogIntent(); break;
                 case 'claim': await this._handleClaim(); break;
                 case 'release': await this._handleRelease(); break;
                 case 'handoff': await this._handleHandoff(); break;
-                case 'setSession': await this._handleSetSession(data.session); break;
-                case 'openFile': vscode.commands.executeCommand('memro.openFile', data.path); break;
+                case 'setSession': await this._handleSetSession(typeof data.session === 'string' ? data.session : undefined); break;
+                case 'openFile': if (typeof data.path === 'string') await vscode.commands.executeCommand('memro.openFile', data.path); break;
             }
         });
     }
@@ -57,7 +58,11 @@ export class MemoryWebviewProvider implements vscode.WebviewViewProvider {
             await this._handleGetFeed();
         } catch (e) { vscode.window.showErrorMessage('Failed to log intent: ' + e); }
     }
-    private async _handleSetSession(session: string) {
+    private async _handleSetSession(session?: string) {
+        if (!session) {
+            session = (await vscode.window.showInputBox({ prompt: 'Session ID', ignoreFocusOut: true }))?.trim();
+            if (!session) return;
+        }
         const config = vscode.workspace.getConfiguration('memro');
         await config.update('sessionId', session, vscode.ConfigurationTarget.Global);
         vscode.window.showInformationMessage(`Memro: Switched to session ${session}`);
@@ -108,10 +113,17 @@ export class MemoryWebviewProvider implements vscode.WebviewViewProvider {
         } catch (e) { this._view.webview.postMessage({ type: 'error', message: String(e) }); }
     }
 
-    private _handleInsert(text: string) {
+    /** Inserts a memory at the cursor, after the user confirms: memory content
+     * is untrusted and this writes into their source. */
+    private async _handleInsert(text: unknown) {
         const editor = vscode.window.activeTextEditor;
-        if (editor) {
-            editor.edit(editBuilder => editBuilder.insert(editor.selection.active, text));
+        if (!editor || typeof text !== 'string' || !text) return;
+        const preview = text.length > 200 ? text.slice(0, 200) + '…' : text;
+        const ok = await vscode.window.showWarningMessage(
+            `Insert this memory into ${vscode.workspace.asRelativePath(editor.document.uri)}?`,
+            { modal: true, detail: preview }, 'Insert');
+        if (ok === 'Insert') {
+            await editor.edit(editBuilder => editBuilder.insert(editor.selection.active, text));
         }
     }
 
@@ -156,10 +168,12 @@ export class MemoryWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {
+        const nonce = randomBytes(16).toString('base64');
         return `<!DOCTYPE html>
             <html lang="en">
             <head>
                 <meta charset="UTF-8">
+                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Memro DevTools</title>
                 <style>
@@ -236,12 +250,12 @@ export class MemoryWebviewProvider implements vscode.WebviewViewProvider {
                     <div id="activeContext" style="margin-bottom:20px;"></div>
                     <div id="feedList"></div>
                     <div style="display:flex; gap:8px; margin-top:15px;">
-                        <button class="btn" onclick="logIntent()">Intent</button>
-                        <button class="btn" onclick="triggerHandoff()">Handoff</button>
-                        <button class="btn btn-primary" onclick="claimCwd()">Claim</button>
+                        <button class="btn" data-action="intent">Intent</button>
+                        <button class="btn" data-action="handoff">Handoff</button>
+                        <button class="btn btn-primary" data-action="claim">Claim</button>
                     </div>
                 </div>
-                <script>
+                <script nonce="${nonce}">
                     (function() {
                         const vscode = acquireVsCodeApi();
                         const lists = { 
@@ -251,28 +265,38 @@ export class MemoryWebviewProvider implements vscode.WebviewViewProvider {
                             activeContext: document.getElementById('activeContext'),
                             activeWork: document.getElementById('activeWorkList')
                         };
+                        // Memory content is untrusted (any agent or document can write it):
+                        // everything interpolated into markup goes through esc().
+                        const esc = (v) => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+                        // The memories currently shown, so Copy/Insert refer to them by index.
+                        let shown = [];
 
                         // Tab switching
                         document.querySelectorAll('.tab').forEach(t => {
                             t.addEventListener('click', () => {
                                 const id = t.getAttribute('data-tab');
-                                console.log('Tab clicked:', id);
-                                
-                                // Deactivate all
                                 document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
                                 document.querySelectorAll('.content').forEach(el => el.classList.remove('active'));
-                                
-                                // Activate current
                                 t.classList.add('active');
                                 const content = document.getElementById(id);
-                                if (content) {
-                                    content.classList.add('active');
-                                }
-                                
+                                if (content) content.classList.add('active');
                                 if (id === 'feed' || id === 'inspector') {
                                     vscode.postMessage({ type: 'getFeed' });
                                 }
                             });
+                        });
+
+                        // One delegated handler instead of inline onclick (blocked by the CSP).
+                        document.body.addEventListener('click', (e) => {
+                            const el = e.target.closest('[data-action]');
+                            if (!el) return;
+                            const action = el.getAttribute('data-action');
+                            if (action === 'open') vscode.postMessage({ type: 'openFile', path: el.getAttribute('data-path') });
+                            if (action === 'copy') { const m = shown[+el.getAttribute('data-i')]; if (m) navigator.clipboard.writeText(m.content || ''); }
+                            if (action === 'insert') { const m = shown[+el.getAttribute('data-i')]; if (m) vscode.postMessage({ type: 'insert', text: m.content || '' }); }
+                            if (action === 'intent') vscode.postMessage({ type: 'intent' });
+                            if (action === 'handoff') vscode.postMessage({ type: 'handoff' });
+                            if (action === 'claim') vscode.postMessage({ type: 'claim' });
                         });
 
                         window.addEventListener('message', e => {
@@ -286,28 +310,37 @@ export class MemoryWebviewProvider implements vscode.WebviewViewProvider {
                                     renderActiveContext(d.context);
                                     renderActiveWork(d.work);
                                 }
-                                if(d.type === 'error') lists.explorer.innerHTML = '<p style="color:red">Error: ' + d.message + '</p>';
+                                if(d.type === 'error') lists.explorer.innerHTML = '<p style="color:red">Error: ' + esc(d.message) + '</p>';
                             } catch (err) {
                                 console.error('Error handling message:', err);
                             }
                         });
 
+                        function parseList(items) {
+                            try {
+                                const v = JSON.parse(items && items[0] && items[0].text || '[]');
+                                return Array.isArray(v) ? v : [];
+                            } catch { return []; }
+                        }
+
+                        const fileLink = (fileId, label) => fileId
+                            ? \`<span class="pill pill-file" data-action="open" data-path="\${esc(fileId)}">\${esc(label)}</span>\`
+                            : '';
+
                         function renderResults(items) {
-                            const raw = items[0] && items[0].text || '[]';
-                            const memories = JSON.parse(raw);
-                            lists.explorer.innerHTML = memories.map(m => {
+                            shown = parseList(items);
+                            lists.explorer.innerHTML = shown.map((m, i) => {
                                 const fileId = m.metadata && m.metadata.file_id;
-                                const fileName = fileId ? fileId.split('/').pop() : '';
                                 return \`
                                     <div class="card">
                                         <div style="display:flex; justify-content:space-between; align-items:center">
-                                            <span class="pill pill-type">\${m.type ? m.type.toUpperCase() : 'UNKNOWN'}</span>
-                                            \${fileId ? \`<span class="pill pill-file" onclick="jumpToFile('\${fileId}')">\${fileName}</span>\` : ''}
+                                            <span class="pill pill-type">\${esc(m.type ? String(m.type).toUpperCase() : 'UNKNOWN')}</span>
+                                            \${fileLink(fileId, fileId ? String(fileId).split('/').pop() : '')}
                                         </div>
-                                        <div style="font-size:12px; margin-top:8px;">\${m.content}</div>
+                                        <div style="font-size:12px; margin-top:8px; white-space:pre-wrap;">\${esc(m.content)}</div>
                                         <div style="display:flex; gap:8px; margin-top:10px;">
-                                            <button class="btn" style="padding:2px; flex:1" onclick="copyMemory('\${btoa(m.content)}')">Copy</button>
-                                            <button class="btn btn-primary" style="padding:2px; flex:1" onclick="insertMemory('\${btoa(m.content)}')">Insert</button>
+                                            <button class="btn" style="padding:2px; flex:1" data-action="copy" data-i="\${i}">Copy</button>
+                                            <button class="btn btn-primary" style="padding:2px; flex:1" data-action="insert" data-i="\${i}">Insert</button>
                                         </div>
                                     </div>
                                 \`;
@@ -315,38 +348,31 @@ export class MemoryWebviewProvider implements vscode.WebviewViewProvider {
                         }
 
                         function renderReasoning(raw) {
-                            const p = JSON.parse(raw);
-                            const conf = Math.round((p.confidence || 0) * 100);
+                            let p;
+                            try { p = JSON.parse(raw); } catch { p = { answer: raw }; }
+                            const conf = Math.max(0, Math.min(100, Math.round((Number(p.confidence) || 0) * 100)));
+                            const why = typeof p.why === 'string' ? p.why : (p.why ? JSON.stringify(p.why, null, 2) : '');
                             lists.inspector.innerHTML = \`
                                 <div class="card">
-                                    <div style="font-size:13px; line-height:1.5;">\${p.answer}</div>
+                                    <div style="font-size:13px; line-height:1.5; white-space:pre-wrap;">\${esc(p.answer)}</div>
                                     <div class="confidence-bar"><div class="confidence-fill" style="width:\${conf}%"></div></div>
-                                    <p style="font-size:10px; opacity:0.5; margin-top:15px">SOURCES</p>
-                                    \${(p.sources || []).map(s => {
-                                        const sFileId = s.metadata && s.metadata.file_id;
-                                        return \`<div style="font-size:11px; padding:6px; border-left:2px solid var(--accent-blue); margin-top:4px; background:rgba(255,255,255,0.02)">
-                                                \${s.content}
-                                                \${sFileId ? \`<div style="font-size:9px; color:var(--accent-blue); margin-top:4px; cursor:pointer" onclick="jumpToFile('\${sFileId}')">→ \${sFileId}</div>\` : ''}
-                                            </div>\`;
-                                    }).join('')}
-                                    <p style="font-size:10px; opacity:0.5; margin-top:15px">LOGIC</p>
-                                    <div style="font-size:11px; opacity:0.8">\${p.logic}</div>
+                                    \${why ? \`<p style="font-size:10px; opacity:0.5; margin-top:15px">WHY</p>
+                                    <div style="font-size:11px; opacity:0.8; white-space:pre-wrap;">\${esc(why)}</div>\` : ''}
                                 </div>
                             \`;
                         }
 
                         function renderFeed(items) {
-                            const raw = items[0] && items[0].text || '[]';
-                            const evs = JSON.parse(raw);
+                            const evs = parseList(items);
                             lists.feed.innerHTML = evs.reverse().map(ev => {
-                                const action = (ev.metadata && ev.metadata.action) || 'event';
+                                const action = String((ev.metadata && ev.metadata.action) || 'event');
                                 const emoji = action === 'claim' ? '🔴' : action === 'release' ? '🟢' : action === 'handoff' ? '🤝' : '🎯';
                                 return \`
                                     <div class="feed-event">
                                         <span>\${emoji}</span>
                                         <div style="flex:1">
-                                            <b style="font-size:9px; opacity:0.6; letter-spacing:0.5px;">\${action.toUpperCase()}</b>
-                                            <div style="font-size:12px;">\${ev.content}</div>
+                                            <b style="font-size:9px; opacity:0.6; letter-spacing:0.5px;">\${esc(action.toUpperCase())}</b>
+                                            <div style="font-size:12px;">\${esc(ev.content)}</div>
                                         </div>
                                     </div>
                                 \`;
@@ -354,53 +380,42 @@ export class MemoryWebviewProvider implements vscode.WebviewViewProvider {
                         }
 
                         function renderActiveWork(ctx) {
-                            if (!ctx || !ctx.claims || !ctx.claims.length) {
+                            if (!ctx || !Array.isArray(ctx.claims) || !ctx.claims.length) {
                                 lists.activeWork.innerHTML = '<p style="font-size:10px; opacity:0.3; text-align:center;">No active work in session.</p>';
                                 return;
                             }
                             lists.activeWork.innerHTML = \`
                                 <h4 style="margin:0 0 10px 0; font-size:10px; color:var(--accent-blue); letter-spacing:1px;">ACTIVE WORK</h4>
                                 \${ctx.claims.map(c => {
-                                    const resName = c.resource ? c.resource.split('/').pop() : 'Workspace';
+                                    const resName = c.resource ? String(c.resource).split('/').pop() : 'Workspace';
                                     return \`<div class="card active-work-item" style="margin-bottom:8px; padding:8px;">
                                             <div style="display:flex; justify-content:space-between; align-items:center;">
-                                                <b style="font-size:11px; color:white;">\${resName}</b>
-                                                <span style="font-size:9px; opacity:0.5;">\${c.timestamp || ''}</span>
+                                                <b style="font-size:11px; color:white;">\${esc(resName)}</b>
+                                                <span style="font-size:9px; opacity:0.5;">\${esc(c.timestamp)}</span>
                                             </div>
-                                            <div style="font-size:10px; margin-top:4px;">👤 \${c.agent || 'Unknown'}</div>
-                                            <div style="font-size:10px; opacity:0.7; margin-top:4px; font-style:italic;">\${c.reason || ''}</div>
+                                            <div style="font-size:10px; margin-top:4px;">👤 \${esc(c.agent || 'Unknown')}</div>
+                                            <div style="font-size:10px; opacity:0.7; margin-top:4px; font-style:italic;">\${esc(c.reason)}</div>
                                         </div>\`;
                                 }).join('')}
                             \`;
                         }
 
                         function renderActiveContext(ctx) {
-                            if (!ctx || !ctx.claims || !ctx.claims.length) {
+                            if (!ctx || !Array.isArray(ctx.claims) || !ctx.claims.length) {
                                  lists.activeContext.innerHTML = '';
                                  return;
                             }
                             lists.activeContext.innerHTML = \`
                                 <div style="background:rgba(255,77,79,0.1); border:1px solid rgba(255,77,79,0.3); padding:8px; border-radius:4px; font-size:11px; margin-bottom:15px;">
                                     <span style="color:var(--accent-red)">🔴 FILE CLAIMED:</span> 
-                                    <b>\${ctx.claims[0].agent || 'Unknown'}</b> is working here.
+                                    <b>\${esc(ctx.claims[0].agent || 'Unknown')}</b> is working here.
                                 </div>
                             \`;
                         }
 
-                        window.jumpToFile = function(p) { vscode.postMessage({ type: 'openFile', path: p }); };
-                        window.insertMemory = function(b64) { vscode.postMessage({ type: 'insert', text: atob(b64) }); };
-                        window.copyMemory = function(b64) { navigator.clipboard.writeText(atob(b64)); };
-                        window.logIntent = function() { vscode.postMessage({ type: 'intent' }); };
-                        window.triggerHandoff = function() { vscode.postMessage({ type: 'handoff' }); };
-                        window.claimCwd = function() { vscode.postMessage({ type: 'claim' }); };
-
                         document.getElementById('sessionSelect').addEventListener('change', (e) => {
-                            let val = e.target.value;
-                            if (val === 'custom') {
-                                val = prompt('Enter session ID:');
-                                if (!val) { e.target.value = 'default'; return; }
-                            }
-                            vscode.postMessage({ type: 'setSession', session: val });
+                            // prompt() does not work in webviews; the extension asks for a custom ID.
+                            vscode.postMessage({ type: 'setSession', session: e.target.value === 'custom' ? undefined : e.target.value });
                         });
 
                         document.getElementById('inspectorQuery').addEventListener('keypress', (e) => {

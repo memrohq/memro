@@ -23,6 +23,20 @@ ssssss
 
 **Memro: Sign Out** removes the key from this machine.
 
+## Settings
+
+| Setting | Default | |
+|---|---|---|
+| `memro.mcpUrl` | `https://mcp.memro.co/mcp` | MCP server (Streamable HTTP) |
+| `memro.sessionId` | `default` | Coordination session; claims are only visible within it |
+| `memro.checkOnOpen` | off | Check whether a file is claimed when you open it (sends its workspace-relative path) |
+| `memro.autoClaimOnEdit` | off | Claim a file when you start editing it (each claim is stored as a memory) |
+
+Background work (the active-work poll and the two options above) never asks
+for a key; it stays idle until you set one. Memory content is treated as
+untrusted: the Memory Explorer renders it as text, **Insert** asks before
+writing into your file, and file links only open paths inside the workspace.
+
 ## Build & Run
 
 - Install: npm install

@@ -38,13 +38,26 @@ function parseArgs(argv) {
     else if (a === "--yes" || a === "-y") opts.yes = true;
     else if (a === "--staging") opts.api = ENVIRONMENTS.staging;
     else if (a === "--local") opts.api = ENVIRONMENTS.local;
-    else if (a === "--api") opts.api = argv[++i];
+    else if (a === "--api") {
+      opts.api = argv[++i];
+      if (!opts.api || opts.api.startsWith("-")) throw new Error("--api needs a URL, e.g. --api https://memro.example.com");
+    }
     else if (a === "--help" || a === "-h") opts.command = "help";
     else if (!opts.command) opts.command = a;
     else throw new Error(`Unexpected argument: ${a}`);
   }
-  opts.api = (opts.api || process.env.MEMRO_API_URL || ENVIRONMENTS.prod).replace(/\/+$/, "");
+  opts.api = checkURL((opts.api || process.env.MEMRO_API_URL || ENVIRONMENTS.prod).replace(/\/+$/, ""), "API");
   return opts;
+}
+
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** API keys travel with every request, so remote servers must use HTTPS. */
+export function checkURL(url, what) {
+  let u;
+  try { u = new URL(url); } catch { throw new Error(`Invalid ${what} URL: ${url}`); }
+  if (u.protocol === "https:" || (u.protocol === "http:" && LOCAL_HOSTS.has(u.hostname))) return url;
+  throw new Error(`The ${what} URL must use https:// (plain http is only allowed for localhost): ${url}`);
 }
 
 async function request(api, route, { method = "GET", json, key } = {}) {
@@ -87,16 +100,26 @@ async function deviceLogin(api) {
   console.log("  Sign in there and press Connect. (If the browser didn't open, visit the link.)\n");
   openBrowser(verification_uri_complete);
 
-  const deadline = Date.now() + expires_in * 1000;
+  const deadline = Date.now() + (expires_in || 600) * 1000;
   let wait = (interval || 3) * 1000;
   process.stdout.write("  Waiting for approval…");
   while (Date.now() < deadline) {
     await sleep(wait);
-    const res = await request(api, "/auth/device/token", { method: "POST", json: { device_code } });
-    if (res.ok) { process.stdout.write(" approved.\n"); return res.data; }
+    let res;
+    try {
+      res = await request(api, "/auth/device/token", { method: "POST", json: { device_code } });
+    } catch {
+      continue; // a dropped connection: keep polling until the code expires
+    }
+    if (res.ok) {
+      process.stdout.write(" approved.\n");
+      checkURL(res.data.mcp_url, "MCP");
+      return res.data;
+    }
     const code = res.data?.error;
     if (code === "authorization_pending") continue;
     if (code === "slow_down") { wait += 2000; continue; }
+    if (res.status >= 500 || res.status === 429) { wait = Math.min(wait * 2, 30_000); continue; }
     process.stdout.write("\n");
     if (code === "expired_token") throw new Error("The code expired. Run `npx memro connect` again.");
     throw new Error(`Sign-in failed: ${res.data?.message || code || res.status}`);
@@ -126,7 +149,10 @@ function selectClients(ids) {
 }
 
 async function confirm(question) {
-  if (!process.stdin.isTTY) return true;
+  if (!process.stdin.isTTY) {
+    console.log("  Not a terminal: pass --yes to write configs without asking.");
+    return false;
+  }
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const answer = (await rl.question(question)).trim().toLowerCase();
   rl.close();
@@ -140,7 +166,10 @@ async function connect(opts) {
   let creds = loadCredentials();
   if (creds?.api_url === opts.api) {
     const who = await request(opts.api, "/auth/whoami", { key: creds.api_key });
-    if (!who.ok) creds = null;
+    if (who.status === 401 || who.status === 403) creds = null;
+    // Anything else (an outage, a rate limit) says nothing about the key;
+    // signing in again would mint a second one.
+    else if (!who.ok) throw new Error(`Memro API returned ${who.status}. Try again in a moment.`);
     else console.log(`  Already signed in as agent ${creds.agent_id.slice(0, 12)}…`);
   } else {
     creds = null;

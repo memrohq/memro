@@ -13,7 +13,7 @@ process.env.XDG_CONFIG_HOME = path.join(HOME, ".config");
 process.env.CODEX_HOME = path.join(HOME, ".codex");
 process.env.MEMRO_NO_CLAUDE_CLI = "1";
 
-const { CLIENTS, findClient, stripCodexServer } = await import("../src/clients.js");
+const { CLIENTS, MCP_REMOTE_VERSION, findClient, stripCodexServer } = await import("../src/clients.js");
 const conn = { mcpUrl: "https://mcp.memro.co/mcp", apiKey: "memro_sk_test" };
 
 beforeEach(() => {
@@ -88,4 +88,29 @@ test("detection only reports installed tools", () => {
   fs.mkdirSync(path.join(HOME, ".cursor"));
   fs.mkdirSync(path.join(HOME, ".gemini", "antigravity"), { recursive: true });
   assert.deepEqual(CLIENTS.filter((c) => c.detect()).map((c) => c.id).sort(), ["antigravity", "cursor"]);
+});
+
+test("writes replace the file in one step and leave no temporary files", () => {
+  const c = findClient("cursor");
+  c.add(conn);
+  const dir = path.dirname(c.file());
+  assert.deepEqual(fs.readdirSync(dir).filter((f) => f.includes("memro-tmp")), []);
+});
+
+test("Claude Desktop runs a pinned mcp-remote", () => {
+  const c = findClient("claude-desktop");
+  c.add(conn);
+  const { args } = JSON.parse(fs.readFileSync(c.file(), "utf8")).mcpServers.memro;
+  assert.equal(args[1], `mcp-remote@${MCP_REMOTE_VERSION}`);
+  assert.ok(!JSON.stringify(args).includes("memro_sk_"), "key stays out of argv");
+});
+
+test("API URLs must use https unless they point at this machine", async () => {
+  const { checkURL } = await import("../src/cli.js");
+  assert.equal(checkURL("https://api.memro.co", "API"), "https://api.memro.co");
+  assert.equal(checkURL("http://localhost:8081", "API"), "http://localhost:8081");
+  assert.equal(checkURL("http://127.0.0.1:8081", "API"), "http://127.0.0.1:8081");
+  assert.throws(() => checkURL("http://memro.example.com", "API"), /https/);
+  assert.throws(() => checkURL("http://localhost.evil.com", "API"), /https/);
+  assert.throws(() => checkURL("not a url", "API"), /Invalid/);
 });

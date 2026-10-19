@@ -146,6 +146,21 @@
           "type": "string",
           "default": "https://mcp.memro.co/mcp",
           "description": "Memro MCP server (Streamable HTTP). Self-hosted: http://localhost:8080/mcp. The API key is kept in VS Code's secret storage, not in settings."
+        },
+        "memro.sessionId": {
+          "type": "string",
+          "default": "default",
+          "description": "Coordination session. Claims and intents are only visible to tools in the same session."
+        },
+        "memro.checkOnOpen": {
+          "type": "boolean",
+          "default": false,
+          "description": "When a file is opened, check whether it is claimed. Sends the file's workspace-relative path to Memro."
+        },
+        "memro.autoClaimOnEdit": {
+          "type": "boolean",
+          "default": false,
+          "description": "Claim a file automatically when you start editing it. Each claim is stored as a memory."
         }
       }
     }

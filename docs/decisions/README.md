@@ -15,6 +15,7 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0007](0007-no-private-keys-in-the-browser.md) | No private keys in the browser; one credential per surface | 2026-10-19 | Accepted |
 | [0008](0008-security-review-fixes.md) | Per-agent webhooks, credentialed MCP connections, real client IPs | 2026-10-19 | Accepted |
 | [0009](0009-sdk-v0-2-and-deletion.md) | SDK 0.2: one API across languages, v2 signing, Memro Cloud by default | 2026-10-19 | Accepted |
+| [0010](0010-connector-hardening.md) | Connector hardening: untrusted memory content, working claims, safer config writes | 2026-10-19 | Accepted |
 
 Template:
 

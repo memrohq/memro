@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memro-mcp"
-version = "0.1.0"
+version = "0.2.1"
 description = "MCP server for memro — gives AI agents persistent memory via Claude, Cursor, and any MCP client"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,12 +15,13 @@ authors = [
 keywords = ["ai", "agents", "memory", "mcp", "claude", "cursor", "memro"]
 
 dependencies = [
-    "mcp>=1.0.0,<2",
-    "memro>=0.1.0",
-    "python-dotenv",
-    "starlette",
-    "uvicorn",
-    "uvloop",
+    "mcp>=1.9,<2",
+    "memro>=0.2,<0.3",
+    "python-dotenv>=1,<2",
+    "starlette>=0.40,<2",
+    "uvicorn>=0.30,<1",
+    # uvloop does not build on Windows; the server falls back to asyncio.
+    "uvloop>=0.19; sys_platform != 'win32'",
 ]
 
 [project.scripts]

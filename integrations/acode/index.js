@@ -55,7 +55,7 @@
     };
 
     let currentBackendUrl = buildFullUrl(localStorage.getItem('memro-ai-ip'));
-    let currentMode = localStorage.getItem('memro-ai-mode') || 'agent';
+    let currentMode = localStorage.getItem('memro-ai-mode') || 'chat';
     let pageRef = null;
     let initialized = false;
 
@@ -167,8 +167,7 @@ All file paths must be strictly relative to the Root. No leading slashes for rel
 Rules:
 1. Be concise.
 2. In Agent mode, ALWAYS conclude your thought process by calling the appropriate tools.
-3. If you can't use tools, output a JSON block with "action" and parameters.
-4. For multi-file changes, prefer 'scaffold' or 'multi_edit'.`;
+3. For multi-file changes, prefer 'scaffold' or 'multi_edit'. The user approves every change before it is applied.`;
     };
 
     const injectStyles = () => {
@@ -201,11 +200,35 @@ Rules:
         } catch(e) {}
     };
 
+    /** The model chooses these paths: keep them relative and inside the open folder. */
+    const resolveInRoot = (root, p) => {
+        const parts = String(p || '').replace(/\\/g, '/').split('/').filter(x => x && x !== '.');
+        if (!parts.length || parts.includes('..') || /^[a-z]+:/i.test(String(p))) {
+            throw new Error(`Refusing path outside the project: ${p}`);
+        }
+        return root.replace(/\/+$/, '') + '/' + parts.join('/');
+    };
+
+    const escapeRegExp = (t) => String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    /** Lists what a batch of tool calls will change and asks before doing it. */
+    const confirmActions = async (calls) => {
+        const lines = [];
+        for (const { name, args } of calls) {
+            if (name === 'scaffold') (args.files || []).forEach(f => lines.push(`write  ${f.path}`));
+            if (name === 'multi_edit') (args.edits || []).forEach(e => lines.push(`edit   ${e.path}`));
+            if (name === 'ast_edit') lines.push(`edit   ${args.path} (${args.target})`);
+            if (name === 'delete') (args.paths || []).forEach(p => lines.push(`DELETE ${p}`));
+        }
+        if (!lines.length) return false;
+        return !!(await acode.confirm('Apply these changes?', lines.join('\n')));
+    };
+
     const scaffoldFiles = async (files, onProgress) => {
         const fs = acode.require('fsOperation');
         const root = getOpenFolderUrl(); if(!root) throw new Error("No open folder found in Acode.");
         for (const f of files) {
-            const full = root + '/' + f.path.replace(/^\//,'');
+            const full = resolveInRoot(root, f.path);
             await fs(full).writeFile(f.content);
             onProgress && onProgress(`📄 Created/Updated: ${f.path}`);
         }
@@ -216,9 +239,10 @@ Rules:
         const fs = acode.require('fsOperation');
         const root = getOpenFolderUrl(); if(!root) throw new Error("No open folder found in Acode.");
         for (const e of edits) {
-            const full = root + '/' + e.path.replace(/^\//,'');
+            const full = resolveInRoot(root, e.path);
             let content = await fs(full).readFile();
-            content = content.replace(e.find, e.replace);
+            if (!content.includes(e.find)) throw new Error(`Text to replace not found in ${e.path}`);
+            content = content.replace(e.find, () => e.replace);
             await fs(full).writeFile(content);
             onProgress && onProgress(`📝 Edited: ${e.path}`);
         }
@@ -228,11 +252,11 @@ Rules:
     const applyASTEdit = async (path, target, newCode, onProgress) => {
         const fs = acode.require('fsOperation');
         const root = getOpenFolderUrl(); if(!root) throw new Error("No open folder found in Acode.");
-        const full = root + '/' + path.replace(/^\//,'');
+        const full = resolveInRoot(root, path);
         let content = await fs(full).readFile();
-        const regex = new RegExp(`(function\\s+${target}\\s*\\([^)]*\\)\\s*\\{[\\s\\S]*?\\})`, "m");
+        const regex = new RegExp(`(function\\s+${escapeRegExp(target)}\\s*\\([^)]*\\)\\s*\\{[\\s\\S]*?\\})`, "m");
         if (!regex.test(content)) throw new Error(`Could not find ${target} in ${path}`);
-        content = content.replace(regex, newCode);
+        content = content.replace(regex, () => newCode);
         await fs(full).writeFile(content);
         onProgress && onProgress(`⚙️ Refactored: ${target}`);
         reloadSidebar(); return { success: true };
@@ -242,7 +266,7 @@ Rules:
         const fs = acode.require('fsOperation');
         const root = getOpenFolderUrl(); if(!root) throw new Error("No open folder found in Acode.");
         for (const p of paths) {
-            const full = root + '/' + p.replace(/^\//,'');
+            const full = resolveInRoot(root, p);
             await fs(full).delete();
             onProgress && onProgress(`🗑️ Deleted: ${p}`);
         }
@@ -298,7 +322,7 @@ Rules:
             currentMode = currentMode === 'agent' ? 'chat' : 'agent';
             localStorage.setItem('memro-ai-mode', currentMode);
             modeBtn.innerHTML = currentMode === 'agent' ? '🤖 Agent' : '💬 Chat';
-            addMsg('system-note', `🔄 Mode set to <b>${currentMode === 'agent' ? 'Agent' : 'Chat'}</b>`);
+            addMsg('system-note', `🔄 Mode set to **${currentMode === 'agent' ? 'Agent' : 'Chat'}**${currentMode === 'agent' ? ' (file changes ask before they are applied)' : ''}`);
         };
 
         clearBtn.onclick = () => {
@@ -342,39 +366,39 @@ Rules:
                     const msg = data.choices[0].message;
                     activeMessages.push(msg);
 
-                    if (msg.content) {
-                        aiMsg.innerHTML = mdToHtml(msg.content);
-                        const rawBlocks = msg.content.match(/\{[\s\S]*?"action":\s*"(?:scaffold|delete|multi_edit|ast_edit)"[\s\S]*?\}/g) || [];
-                        for (const block of rawBlocks) {
-                            try {
-                                const action = JSON.parse(block);
-                                const sm = addMsg('system-note', `⚙️ Executing fallback action: ${action.action}...`);
-                                if (action.action === 'scaffold') await scaffoldFiles(action.files, m => sm.innerHTML += `<br/>${m}`);
-                                if (action.action === 'multi_edit') await applyMultiEdit(action.edits, m => sm.innerHTML += `<br/>${m}`);
-                                if (action.action === 'ast_edit') await applyASTEdit(action.path, action.target, action.new_code, m => sm.innerHTML += `<br/>${m}`);
-                                if (action.action === 'delete') await deletePaths(action.paths, m => sm.innerHTML += `<br/>${m}`);
-                            } catch(e) {}
-                        }
-                    }
-                    
-                    if (!msg.tool_calls || msg.tool_calls.length === 0) break;
+                    // Only structured tool calls change files. Text that merely looks
+                    // like an action is shown, never executed.
+                    if (msg.content) aiMsg.innerHTML = mdToHtml(msg.content);
 
-                    const sm = addMsg('system-note', `🛠️ Running ${msg.tool_calls.length} tool(s)...`);
-                    for (const t of msg.tool_calls) {
-                        const name = t.function.name; const args = JSON.parse(t.function.arguments);
-                        let result;
-                        try {
-                            if (name === 'scaffold') result = await scaffoldFiles(args.files, m => sm.innerHTML += `<br/>${m}`);
-                            if (name === 'multi_edit') result = await applyMultiEdit(args.edits, m => sm.innerHTML += `<br/>${m}`);
-                            if (name === 'ast_edit') result = await applyASTEdit(args.path, args.target, args.new_code, m => sm.innerHTML += `<br/>${m}`);
-                            if (name === 'delete') result = await deletePaths(args.paths, m => sm.innerHTML += `<br/>${m}`);
-                        } catch(e) { result = { success: false, error: e.message }; }
-                        activeMessages.push({ role: 'tool', tool_call_id: t.id, name, content: JSON.stringify(result) });
+                    if (currentMode !== 'agent' || !msg.tool_calls || msg.tool_calls.length === 0) break;
+
+                    const calls = msg.tool_calls.map(t => {
+                        let args = {};
+                        try { args = JSON.parse(t.function.arguments || '{}'); } catch (e) { /* reported below */ }
+                        return { id: t.id, name: t.function.name, args };
+                    });
+                    const sm = addMsg('system-note', `🛠️ ${calls.length} tool call(s) proposed`);
+                    const note = (m) => { sm.appendChild(document.createElement('br')); sm.appendChild(document.createTextNode(m)); };
+                    const approved = await confirmActions(calls);
+                    if (!approved) note('Not applied.');
+                    for (const { id, name, args } of calls) {
+                        let result = { success: false, error: 'The user declined these changes.' };
+                        if (approved) {
+                            try {
+                                if (name === 'scaffold') result = await scaffoldFiles(args.files || [], note);
+                                else if (name === 'multi_edit') result = await applyMultiEdit(args.edits || [], note);
+                                else if (name === 'ast_edit') result = await applyASTEdit(args.path, args.target, args.new_code, note);
+                                else if (name === 'delete') result = await deletePaths(args.paths || [], note);
+                                else result = { success: false, error: `Unknown tool ${name}` };
+                            } catch(e) { result = { success: false, error: e.message }; note(`⚠️ ${e.message}`); }
+                        }
+                        activeMessages.push({ role: 'tool', tool_call_id: id, name, content: JSON.stringify(result) });
                     }
+                    if (!approved) break;
                     iterations++;
                 }
                 conversationHistory = activeMessages.filter(m => m.role !== 'system' && m.role !== 'tool' && !m.tool_calls);
-            } catch (err) { aiMsg.innerHTML = `<b>Error:</b> ${err.message}`; } finally { isGenerating = false; statusEl.textContent = ''; }
+            } catch (err) { aiMsg.textContent = `Error: ${err.message}`; } finally { isGenerating = false; statusEl.textContent = ''; }
         };
         initialized = true;
     };

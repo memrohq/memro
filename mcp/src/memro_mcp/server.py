@@ -5,6 +5,10 @@ import json
 import logging
 import uuid
 import re
+import hashlib
+import threading
+import time
+from collections import OrderedDict
 from contextvars import ContextVar
 from dotenv import load_dotenv
 from urllib.parse import parse_qs
@@ -30,7 +34,11 @@ try:
 except ImportError:
     uvloop_available = False
 
-SERVER_VERSION = "0.2.0"
+try:
+    from importlib.metadata import version as _version
+    SERVER_VERSION = _version("memro-mcp")
+except Exception:
+    SERVER_VERSION = "0.0.0"
 
 # --- Core Objects (Module Level for Uvicorn Workers) ---
 server = Server("memro-memory")
@@ -59,9 +67,17 @@ ALLOW_PRIVATE_KEY_AUTH = os.getenv("MCP_ALLOW_PRIVATE_KEY_AUTH") == "1"
 class AuthRequired(Exception):
     pass
 
-# API key (memro_sk_...) -> Agent, so whoami is resolved once per key.
-_api_key_agents: dict = {}
+# sha256(API key) -> (Agent, resolved at), so whoami runs once per key per
+# TTL rather than on every request. The TTL bounds how long a revoked key can
+# still open a session (its tool calls fail at the API right away).
+_api_key_agents: "OrderedDict[str, tuple]" = OrderedDict()
+_api_key_lock = threading.Lock()
+API_KEY_CACHE_SIZE = int(os.getenv("MCP_KEY_CACHE_SIZE", "10000"))
+API_KEY_CACHE_TTL = float(os.getenv("MCP_KEY_CACHE_TTL", "300"))
 API_KEY_PREFIX = "memro_sk_"
+# Read the caller's address from X-Real-IP only behind a proxy that sets it;
+# otherwise anyone could pick the address the API rate-limits them by.
+TRUST_PROXY_HEADERS = os.getenv("MCP_TRUST_PROXY_HEADERS", "").lower() in ("1", "true")
 
 
 class ForwardingClient(MemroClient):
@@ -76,13 +92,20 @@ class ForwardingClient(MemroClient):
 
 
 def agent_for_api_key(api_key: str) -> Agent:
-    agent = _api_key_agents.get(api_key)
-    if agent is None:
-        base_url = os.getenv("MEMRO_BASE_URL", "http://localhost:8081")
-        agent = Agent.from_api_key(api_key, client=ForwardingClient(base_url, api_key=api_key))
-        if len(_api_key_agents) > 10_000:
-            _api_key_agents.clear()
-        _api_key_agents[api_key] = agent
+    digest = hashlib.sha256(api_key.encode()).hexdigest()
+    now = time.monotonic()
+    with _api_key_lock:
+        hit = _api_key_agents.get(digest)
+        if hit and now - hit[1] < API_KEY_CACHE_TTL:
+            _api_key_agents.move_to_end(digest)
+            return hit[0]
+    base_url = os.getenv("MEMRO_BASE_URL", "http://localhost:8081")
+    agent = Agent.from_api_key(api_key, client=ForwardingClient(base_url, api_key=api_key))
+    with _api_key_lock:
+        _api_key_agents[digest] = (agent, now)
+        _api_key_agents.move_to_end(digest)
+        while len(_api_key_agents) > API_KEY_CACHE_SIZE:
+            _api_key_agents.popitem(last=False)
     return agent
 
 # Logs go to stderr (stdout is the stdio transport). Tool arguments contain
@@ -107,15 +130,17 @@ class CoordinationEngine:
         self.session_id = session_id
 
     def _get_active_claims(self, resource: str = None):
-        """Fetch active procedural memories for claims/intents scoped to session."""
-        results = self.agent.get_recent(limit=50) 
+        """Active claims and intents in this session. Memories arrive newest
+        first; a release (or handoff) settles every older claim and intent on
+        that resource, and only the newest claim per resource counts."""
+        results = self.agent.get_recent(limit=100, type="procedural")
         active_claims = []
         active_intents = []
-        
+        settled = set()
+
         for m in results:
-            if m.memory_type != "procedural": continue
-            meta = getattr(m, 'metadata', {})
-            
+            meta = m.metadata or {}
+
             # SESSION ISOLATION: Skip memories from other sessions
             if meta.get("session_id") != self.session_id:
                 continue
@@ -123,8 +148,14 @@ class CoordinationEngine:
             action = meta.get("action")
             res = meta.get("resource")
             agent_owner = meta.get("agent_id", "Unknown")
-            
+            if res in settled:
+                continue
+            if action in ("release", "handoff"):
+                settled.add(res)
+                continue
+
             if action == "claim" and meta.get("status") == "active":
+                settled.add(res)
                 if not resource or res == resource:
                     active_claims.append({
                         "agent": agent_owner, 
@@ -345,6 +376,8 @@ def _all_tools() -> list[Tool]:
                     "content": {"type": "string"},
                     "context_metadata": {"type": "object"},
                     "type": {"type": "string", "enum": ["episodic", "semantic", "procedural", "profile"], "default": "episodic"},
+                    "event_date": {"type": "string"},
+                    "session_id": {"type": "string"},
                 },
                 "required": ["content"],
             },
@@ -383,26 +416,41 @@ def _dump(model) -> dict:
     return model.model_dump(mode="json") if hasattr(model, "model_dump") else model
 
 
+MAX_LIMIT = 50
+
+
+def _limit(args: dict, default: int) -> int:
+    """The caller's limit, clamped so one call cannot pull an unbounded page."""
+    try:
+        return max(1, min(int(args.get("limit", default)), MAX_LIMIT))
+    except (TypeError, ValueError):
+        return default
+
+
 def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolResult:
     """Executes one tool. Runs in a worker thread: the SDK is synchronous."""
     if name == "remember":
         memory = agent.remember(content=args.get("content"), type=args.get("type", "episodic"),
-                                visibility=args.get("visibility", "private"))
+                                visibility=args.get("visibility", "private"),
+                                event_date=args.get("event_date"), session_id=args.get("session_id"),
+                                is_atomic=bool(args.get("is_atomic", False)))
         return _text(f"Remembered: {memory.content[:100]} (ID: {memory.id})")
 
     if name == "remember_with_context":
+        metadata = args.get("context_metadata")
         memory = agent.remember(content=args.get("content"), type=args.get("type", "episodic"),
-                                event_date=args.get("event_date"), session_id=args.get("session_id"))
+                                event_date=args.get("event_date"), session_id=args.get("session_id"),
+                                metadata=metadata if isinstance(metadata, dict) else None)
         return _text(f"Remembered with context: {memory.content[:100]} (ID: {memory.id})")
 
     if name in ("recall", "recall_multi_session"):
-        results = agent.recall(query=args.get("query"), limit=args.get("limit", 5 if name == "recall" else 15),
+        results = agent.recall(query=args.get("query"), limit=_limit(args, 5 if name == "recall" else 15),
                                type=args.get("type"))
         return _text([{"id": r.memory_id, "content": r.content, "type": r.memory_type, "score": r.score,
                        "created_at": r.created_at} for r in results])
 
     if name == "get_recent_memories":
-        memories = agent.get_recent(limit=args.get("limit", 10), type=args.get("type"))
+        memories = agent.get_recent(limit=_limit(args, 10), type=args.get("type"))
         return _text([{"id": m.id, "content": m.content, "type": m.memory_type,
                        "created_at": m.created_at.isoformat(), "metadata": m.metadata or {}} for m in memories])
 
@@ -414,7 +462,7 @@ def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolR
 
     if name == "search_temporal":
         results = agent.recall_temporal(
-            query=args.get("query"), limit=args.get("limit", 10),
+            query=args.get("query"), limit=_limit(args, 10),
             after_date=args.get("after_date"), before_date=args.get("before_date"),
             after_event=args.get("after_event_date"), before_event=args.get("before_event_date"),
             session_id=args.get("session_id"), atomic_only=args.get("atomic_only"),
@@ -504,9 +552,13 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
         return await asyncio.to_thread(_run_tool, agent, current_session_id.get(), name, arguments or {})
     except MemroError as e:
         return CallToolResult(isError=True, content=[TextContent(type="text", text=f"Memro API error {e.status_code}: {e.message}")])
-    except Exception as e:
-        logger.exception("Error in call_tool")
-        return CallToolResult(isError=True, content=[TextContent(type="text", text=f"Tool execution failed: {e}")])
+    except AuthRequired as e:
+        return CallToolResult(isError=True, content=[TextContent(type="text", text=str(e))])
+    except Exception:
+        # The details stay in our logs; the client gets an ID to quote.
+        ref = uuid.uuid4().hex[:12]
+        logger.exception("Error in call_tool %s (ref %s)", name, ref)
+        return CallToolResult(isError=True, content=[TextContent(type="text", text=f"Tool {name} failed (ref {ref}).")])
 
 # --- ASGI / SSE Application Logic ---
 # --- Middleware for Auth/Context ---
@@ -523,19 +575,22 @@ class AuthMiddleware:
         query_string = scope.get("query_string", b"").decode()
         params = parse_qs(query_string)
         
-        agent_id = params.get("agent_id", [None])[0]
-        token = params.get("token", [None])[0]
         session_id = params.get("session_id", [None])[0]
-        
-        if not agent_id or not token:
-            request = Request(scope, receive)
-            agent_id = agent_id or request.query_params.get("agent_id")
-            token = token or request.query_params.get("token") or request.headers.get("Authorization", "")[7:]
-
+        agent_id = token = None
+        # Only the legacy SSE transport takes credentials in the URL, where
+        # they end up in proxy logs; everything else needs the header.
+        if path.startswith("/sse"):
+            agent_id = params.get("agent_id", [None])[0]
+            token = params.get("token", [None])[0]
+        if not token:
+            scheme, _, value = Request(scope, receive).headers.get("Authorization", "").partition(" ")
+            if scheme.lower() == "bearer":
+                token = value.strip() or None
 
         # The edge proxy sets X-Real-IP to the caller's address.
         headers = dict(scope.get("headers") or [])
-        client_ip = headers.get(b"x-real-ip", b"").decode().strip() or (scope.get("client") or [None])[0]
+        forwarded = headers.get(b"x-real-ip", b"").decode().strip() if TRUST_PROXY_HEADERS else ""
+        client_ip = forwarded or (scope.get("client") or [None])[0]
         t_ip = current_client_ip.set(client_ip)
         t_sid = current_session_id.set(session_id or "default")
         t_auth = current_auth_info.set({"agent_id": agent_id, "token": token})

@@ -10,8 +10,9 @@ Windsurf, Gemini CLI, OpenCode, Antigravity, Claude Desktop and others.
 | SSE (legacy clients) | `https://mcp.memro.co/sse/` | `http://localhost:8080/sse/` |
 
 Every connection authenticates with an [API key](authentication.md#api-keys):
-`Authorization: Bearer memro_sk_…`. SSE clients that can't set headers may
-pass `?token=memro_sk_…`, but a header keeps the key out of logs. A
+`Authorization: Bearer memro_sk_…`. Only the legacy SSE endpoint also accepts
+`?token=memro_sk_…`, for clients that can't set headers; `/mcp` requires the
+header, which keeps the key out of logs. A
 connection always acts as the key's agent and can't reach any other agent's
 memories. Requests without a valid key get `401`.
 
@@ -70,8 +71,8 @@ instructions (`CLAUDE.md`, `AGENTS.md`, …):
 
 | Tool | Arguments | |
 |---|---|---|
-| `remember` | `content`, `type?`, `visibility?` | Store a memory |
-| `remember_with_context` | `content`, `type?`, `event_date?`, `session_id?` | Store with when it happened |
+| `remember` | `content`, `type?`, `visibility?`, `event_date?`, `session_id?`, `is_atomic?` | Store a memory |
+| `remember_with_context` | `content`, `context_metadata?`, `type?`, `event_date?`, `session_id?` | Store with metadata (file, branch, function) and when it happened |
 | `recall` | `query`, `limit?` (5), `type?` | Hybrid search |
 | `recall_multi_session` | `query`, `limit?` (15) | Search across all sessions |
 | `search_temporal` | `query`, `after_date?`, `before_date?`, `after_event_date?`, `before_event_date?`, `temporal_weight?`, `atomic_only?`, `limit?` | Search by time |
@@ -93,7 +94,10 @@ instructions (`CLAUDE.md`, `AGENTS.md`, …):
 | `find_contradictions` | | How many conflicts exist and how many are unresolved |
 
 **Coordinating several agents** on one codebase (stored as procedural
-memories, scoped to a session):
+memories). The session is the `session_id` query parameter on the MCP URL
+(`…/mcp?session_id=team-a`, default `default`); claims and intents are only
+visible within it. A release or handoff frees the resource for a new claim.
+`limit` on any tool is capped at 50.
 
 | Tool | Arguments | |
 |---|---|---|

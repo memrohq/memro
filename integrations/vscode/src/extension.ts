@@ -5,6 +5,7 @@ import { MemoryWebviewProvider } from './webview.js';
 
 // MCP Client singleton
 let mcpClient: Client | null = null;
+let connecting: Promise<Client> | null = null;
 let statusBarItem: vscode.StatusBarItem;
 let currentSessionId: string = 'default';
 let secrets: vscode.SecretStorage;
@@ -12,10 +13,23 @@ let secrets: vscode.SecretStorage;
 const API_KEY_SECRET = 'memro.apiKey';
 
 function resetMcpClient() {
+  connecting = null;
   if (mcpClient) {
-    mcpClient.close();
+    mcpClient.close().catch(() => undefined);
     mcpClient = null;
   }
+}
+
+/** Thrown when a background task needs the client but no key is stored; it
+ * stays quiet instead of prompting. */
+class NotSignedIn extends Error {}
+
+/** Only files on disk inside the workspace take part in coordination. */
+function coordinationPath(uri: vscode.Uri): string | undefined {
+  if (uri.scheme !== 'file' || !vscode.workspace.getWorkspaceFolder(uri)) return undefined;
+  const resource = vscode.workspace.asRelativePath(uri);
+  if (resource.startsWith('.') || resource.includes('node_modules')) return undefined;
+  return resource;
 }
 
 /** Asks for an API key and stores it in VS Code's secret storage (the OS keychain). */
@@ -33,21 +47,36 @@ async function promptForApiKey(): Promise<string | undefined> {
   return key?.trim();
 }
 
-async function getMcpClient(): Promise<Client> {
+/** The shared MCP client. Commands the user runs pass interactive=true and may
+ * ask for a key; background work (polling, editor events) never prompts. */
+async function getMcpClient(interactive = true): Promise<Client> {
   if (mcpClient) return mcpClient;
+  if (!(await secrets.get(API_KEY_SECRET))) {
+    if (!interactive) throw new NotSignedIn('Not signed in');
+    if (!(await promptForApiKey())) {
+      vscode.window.showErrorMessage('Memro needs an API key. Run "Memro: Set API Key".');
+      throw new Error('Missing API key');
+    }
+  }
+  // Concurrent callers share one connection attempt.
+  if (!connecting) {
+    connecting = connect().finally(() => { connecting = null; });
+  }
+  return connecting;
+}
 
+async function connect(): Promise<Client> {
   const config = vscode.workspace.getConfiguration('memro');
   const mcpUrl = config.get<string>('mcpUrl') || 'https://mcp.memro.co/mcp';
   currentSessionId = config.get<string>('sessionId') || 'default';
+  const apiKey = await secrets.get(API_KEY_SECRET);
+  if (!apiKey) throw new Error('Missing API key');
 
-  const apiKey = (await secrets.get(API_KEY_SECRET)) || (await promptForApiKey());
-  if (!apiKey) {
-    vscode.window.showErrorMessage('Memro needs an API key. Run "Memro: Set API Key".');
-    throw new Error('Missing API key');
-  }
-
+  // The server scopes claims and intents by the session in the URL.
+  const url = new URL(mcpUrl);
+  url.searchParams.set('session_id', currentSessionId);
   // Streamable HTTP with the key in a header: it never appears in a URL or log.
-  const transport = new StreamableHTTPClientTransport(new URL(mcpUrl), {
+  const transport = new StreamableHTTPClientTransport(url, {
     requestInit: { headers: { Authorization: `Bearer ${apiKey}` } },
   });
   const client = new Client({ name: 'vscode-memro', version: '0.1.0' }, {});
@@ -60,7 +89,7 @@ async function getMcpClient(): Promise<Client> {
     throw e;
   }
   mcpClient = client;
-  return mcpClient;
+  return client;
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -244,7 +273,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (!q) return;
     try {
       const client = await getMcpClient();
-      const res = await client.callTool({ name: 'query_graph', arguments: { query: q } });
+      const res = await client.callTool({ name: 'mee_reason', arguments: { query: q } });
       const resContent = res.content as any[];
       vscode.window.showInformationMessage(resContent?.[0]?.text ?? 'No results.');
     } catch (e) {
@@ -254,8 +283,14 @@ export function activate(context: vscode.ExtensionContext) {
 
   const openFile = vscode.commands.registerCommand('memro.openFile', async (filePath: string) => {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-    if (!workspaceFolder) return;
+    if (!workspaceFolder || typeof filePath !== 'string') return;
+    // Paths come from memories, which are untrusted: stay inside the workspace.
     const uri = vscode.Uri.joinPath(workspaceFolder.uri, filePath);
+    const root = workspaceFolder.uri.path.replace(/\/+$/, '') + '/';
+    if (!uri.path.startsWith(root)) {
+      vscode.window.showWarningMessage(`Memro: refusing to open ${filePath}, which is outside the workspace.`);
+      return;
+    }
     try {
       const doc = await vscode.workspace.openTextDocument(uri);
       await vscode.window.showTextDocument(doc);
@@ -319,6 +354,7 @@ export function activate(context: vscode.ExtensionContext) {
           session_id: currentSessionId
         } 
       });
+      claimedHere.delete(resource);
       vscode.window.showInformationMessage(`Memro: ${resource} released.`);
       updateStatusBar('allow', '');
     } catch (e) {
@@ -352,6 +388,7 @@ export function activate(context: vscode.ExtensionContext) {
           session_id: currentSessionId
         } 
       });
+      claimedHere.delete(resource);
       vscode.window.showInformationMessage(`Memro: ${resource} handed off.`);
       updateStatusBar('allow', '');
     } catch (e) {
@@ -380,8 +417,9 @@ export function activate(context: vscode.ExtensionContext) {
   function startPoller() {
     if (poller) clearInterval(poller);
     poller = setInterval(async () => {
+      if (!vscode.window.state.focused) return;
       try {
-        const client = await getMcpClient();
+        const client = await getMcpClient(false);
         const res = await client.callTool({ name: 'get_active_work', arguments: { session_id: currentSessionId } });
         const data = JSON.parse((res.content as any[])[0].text);
         provider.updateActiveWork(data.claims);
@@ -398,11 +436,12 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   async function performPreActionCheck(document: vscode.TextDocument) {
-    const resource = vscode.workspace.asRelativePath(document.uri);
-    if (resource.startsWith('.') || resource.includes('node_modules')) return;
+    if (!vscode.workspace.getConfiguration('memro').get<boolean>('checkOnOpen')) return;
+    const resource = coordinationPath(document.uri);
+    if (!resource) return;
 
     try {
-      const client = await getMcpClient();
+      const client = await getMcpClient(false);
       const res = await client.callTool({ 
         name: 'pre_action_check', 
         arguments: { 
@@ -421,19 +460,21 @@ export function activate(context: vscode.ExtensionContext) {
           });
       }
     } catch (e) {
-      console.error('Memro: Pre-action check failed', e);
+      if (!(e instanceof NotSignedIn)) console.error('Memro: Pre-action check failed', e);
     }
   }
 
   let intentTimeout: NodeJS.Timeout | undefined;
+  // Claimed in this window already; avoids a lookup on every keystroke.
+  const claimedHere = new Set<string>();
   async function autoClaimOnEdit(document: vscode.TextDocument) {
+    if (!vscode.workspace.getConfiguration('memro').get<boolean>('autoClaimOnEdit')) return;
+    const resource = coordinationPath(document.uri);
+    if (!resource || claimedHere.has(resource)) return;
     if (intentTimeout) clearTimeout(intentTimeout);
     intentTimeout = setTimeout(async () => {
-      const resource = vscode.workspace.asRelativePath(document.uri);
-      if (resource.startsWith('.') || resource.includes('node_modules')) return;
-
       try {
-        const client = await getMcpClient();
+        const client = await getMcpClient(false);
         // Check if already claimed
         const statusRes = await client.callTool({ name: 'get_active_context', arguments: { resource } });
         const status = JSON.parse((statusRes.content as any[])[0].text);
@@ -453,17 +494,21 @@ export function activate(context: vscode.ExtensionContext) {
             return;
           }
 
+          claimedHere.add(resource);
           vscode.window.showInformationMessage(`⬢ Memro: Auto-claimed ${resource} for editing.`);
           vscode.window.setStatusBarMessage(`$(lock) Memro: Auto-claimed ${resource}`, 3000);
         }
       } catch (e) { 
-        console.error('Memro: Auto-claim failed', e);
+        if (!(e instanceof NotSignedIn)) console.error('Memro: Auto-claim failed', e);
       }
-    }, 500); // 500ms debounce for "snappy" feel
+    }, 2000); // wait for a pause in typing
   }
 
-  vscode.workspace.onDidOpenTextDocument(performPreActionCheck);
-  vscode.workspace.onDidChangeTextDocument(e => autoClaimOnEdit(e.document));
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument(performPreActionCheck),
+    vscode.workspace.onDidChangeTextDocument(e => autoClaimOnEdit(e.document)),
+    { dispose: () => { if (poller) clearInterval(poller); if (intentTimeout) clearTimeout(intentTimeout); } },
+  );
   startPoller();
 
   const provider = new MemoryWebviewProvider(context.extensionUri, () => getMcpClient());
@@ -473,5 +518,5 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-  mcpClient = null;
+  resetMcpClient();
 }
