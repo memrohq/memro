@@ -701,6 +701,14 @@ func TestHooksAreScopedToTheAgent(t *testing.T) {
 	if urls, _ := e.st.GetHooks(context.Background(), a.id, "memory_created"); len(urls) != 1 {
 		t.Fatalf("A's hooks = %v", urls)
 	}
+	hook := j(map[string]string{"event_type": "memory_created", "url": "https://a.example.com/hook"})
+	code, body = e.do(&b, "v2", "DELETE", "/hooks", hook, nil)
+	e.must(404, code, body, "B deletes A's hook")
+	code, body = e.do(&a, "v2", "DELETE", "/hooks", hook, nil)
+	e.must(204, code, body, "A deletes its hook")
+	if urls, _ := e.st.GetHooks(context.Background(), a.id, "memory_created"); len(urls) != 0 {
+		t.Fatalf("hook not deleted: %v", urls)
+	}
 }
 
 func (e *env) userWithCode(code string) string {
@@ -781,4 +789,67 @@ func TestTemporalSearchFindsMemoriesWithoutEmbeddings(t *testing.T) {
 	if !strings.Contains(string(body), m.ID.String()) {
 		t.Fatalf("un-embedded memory not found: %s", body)
 	}
+}
+
+// Deleting an agent removes its uploaded files too, so /assets stops serving them.
+func TestDeleteIdentityRemovesFiles(t *testing.T) {
+	e := setup(t)
+	a := newAgent(t)
+	e.register(a)
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", "secret.txt")
+	fw.Write([]byte("private notes"))
+	mw.WriteField("agent_id", a.id)
+	mw.Close()
+	code, body := e.do(&a, "v2", "POST", "/upload", buf.Bytes(), map[string]string{"Content-Type": mw.FormDataContentType()})
+	e.must(200, code, body, "upload")
+	var up struct {
+		FileID string `json:"file_id"`
+	}
+	_ = json.Unmarshal(body, &up)
+	code, body = e.do(nil, "", "GET", "/assets/"+up.FileID, nil, nil)
+	e.must(200, code, body, "asset before delete")
+
+	code, body = e.do(&a, "v2", "DELETE", "/identity/"+a.id, nil, nil)
+	e.must(204, code, body, "delete identity")
+	code, body = e.do(nil, "", "GET", "/assets/"+up.FileID, nil, nil)
+	e.must(404, code, body, "asset after delete")
+}
+
+// Deleting the last memory made from a file deletes the file.
+func TestDeletingAMemoryRemovesItsFile(t *testing.T) {
+	e := setup(t)
+	a := newAgent(t)
+	e.register(a)
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", "note.txt")
+	fw.Write([]byte("a private note"))
+	mw.WriteField("agent_id", a.id)
+	mw.Close()
+	code, body := e.do(&a, "v2", "POST", "/upload", buf.Bytes(), map[string]string{"Content-Type": mw.FormDataContentType()})
+	e.must(200, code, body, "upload")
+	var up struct {
+		FileID string `json:"file_id"`
+	}
+	_ = json.Unmarshal(body, &up)
+	var ids [2]string
+	for i := range ids {
+		code, body = e.do(&a, "v2", "POST", "/memory/from-file", j(map[string]string{"file_id": up.FileID, "memory_type": []string{"semantic", "episodic"}[i]}), nil)
+		e.must(200, code, body, "memory from file")
+		var m struct {
+			MemoryID string `json:"memory_id"`
+		}
+		_ = json.Unmarshal(body, &m)
+		ids[i] = m.MemoryID
+	}
+	code, body = e.do(&a, "v2", "DELETE", "/memory/"+ids[0], nil, nil)
+	e.must(204, code, body, "delete first memory")
+	code, body = e.do(nil, "", "GET", "/assets/"+up.FileID, nil, nil)
+	e.must(200, code, body, "file still used by the second memory")
+	code, body = e.do(&a, "v2", "DELETE", "/memory/"+ids[1], nil, nil)
+	e.must(204, code, body, "delete second memory")
+	code, body = e.do(nil, "", "GET", "/assets/"+up.FileID, nil, nil)
+	e.must(404, code, body, "file after its last memory is deleted")
 }

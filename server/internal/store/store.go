@@ -330,9 +330,15 @@ func (s *Store) GetMemory(ctx context.Context, id uuid.UUID, agentID string, ten
 	return nilIfNoRows(&m, err)
 }
 
-func (s *Store) DeleteMemory(ctx context.Context, id uuid.UUID, agentID string, tenantID uuid.UUID) (bool, error) {
-	tag, err := s.Pool.Exec(ctx, `DELETE FROM memories WHERE id = $1 AND agent_id = $2 AND tenant_id = $3`, id, agentID, tenantID)
-	return tag.RowsAffected() > 0, err
+// DeleteMemory deletes a memory and returns the file it was made from, if any.
+func (s *Store) DeleteMemory(ctx context.Context, id uuid.UUID, agentID string, tenantID uuid.UUID) (bool, *uuid.UUID, error) {
+	var fileID *uuid.UUID
+	err := s.Pool.QueryRow(ctx, `DELETE FROM memories WHERE id = $1 AND agent_id = $2 AND tenant_id = $3 RETURNING file_id`,
+		id, agentID, tenantID).Scan(&fileID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil, nil
+	}
+	return err == nil, fileID, err
 }
 
 // --- Embeddings ---------------------------------------------------------------
@@ -395,6 +401,37 @@ func (s *Store) InsertFile(ctx context.Context, f *File) error {
 	return err
 }
 
+// DeleteOrphanFile removes a file record no memory refers to any more and
+// returns its path ("" if the file is still in use or already gone).
+func (s *Store) DeleteOrphanFile(ctx context.Context, fileID uuid.UUID, agentID string) (string, error) {
+	var path string
+	err := s.Pool.QueryRow(ctx, `DELETE FROM files f WHERE f.id = $1 AND f.agent_id = $2
+		AND NOT EXISTS (SELECT 1 FROM memories m WHERE m.file_id = f.id) RETURNING f.file_path`, fileID, agentID).Scan(&path)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return path, err
+}
+
+// DeleteFilesForAgent removes an agent's file records and returns their
+// paths so the caller can delete them from storage.
+func (s *Store) DeleteFilesForAgent(ctx context.Context, agentID string) ([]string, error) {
+	rows, err := s.Pool.Query(ctx, `DELETE FROM files WHERE agent_id = $1 RETURNING file_path`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		paths = append(paths, p)
+	}
+	return paths, rows.Err()
+}
+
 func (s *Store) GetFile(ctx context.Context, id uuid.UUID) (*File, error) {
 	var f File
 	err := s.Pool.QueryRow(ctx, `SELECT id, agent_id, tenant_id, file_name, file_type, file_path, file_size, mime_type, extracted_text
@@ -439,6 +476,11 @@ func (s *Store) RegisterHook(ctx context.Context, tenantID uuid.UUID, agentID, e
 	_, err := s.Pool.Exec(ctx, `INSERT INTO hooks (tenant_id, agent_id, event_type, url) VALUES ($1, $2, $3, $4)
 		ON CONFLICT DO NOTHING`, tenantID, agentID, eventType, url)
 	return err
+}
+
+func (s *Store) DeleteHook(ctx context.Context, agentID, eventType, url string) (bool, error) {
+	tag, err := s.Pool.Exec(ctx, `DELETE FROM hooks WHERE agent_id = $1 AND event_type = $2 AND url = $3`, agentID, eventType, url)
+	return tag.RowsAffected() > 0, err
 }
 
 func (s *Store) GetHooks(ctx context.Context, agentID, eventType string) ([]string, error) {

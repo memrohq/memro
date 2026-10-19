@@ -113,6 +113,18 @@ func (s *Server) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusInternalServerError, "Failed to delete identity")
 		return
 	}
+	// Files are not tied to the identity by a foreign key (memories, which
+	// reference them, are gone now); remove them and their bytes on disk so
+	// /assets stops serving them.
+	paths, err := s.store.DeleteFilesForAgent(r.Context(), id)
+	if err != nil {
+		slog.Error("delete files of deleted identity", "agent_id", id, "err", err)
+	}
+	for _, p := range paths {
+		if err := s.files.Remove(p); err != nil {
+			slog.Warn("remove file", "err", err)
+		}
+	}
 	s.engine.Cache().InvalidateAgent(id)
 	s.audit(r, a, "identity.delete", &id)
 	w.WriteHeader(http.StatusNoContent)
@@ -286,7 +298,17 @@ func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "Invalid memory ID format")
 		return
 	}
-	ok, err := s.store.DeleteMemory(r.Context(), id, a.ID, a.TenantID)
+	ok, fileID, err := s.store.DeleteMemory(r.Context(), id, a.ID, a.TenantID)
+	if ok && fileID != nil {
+		// The file goes with the last memory made from it.
+		if path, err := s.store.DeleteOrphanFile(r.Context(), *fileID, a.ID); err != nil {
+			slog.Warn("delete orphan file", "err", err)
+		} else if path != "" {
+			if err := s.files.Remove(path); err != nil {
+				slog.Warn("remove file", "err", err)
+			}
+		}
+	}
 	switch {
 	case err != nil:
 		slog.Error("delete memory", "err", err)
@@ -468,6 +490,28 @@ func (s *Server) registerHook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
+}
+
+// DELETE /hooks {"event_type": "…", "url": "…"}
+func (s *Server) deleteHook(w http.ResponseWriter, r *http.Request) {
+	a := agentFrom(r)
+	var req struct {
+		EventType string `json:"event_type"`
+		URL       string `json:"url"`
+	}
+	if err := decodeJSON(body(r), &req); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ok, err := s.store.DeleteHook(r.Context(), a.ID, req.EventType, req.URL)
+	switch {
+	case err != nil:
+		httpError(w, http.StatusInternalServerError, "Failed to delete hook")
+	case !ok:
+		httpError(w, http.StatusNotFound, "Hook not found")
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func (s *Server) getHooks(w http.ResponseWriter, r *http.Request) {

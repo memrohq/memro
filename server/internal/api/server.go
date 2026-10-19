@@ -140,6 +140,7 @@ func (s *Server) Handler() http.Handler {
 	protected("GET /tenant/{id}/usage", s.tenantUsage)
 	protected("POST /hooks", s.registerHook)
 	protected("GET /hooks/{event_type}", s.getHooks)
+	protected("DELETE /hooks", s.deleteHook)
 	protected("GET /auth/whoami", s.whoami)
 	protected("GET /auth/device", s.deviceInfo)
 	protected("POST /auth/device/approve", s.deviceApprove)

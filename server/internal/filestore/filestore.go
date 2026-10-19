@@ -37,18 +37,39 @@ func (l *Local) Save(id uuid.UUID, originalName string, data []byte) (string, er
 	return path, nil
 }
 
-// Read only returns files inside the storage directory.
-func (l *Local) Read(path string) ([]byte, error) {
+// Remove deletes a stored file. Paths outside the storage directory and
+// files that are already gone are ignored.
+func (l *Local) Remove(path string) error {
+	abs, err := l.inside(path)
+	if err != nil {
+		return nil
+	}
+	if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func (l *Local) inside(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	root, err := filepath.Abs(l.dir)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if !strings.HasPrefix(abs, root+string(os.PathSeparator)) {
-		return nil, os.ErrNotExist
+		return "", os.ErrNotExist
+	}
+	return abs, nil
+}
+
+// Read only returns files inside the storage directory.
+func (l *Local) Read(path string) ([]byte, error) {
+	abs, err := l.inside(path)
+	if err != nil {
+		return nil, err
 	}
 	return os.ReadFile(abs)
 }
