@@ -71,7 +71,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.email.SendOTP(email, code); err != nil {
+	if err := s.email.SendOTP(email, code, s.cfg.AppURL); err != nil {
 		slog.Error("send otp email", "err", err)
 		httpError(w, http.StatusInternalServerError, "Failed to send login email. Please check server logs.")
 		return
