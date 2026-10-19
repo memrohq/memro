@@ -59,12 +59,13 @@ export function writeFileSafely(file, text) {
 const writeJSON = (file, data) => writeFileSafely(file, JSON.stringify(data, null, 2) + "\n");
 
 /** A client whose config is a JSON object with servers under `key`. */
-function jsonClient({ id, name, file, detect, key = "mcpServers", entry }) {
+function jsonClient({ id, name, file, detect, key = "mcpServers", entry, rules }) {
   return {
     id,
     name,
     file,
     detect,
+    rules,
     add(conn) {
       const cfg = readJSON(file());
       cfg[key] = { ...(cfg[key] || {}), [SERVER_NAME]: entry(conn) };
@@ -109,6 +110,7 @@ const codex = {
   name: "Codex",
   file: () => path.join(process.env.CODEX_HOME || path.join(home(), ".codex"), "config.toml"),
   detect: () => exists(process.env.CODEX_HOME || path.join(home(), ".codex")),
+  rules: () => path.join(process.env.CODEX_HOME || path.join(home(), ".codex"), "AGENTS.md"),
   add({ mcpUrl, apiKey }) {
     const file = codex.file();
     const current = fs.existsSync(file) ? stripCodexServer(fs.readFileSync(file, "utf8")) : "";
@@ -139,6 +141,7 @@ const claudeJSON = jsonClient({
   file: () => path.join(home(), ".claude.json"),
   detect: () => exists(home(), ".claude.json") || exists(home(), ".claude"),
   entry: ({ mcpUrl, apiKey }) => ({ type: "http", url: mcpUrl, headers: bearer(apiKey) }),
+  rules: () => path.join(home(), ".claude", "CLAUDE.md"),
 });
 
 function claudeCLI(...args) {
@@ -194,6 +197,7 @@ export const CLIENTS = [
     detect: () => exists(process.env.XDG_CONFIG_HOME || path.join(home(), ".config"), "opencode"),
     key: "mcp",
     entry: ({ mcpUrl, apiKey }) => ({ type: "remote", url: mcpUrl, enabled: true, headers: bearer(apiKey) }),
+    rules: () => path.join(process.env.XDG_CONFIG_HOME || path.join(home(), ".config"), "opencode", "AGENTS.md"),
   }),
   jsonClient({
     id: "gemini-cli",
@@ -201,6 +205,7 @@ export const CLIENTS = [
     file: () => path.join(home(), ".gemini", "settings.json"),
     detect: () => exists(home(), ".gemini", "settings.json"),
     entry: ({ mcpUrl, apiKey }) => ({ httpUrl: mcpUrl, headers: bearer(apiKey) }),
+    rules: () => path.join(home(), ".gemini", "GEMINI.md"),
   }),
   jsonClient({
     id: "vscode",
@@ -216,6 +221,7 @@ export const CLIENTS = [
     file: () => path.join(home(), ".codeium", "windsurf", "mcp_config.json"),
     detect: () => exists(home(), ".codeium", "windsurf"),
     entry: ({ mcpUrl, apiKey }) => ({ serverUrl: mcpUrl, headers: bearer(apiKey) }),
+    rules: () => path.join(home(), ".codeium", "windsurf", "memories", "global_rules.md"),
   }),
   jsonClient({
     id: "claude-desktop",

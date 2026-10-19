@@ -32,9 +32,10 @@ export function reduce(state, key) {
     s.cursor = (s.cursor + 1) % n;
   } else if (name === "space" || name === " ") {
     s.items[s.cursor].checked = !s.items[s.cursor].checked;
-  } else if (name === "a") {
-    const all = s.items.every((i) => i.checked);
-    s.items.forEach((i) => { i.checked = !all; });
+  } else if (name === "a") { // all tools; options below the list keep their state
+    const tools = s.items.filter((i) => !i.option);
+    const all = tools.every((i) => i.checked);
+    tools.forEach((i) => { i.checked = !all; });
   }
   return s;
 }
@@ -43,13 +44,14 @@ export function reduce(state, key) {
 export function render(state, title) {
   const lines = [`  ${c.bold(title)}`, c.dim("  ↑/↓ move · space select · a all · enter confirm · esc cancel"), ""];
   state.items.forEach((item, i) => {
+    if (item.option && !state.items[i - 1]?.option) lines.push(""); // options sit below the list
     const here = i === state.cursor;
     const box = item.checked ? c.green("◉") : c.dim("○");
     const label = here ? c.accent(item.label) : item.label;
     const hint = item.hint ? "  " + c.dim(item.hint) : "";
     lines.push(`  ${here ? c.accent("›") : " "} ${box} ${label}${hint}`);
   });
-  const count = state.items.filter((i) => i.checked).length;
+  const count = state.items.filter((i) => i.checked && !i.option).length;
   lines.push("", c.dim(`  ${count} selected`));
   return lines;
 }

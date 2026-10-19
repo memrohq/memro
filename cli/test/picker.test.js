@@ -67,3 +67,12 @@ test("pick resolves null when cancelled", async () => {
   input.write("q");
   assert.equal(await done, null);
 });
+
+test("options sit below the tools and are not counted or toggled by a", () => {
+  const withOption = [...items, { label: "Teach tools", checked: true, option: "instructions" }];
+  let s = reduce(initialState(withOption), key("a"));
+  assert.equal(s.items.at(-1).checked, true, "a leaves options alone");
+  const lines = render(initialState(withOption), "Pick").map(strip);
+  assert.match(lines.at(-1), /2 selected/);
+  assert.equal(lines[lines.findIndex((l) => l.includes("Teach tools")) - 1], "");
+});

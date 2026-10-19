@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { CLIENTS, findClient } from "./clients.js";
 import { pick } from "./picker.js";
+import { installInstructions, uninstallInstructions } from "./instructions.js";
 
 const ENVIRONMENTS = {
   prod: "https://api.memro.co",
@@ -26,16 +27,19 @@ Usage
 Options
   --client <ids>             Only these tools, comma-separated, skipping the list (${CLIENTS.map((c) => c.id).join(", ")})
   --yes, -y                  Don't ask: use every detected tool
+  --no-instructions          Don't add the "use Memro automatically" note to
+                             the tools' global instructions (CLAUDE.md, AGENTS.md…)
   --staging | --local        Use staging or a local server instead of Memro Cloud
   --api <url>                Use a specific Memro API (self-hosted)
 `;
 
 function parseArgs(argv) {
-  const opts = { command: null, clients: null, yes: false, api: null };
+  const opts = { command: null, clients: null, yes: false, api: null, instructions: true };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--client" || a === "--clients") opts.clients = (argv[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
     else if (a === "--yes" || a === "-y") opts.yes = true;
+    else if (a === "--no-instructions") opts.instructions = false;
     else if (a === "--staging") opts.api = ENVIRONMENTS.staging;
     else if (a === "--local") opts.api = ENVIRONMENTS.local;
     else if (a === "--api") {
@@ -163,10 +167,16 @@ async function chooseTargets(opts) {
   }
   console.log("");
   const picked = await pick(
-    CLIENTS.map((c) => ({ label: c.name, hint: detected.has(c) ? "" : "not detected", checked: detected.has(c), client: c })),
+    [
+      ...CLIENTS.map((c) => ({ label: c.name, hint: detected.has(c) ? "" : "not detected", checked: detected.has(c), client: c })),
+      { label: "Teach these tools to use Memro automatically", hint: "adds a short note to CLAUDE.md, AGENTS.md…",
+        checked: opts.instructions, option: "instructions" },
+    ],
     { title: "Which tools should use Memro?" },
   );
-  return picked && picked.map((p) => p.client);
+  if (!picked) return null;
+  opts.instructions = picked.some((p) => p.option === "instructions");
+  return picked.filter((p) => p.client).map((p) => p.client);
 }
 
 async function connect(opts) {
@@ -213,6 +223,10 @@ async function connect(opts) {
       c.add(conn);
       ok++;
       console.log(`  \x1b[32m✔\x1b[0m ${c.name.padEnd(15)} ${tilde(c.file())}`);
+      if (opts.instructions && c.rules) {
+        installInstructions(c.rules());
+        console.log(`  \x1b[32m✔\x1b[0m ${"".padEnd(15)} ${tilde(c.rules())} (use Memro automatically)`);
+      }
     } catch (err) {
       console.log(`  \x1b[33m!\x1b[0m ${c.name.padEnd(15)} ${err.message}`);
     }
@@ -253,6 +267,7 @@ async function disconnect(opts) {
   for (const c of targets) {
     try {
       if (c.remove()) console.log(`  ✔ Removed from ${c.name}`);
+      if (c.rules && uninstallInstructions(c.rules())) console.log(`  ✔ Removed the Memro note from ${tilde(c.rules())}`);
     } catch (err) {
       console.log(`  ! ${c.name}: ${err.message}`);
     }

@@ -26,6 +26,23 @@ npx memro-cli connect
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` |
 | Claude Desktop | `claude_desktop_config.json` (via `mcp-remote`) |
 
+5. Teaches each tool to use Memro without being asked: recall at the start of
+   a task, remember preferences, decisions and lasting facts, never store
+   secrets. The Memro server sends this guidance to every client on connect;
+   for tools that keep global instructions in a file, a short note is also
+   added there between `<!-- memro:start -->` and `<!-- memro:end -->`:
+
+   | Tool | File |
+   |---|---|
+   | Claude Code | `~/.claude/CLAUDE.md` |
+   | Codex | `~/.codex/AGENTS.md` |
+   | Gemini CLI | `~/.gemini/GEMINI.md` |
+   | OpenCode | `~/.config/opencode/AGENTS.md` |
+   | Windsurf | `~/.codeium/windsurf/memories/global_rules.md` |
+
+   Untick "Teach these tools…" in the list, or pass `--no-instructions`, to
+   skip it. `disconnect` removes the note and leaves the rest of the file.
+
 Existing settings and other servers are kept; the original file is saved
 once as `<file>.memro-backup`. Restart the tool afterwards.
 
