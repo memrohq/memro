@@ -34,6 +34,7 @@ import (
 	"github.com/memrohq/memro/server/internal/api"
 	"github.com/memrohq/memro/server/internal/auth"
 	"github.com/memrohq/memro/server/internal/db"
+	"github.com/memrohq/memro/server/internal/domain"
 	"github.com/memrohq/memro/server/internal/email"
 	"github.com/memrohq/memro/server/internal/embed"
 	"github.com/memrohq/memro/server/internal/engine"
@@ -761,4 +762,23 @@ func TestSignInCodesAreThrottledPerEmail(t *testing.T) {
 	e.must(429, code, body, "sixth code within the hour")
 	code, body = e.do(nil, "", "POST", "/auth/login", j(map[string]string{"email": "other@example.com"}), nil)
 	e.must(200, code, body, "another email")
+}
+
+// A memory with no embedding yet (just written, or embedding failed) is
+// still found by temporal search, by keyword.
+func TestTemporalSearchFindsMemoriesWithoutEmbeddings(t *testing.T) {
+	e := setup(t)
+	a := newAgent(t)
+	e.register(a)
+	now := time.Now().UTC()
+	m := &domain.Memory{ID: uuid.New(), AgentID: a.id, TenantID: uuid.Nil, Content: "The invoicing pipeline moved to Rust",
+		MemoryType: domain.Semantic, Visibility: domain.Private, CreatedAt: now, DocumentDate: now, LastAccessedAt: now, Confidence: 1}
+	if err := e.st.InsertMemory(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	code, body := e.do(&a, "v1", "GET", "/search/temporal?query=invoicing+pipeline", nil, nil)
+	e.must(200, code, body, "temporal search")
+	if !strings.Contains(string(body), m.ID.String()) {
+		t.Fatalf("un-embedded memory not found: %s", body)
+	}
 }

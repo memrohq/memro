@@ -38,7 +38,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "A valid email is required")
 		return
 	}
-	devLog := !s.email.Configured() && s.cfg.DevLogOTP
+	devLog := s.cfg.DevLogOTP
 	if !s.email.Configured() && !devLog {
 		httpError(w, http.StatusServiceUnavailable, "Email login is not configured on this server")
 		return
@@ -64,9 +64,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if devLog {
-		slog.Warn("DEV_LOG_OTP: sign-in code (email is not configured)", "email", email, "code", code)
-		writeJSON(w, http.StatusOK, authMessage{true, "OTP sent to email"})
-		return
+		// Staging only (prod forces DEV_LOG_OTP off): lets smoke tests sign in.
+		slog.Warn("DEV_LOG_OTP: sign-in code", "email", email, "code", code)
+		if !s.email.Configured() {
+			writeJSON(w, http.StatusOK, authMessage{true, "OTP sent to email"})
+			return
+		}
 	}
 	if err := s.email.SendOTP(email, code); err != nil {
 		slog.Error("send otp email", "err", err)

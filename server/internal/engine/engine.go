@@ -277,12 +277,15 @@ func (e *Engine) TemporalSearch(ctx context.Context, q TemporalQuery, tenantID u
 
 	var simExpr, join, order string
 	if vec := e.queryEmbedding(ctx, q.Query); vec != nil {
-		args = append(args, pgvector.NewVector(vec), len(vec))
-		vi, di := len(args)-1, len(args)
-		join = " JOIN memory_embeddings e ON e.memory_id = m.id"
-		where += fmt.Sprintf(" AND e.dims = $%d", di)
-		simExpr = fmt.Sprintf("(1 - (e.embedding <=> $%d))::REAL", vi)
-		order = fmt.Sprintf("e.embedding <=> $%d", vi)
+		// Memories without an embedding yet (just written, or the embedding
+		// call failed) are still found by keyword.
+		args = append(args, pgvector.NewVector(vec), len(vec), q.Query)
+		vi, di, qi := len(args)-2, len(args)-1, len(args)
+		tsq := fmt.Sprintf("plainto_tsquery('english', $%d)", qi)
+		join = fmt.Sprintf(" LEFT JOIN memory_embeddings e ON e.memory_id = m.id AND e.dims = $%d", di)
+		where += fmt.Sprintf(" AND (e.memory_id IS NOT NULL OR to_tsvector('english', m.content) @@ %s)", tsq)
+		simExpr = fmt.Sprintf("COALESCE((1 - (e.embedding <=> $%d))::REAL, ts_rank_cd(to_tsvector('english', m.content), %s)::REAL)", vi, tsq)
+		order = simExpr + " DESC"
 	} else {
 		args = append(args, q.Query)
 		qi := len(args)

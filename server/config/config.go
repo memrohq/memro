@@ -49,9 +49,9 @@ type Config struct {
 	AppURL string // dashboard, e.g. https://app.memro.co
 	MCPURL string // hosted MCP endpoint, e.g. https://mcp.memro.co/mcp
 
-	// DevLogOTP writes dashboard sign-in codes to the server log instead of
-	// emailing them when no SMTP server is configured. For local development
-	// and staging only; never enable it in production.
+	// DevLogOTP writes dashboard sign-in codes to the server log (and still
+	// emails them when SMTP is configured), so local development and staging
+	// smoke tests can sign in. Never enable it in production.
 	DevLogOTP bool
 }
 
