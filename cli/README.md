@@ -1,4 +1,4 @@
-# memro
+# memro-cli
 
 Connect your AI tools to [Memro](https://memro.co) memory with one command.
 
@@ -6,10 +6,13 @@ Connect your AI tools to [Memro](https://memro.co) memory with one command.
 npx memro-cli connect
 ```
 
-1. Shows a code and opens the Memro dashboard. Sign in and press **Connect**.
-2. Receives a new API key (revocable in the dashboard → API keys) and stores
+1. Lists the supported tools with the ones on this machine already ticked.
+   Use ↑/↓ to move, space to tick, `a` for all, Enter to confirm (Esc cancels
+   without signing in).
+2. Shows a code and opens the Memro dashboard. Sign in and press **Connect**.
+3. Receives a new API key (revocable in the dashboard → API keys) and stores
    it in `~/.memro/credentials.json` (readable only by you).
-3. Finds the tools on this machine and adds the Memro MCP server to each:
+4. Adds the Memro MCP server to each tool you picked:
 
 | Tool | Config written |
 |---|---|
@@ -34,6 +37,8 @@ npx memro-cli status
 npx memro-cli disconnect [--client ...]
 ```
 
+`--client` picks tools without the list; `--yes` takes every detected tool
+(both work in scripts, where there is no list to show).
 `--staging`, `--local` or `--api <url>` target another Memro server
 (self-hosted: `--api https://memro.example.com`).
 

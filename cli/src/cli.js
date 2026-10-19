@@ -2,9 +2,9 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import readline from "node:readline/promises";
 
 import { CLIENTS, findClient } from "./clients.js";
+import { pick } from "./picker.js";
 
 const ENVIRONMENTS = {
   prod: "https://api.memro.co",
@@ -24,8 +24,8 @@ Usage
   npx memro-cli disconnect   Remove Memro from your tools and forget the key
 
 Options
-  --client <ids>             Only these tools, comma-separated (${CLIENTS.map((c) => c.id).join(", ")})
-  --yes, -y                  Don't ask before writing configs
+  --client <ids>             Only these tools, comma-separated, skipping the list (${CLIENTS.map((c) => c.id).join(", ")})
+  --yes, -y                  Don't ask: use every detected tool
   --staging | --local        Use staging or a local server instead of Memro Cloud
   --api <url>                Use a specific Memro API (self-hosted)
 `;
@@ -148,20 +148,39 @@ function selectClients(ids) {
   });
 }
 
-async function confirm(question) {
-  if (!process.stdin.isTTY) {
-    console.log("  Not a terminal: pass --yes to write configs without asking.");
-    return false;
+/**
+ * Which tools to configure: --client wins; --yes takes every detected tool;
+ * otherwise the user picks in a list with detected tools pre-selected.
+ * Returns null when the user cancels or nothing can be asked.
+ */
+async function chooseTargets(opts) {
+  if (opts.clients) return selectClients(opts.clients);
+  const detected = new Set(CLIENTS.filter((c) => c.detect()));
+  if (opts.yes) return [...detected];
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.log("  Not a terminal: pass --yes (every detected tool) or --client <ids>.");
+    return null;
   }
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const answer = (await rl.question(question)).trim().toLowerCase();
-  rl.close();
-  return answer === "" || answer === "y" || answer === "yes";
+  console.log("");
+  const picked = await pick(
+    CLIENTS.map((c) => ({ label: c.name, hint: detected.has(c) ? "" : "not detected", checked: detected.has(c), client: c })),
+    { title: "Which tools should use Memro?" },
+  );
+  return picked && picked.map((p) => p.client);
 }
 
 async function connect(opts) {
-  const targets = selectClients(opts.clients);
   console.log(`\n◆ Memro connect  (${opts.api})`);
+  // Choose first, so cancelling never creates an API key.
+  const targets = await chooseTargets(opts);
+  if (!targets) {
+    console.log("  Nothing changed.");
+    return;
+  }
+  if (targets.length === 0 && !opts.yes) {
+    console.log("  No tools selected. Nothing changed.");
+    return;
+  }
 
   let creds = loadCredentials();
   if (creds?.api_url === opts.api) {
@@ -185,11 +204,7 @@ async function connect(opts) {
     printManual(creds);
     return;
   }
-  console.log(`\n  Found: ${targets.map((c) => c.name).join(", ")}`);
-  if (!opts.yes && !(await confirm("  Add Memro to these tools? [Y/n] "))) {
-    console.log("  Nothing changed.");
-    return;
-  }
+  console.log(`\n  Adding Memro to: ${targets.map((c) => c.name).join(", ")}`);
 
   const conn = { mcpUrl: creds.mcp_url, apiKey: creds.api_key };
   let ok = 0;
