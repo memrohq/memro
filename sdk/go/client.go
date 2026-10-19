@@ -394,10 +394,11 @@ func (c *Client) UploadImage(ctx context.Context, name, contentType string, data
 	return &out, c.upload(ctx, "/upload/image", "image", name, contentType, data, nil, signer, &out)
 }
 
-// UploadDocument stores a PDF as ~1,500-character memories.
+// UploadDocument stores a PDF, Word, PowerPoint, Excel or text document as
+// ~1,500-character overlapping memories linked to the stored file.
 func (c *Client) UploadDocument(ctx context.Context, name string, data []byte, signer *Signer) ([]Memory, error) {
 	var out []Memory
-	return out, c.upload(ctx, "/upload/document", "document", name, "application/pdf", data, nil, signer, &out)
+	return out, c.upload(ctx, "/upload/document", "document", name, "", data, nil, signer, &out)
 }
 
 // ── Webhooks ──────────────────────────────────────────────────────────────

@@ -279,7 +279,7 @@ class Agent:
         return Memory(**self.client.upload_image(self.agent_id, self._private_key, file))
 
     def upload_document(self, file) -> List[Memory]:
-        """Store a PDF as ~1,500-character memories."""
+        """Store a PDF, Word, PowerPoint, Excel or text document as ~1,500-character memories."""
         return [Memory(**m) for m in self.client.upload_document(self.agent_id, self._private_key, file)]
 
     # ── Webhooks ────────────────────────────────────────────────────────────

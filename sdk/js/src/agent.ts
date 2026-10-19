@@ -147,7 +147,7 @@ export class Agent {
   }
   /** Describe an image with vision and store the description. */
   uploadImage(file: FileInput): Promise<Memory> { return this.client.uploadImage(file, this.signer); }
-  /** Store a PDF as ~1,500-character memories. */
+  /** Store a PDF, Word, PowerPoint, Excel or text document as ~1,500-character overlapping memories. */
   uploadDocument(file: FileInput): Promise<Memory[]> { return this.client.uploadDocument(file, this.signer); }
 
   // ── Webhooks ────────────────────────────────────────────────────────────

@@ -29,7 +29,7 @@ User-Agent: memro-webhooks/1
   carrier-grade NAT addresses are refused, both when you register the hook
   and when it is delivered (so DNS rebinding can't reach internal hosts).
 - Fires for `POST /memory`, `/memory/from-file` and `/upload/image`; not for
-  PDF chunks from `/upload/document` or memories the engine creates.
+  document chunks from `/upload/document` or memories the engine creates.
 
 Requests are not signed yet. Use an unguessable URL (for example with a
 random path segment) and treat the payload as untrusted input.

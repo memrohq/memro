@@ -325,7 +325,8 @@ class MemroClient:
         return self._json("POST", "/upload/image", files={"image": _file(file)}, agent_id=agent_id, private_key=private_key)
 
     def upload_document(self, agent_id: str, private_key: Optional[str], file: FileInput) -> List[dict]:
-        """Split a PDF into ~1,500-character memories."""
+        """Store a PDF, Word, PowerPoint, Excel or text document as ~1,500-character
+        overlapping memories linked to the file."""
         return self._json("POST", "/upload/document", files={"document": _file(file)}, agent_id=agent_id, private_key=private_key)
 
     # ── Webhooks ────────────────────────────────────────────────────────────

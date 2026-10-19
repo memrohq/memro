@@ -98,12 +98,25 @@ On top of storage and search, Memro keeps a graph of how memories relate
 
 ## Files
 
-`POST /upload` stores a file and extracts its text: PDFs, plain text and
-source code; images are described with a vision model and audio/video is
-transcribed (both need the OpenAI provider). `POST /memory/from-file` then
-turns that text into a memory. Shortcuts: `POST /upload/image` describes an
-image and stores the description as a memory, and `POST /upload/document`
-splits a PDF into ~1,500-character memories.
+`POST /upload` stores a file and extracts its text: PDF, Word (.docx),
+PowerPoint (.pptx), Excel (.xlsx), plain text and source code; images are
+described with a vision model and audio/video is transcribed (both need the
+OpenAI provider). `POST /memory/from-file` turns that text into a memory, or
+into several when it is longer than 10,000 characters.
+
+`POST /upload/document` does both in one step for documents: it stores the
+file and splits its text into memories.
+
+### Chunking
+
+Long text is split into chunks of at most 1,500 characters. The splitter
+keeps paragraphs together where they fit, otherwise whole sentences, and only
+cuts a word when the word alone is longer than a chunk. Each chunk starts
+with up to 200 characters of whole sentences from the end of the previous
+one, so a fact that spans a boundary is still found. Sentence detection
+understands abbreviations ("e.g.", "Dr."), initials, decimals and domain
+names. Each chunk is a semantic memory linked to its file, with
+`metadata: {"source": "<file name>", "file_id", "chunk": n, "chunks": total}`.
 
 Uploaded files are served at `GET /assets/{file_id}`. The random file ID
 works as a capability URL (usable in `<img>` tags), so treat it as a secret

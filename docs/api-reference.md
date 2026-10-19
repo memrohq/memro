@@ -203,15 +203,18 @@ Form fields: `file` (required), `agent_id` (required, your own).
 ```
 
 `file_type` is `pdf`, `image`, `audio`, `text`, `docx`, `xlsx`, `pptx` or
-`unknown`. Text is extracted from PDFs and text/code files; images are
-described and audio/video transcribed when the server has an OpenAI key.
-`extracted_text` is null when nothing could be extracted.
+`unknown`. Text is extracted from PDF, Word, PowerPoint, Excel and text/code
+files; images are described and audio/video transcribed when the server has
+an OpenAI key. `extracted_text` is null when nothing could be extracted
+(legacy .doc/.xls/.ppt are stored but not read).
 
 ### 🔒 `POST /memory/from-file`
 
 Body `{"file_id": "…", "memory_type": "semantic", "visibility": "private"}` →
-`{"memory_id": "…", "file_id": "…", "content": "…"}`. The memory's content is
-the extracted text (first 10,000 characters).
+`{"memory_id": "…", "memory_ids": ["…"], "chunks": 1, "file_id": "…", "content": "…"}`.
+The memory's content is the extracted text. Text longer than 10,000
+characters is [chunked](concepts.md#chunking) into several memories:
+`memory_ids` lists them and `memory_id` is the first.
 
 ### 🔒 `POST /upload/image`
 
@@ -221,9 +224,12 @@ Returns the memory. Needs an OpenAI key on the server.
 
 ### 🔒 `POST /upload/document`
 
-Form field `document` (PDF). Splits the text into ~1,500-character semantic
-memories and returns them as an array. Counts each chunk against the memory
-limit.
+Form field `document`: a PDF, Word, PowerPoint, Excel or text file (type
+detected from the name, or the content). Stores the file and its text as
+[chunks](concepts.md#chunking) of up to 1,500 characters, returned as an
+array of memories, each with `file_id` and `metadata.chunk`/`chunks`. Each
+chunk counts against the memory limit. `400` for unsupported or unreadable
+files.
 
 ### `GET /assets/{file_id}`
 

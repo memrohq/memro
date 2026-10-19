@@ -68,7 +68,7 @@ import { readFile } from 'node:fs/promises';
 await agent.uploadFile({ name: 'notes.pdf', data: await readFile('notes.pdf'), type: 'application/pdf' });
 await agent.uploadFile(fileInput.files[0], { remember: false });   // a Blob/File works too
 await agent.uploadImage({ name: 'board.png', data: png, type: 'image/png' });
-await agent.uploadDocument({ name: 'handbook.pdf', data: pdf });
+await agent.uploadDocument({ name: 'handbook.docx', data: docx });   // PDF, Word, PowerPoint, Excel, text
 
 await agent.addWebhook('https://example.com/memro-hook');
 await agent.webhooks();

@@ -71,7 +71,7 @@ agent.usage()                           # dict
 up = agent.upload_file("notes.pdf")                    # stores the file and a memory of its text
 up = agent.upload_file(("notes.txt", b"...", "text/plain"), remember=False)
 agent.upload_image("whiteboard.png")                   # Memory with a description
-agent.upload_document("handbook.pdf")                  # list[Memory], ~1,500 chars each
+agent.upload_document("handbook.docx")                 # PDF/Word/PowerPoint/Excel/text -> list[Memory]
 
 agent.add_webhook("https://example.com/memro-hook")
 agent.webhooks()

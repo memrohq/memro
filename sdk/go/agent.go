@@ -270,7 +270,8 @@ func (a *Agent) UploadImage(ctx context.Context, name, contentType string, data 
 	return a.Client.UploadImage(ctx, name, contentType, data, a.signer)
 }
 
-// UploadDocument stores a PDF as ~1,500-character memories.
+// UploadDocument stores a PDF, Word, PowerPoint, Excel or text document as
+// ~1,500-character overlapping memories.
 func (a *Agent) UploadDocument(ctx context.Context, name string, data []byte) ([]Memory, error) {
 	return a.Client.UploadDocument(ctx, name, data, a.signer)
 }

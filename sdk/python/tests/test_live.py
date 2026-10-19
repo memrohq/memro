@@ -32,7 +32,7 @@ def test_signed_agent_end_to_end(agent):
     assert any(r.memory_id == m.id for r in agent.recall_temporal("billing service"))
     assert {x.id for x in agent.get_recent(limit=10)} >= {m.id}
     assert agent.stats().total_memories == 2
-    assert agent.export().total == 2
+    assert agent.export().total == 2  # before uploads add more
     assert agent.reason("what is the billing service written in").answer
     assert agent.timeline(m.id).memory_id == m.id
     assert agent.memory_chain(m.id).root_memory.memory_id == m.id
@@ -41,6 +41,11 @@ def test_signed_agent_end_to_end(agent):
 
     up = agent.upload_file(("notes.txt", b"Quarterly planning starts in March", "text/plain"))
     assert "Quarterly planning" in (up.extracted_text or "") and up.memory_id
+
+    long_text = ("Retries happen three times before paging on-call. " * 60).encode()
+    chunks = agent.upload_document(("runbook.md", long_text, "text/markdown"))
+    assert len(chunks) >= 2 and all(len(c.content) <= 1500 and c.file_id == chunks[0].file_id for c in chunks)
+    assert chunks[0].metadata["chunks"] == len(chunks)
 
     agent.add_webhook("https://hooks.example.com/memro")
     assert agent.webhooks() == ["https://hooks.example.com/memro"]

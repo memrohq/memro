@@ -5,7 +5,9 @@ Memro API. Skipped unless MEMRO_TEST_BASE_URL is set.
 import asyncio
 import json
 import os
+import socket
 import subprocess
+import urllib.request
 import sys
 import time
 
@@ -24,13 +26,21 @@ def test_every_tool_works_end_to_end(monkeypatch):
     key = owner.client._json("POST", "/api-keys", json_body={"name": "mcp test"},
                              agent_id=owner.agent_id, private_key=owner._private_key)["key"]
     # A separate process: the MCP session manager starts once per process.
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
     env = {**os.environ, "MEMRO_BASE_URL": BASE, "MCP_TRANSPORT": "sse"}
-    proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "memro_mcp.server:starlette_app", "--port", "8797",
+    proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "memro_mcp.server:starlette_app", "--port", str(port),
                              "--log-level", "warning"], env=env)
-    time.sleep(3)
+    for _ in range(100):
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=1)
+            break
+        except OSError:
+            time.sleep(0.1)
 
     async def run():
-        async with streamablehttp_client("http://127.0.0.1:8797/mcp", headers={"Authorization": f"Bearer {key}"}) as (r, w, _):
+        async with streamablehttp_client(f"http://127.0.0.1:{port}/mcp", headers={"Authorization": f"Bearer {key}"}) as (r, w, _):
             async with ClientSession(r, w) as s:
                 await s.initialize()
                 tools = {t.name for t in (await s.list_tools()).tools}
@@ -61,6 +71,8 @@ def test_every_tool_works_end_to_end(monkeypatch):
                 await call("log_intent", resource="docs", intent="write the quickstart")
                 await call("get_active_work")
                 await call("get_active_context", resource="billing")
+                await call("release_task", resource="billing")
+                await call("claim_task", resource="billing", intent="second pass")  # released claims don't block
                 await call("release_task", resource="billing")
                 await call("handoff_task", resource="docs", summary="quickstart drafted")
                 await call("export_memories")
