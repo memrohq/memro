@@ -101,73 +101,19 @@ def get_supermemory_tools():
         Tool(
             name="find_contradictions",
             description=(
-                "Analyze stored memories for contradictions. Helps identify when beliefs "
-                "have changed or conflicting information was stored."
+                "Summarize contradictions the memory engine has found: how many beliefs were "
+                "updated by newer memories and how many are still unresolved. Use mee_resolve "
+                "to settle a specific pair."
             ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "topic": {
-                        "type": "string",
-                        "description": "Optional: narrow analysis to a specific topic",
-                    },
-                    "threshold": {
-                        "type": "number",
-                        "minimum": 0.0,
-                        "maximum": 1.0,
-                        "default": 0.6,
-                        "description": "Contradiction confidence threshold (0.6 = 60% confidence of contradiction)",
-                    },
-                },
-            },
+            inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
             name="get_temporal_stats",
             description=(
-                "Get temporal statistics about your memories. Shows distribution over time, "
-                "frequency patterns, and memory creation trends."
+                "Get statistics about your memories: totals for today, this week and this "
+                "month, average days between memories, and the count per memory type."
             ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "days": {
-                        "type": "integer",
-                        "default": 90,
-                        "description": "Analyze memories from the last N days",
-                    },
-                },
-            },
-        ),
-        Tool(
-            name="remember_with_context",
-            description=(
-                "Store a memory with rich temporal context. Automatically extracts "
-                "when events occurred vs when they're discussed, enabling better temporal reasoning."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "content": {
-                        "type": "string",
-                        "description": "What to remember",
-                    },
-                    "event_date": {
-                        "type": "string",
-                        "description": "When the event actually occurred (ISO 8601 or natural language)",
-                    },
-                    "type": {
-                        "type": "string",
-                        "enum": ["episodic", "semantic", "procedural", "profile"],
-                        "default": "episodic",
-                    },
-                    "is_atomic": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "Mark as atomic fact (single statement) vs chunk (narrative)",
-                    },
-                },
-                "required": ["content"],
-            },
+            inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
             name="generate_atomic_facts",

@@ -30,6 +30,8 @@ try:
 except ImportError:
     uvloop_available = False
 
+SERVER_VERSION = "0.2.0"
+
 # --- Core Objects (Module Level for Uvicorn Workers) ---
 server = Server("memro-memory")
 # Use a path that will be appended to our mount point
@@ -65,8 +67,8 @@ API_KEY_PREFIX = "memro_sk_"
 class ForwardingClient(MemroClient):
     """MemroClient that tells the API which end user a request is for."""
 
-    def _auth_headers(self, agent_id: str, private_key: str, body: bytes) -> dict:
-        headers = super()._auth_headers(agent_id, private_key, body)
+    def _headers(self, method, path_and_query, body, agent_id, private_key) -> dict:
+        headers = super()._headers(method, path_and_query, body, agent_id, private_key)
         ip = current_client_ip.get()
         if ip:
             headers["X-Real-IP"] = ip
@@ -371,288 +373,142 @@ def _all_tools() -> list[Tool]:
         *get_supermemory_tools()
     ]
 
+def _text(value) -> CallToolResult:
+    if not isinstance(value, str):
+        value = json.dumps(value, indent=2, default=str)
+    return CallToolResult(content=[TextContent(type="text", text=value)])
+
+
+def _dump(model) -> dict:
+    return model.model_dump(mode="json") if hasattr(model, "model_dump") else model
+
+
+def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolResult:
+    """Executes one tool. Runs in a worker thread: the SDK is synchronous."""
+    if name == "remember":
+        memory = agent.remember(content=args.get("content"), type=args.get("type", "episodic"),
+                                visibility=args.get("visibility", "private"))
+        return _text(f"Remembered: {memory.content[:100]} (ID: {memory.id})")
+
+    if name == "remember_with_context":
+        memory = agent.remember(content=args.get("content"), type=args.get("type", "episodic"),
+                                event_date=args.get("event_date"), session_id=args.get("session_id"))
+        return _text(f"Remembered with context: {memory.content[:100]} (ID: {memory.id})")
+
+    if name in ("recall", "recall_multi_session"):
+        results = agent.recall(query=args.get("query"), limit=args.get("limit", 5 if name == "recall" else 15),
+                               type=args.get("type"))
+        return _text([{"id": r.memory_id, "content": r.content, "type": r.memory_type, "score": r.score,
+                       "created_at": r.created_at} for r in results])
+
+    if name == "get_recent_memories":
+        memories = agent.get_recent(limit=args.get("limit", 10), type=args.get("type"))
+        return _text([{"id": m.id, "content": m.content, "type": m.memory_type,
+                       "created_at": m.created_at.isoformat(), "metadata": m.metadata or {}} for m in memories])
+
+    if name == "delete_memory":
+        return _text("Memory deleted." if agent.delete_memory(args.get("memory_id")) else "Memory not found.")
+
+    if name == "export_memories":
+        return _text(f"Exported {agent.export().total} memories.")
+
+    if name == "search_temporal":
+        results = agent.recall_temporal(
+            query=args.get("query"), limit=args.get("limit", 10),
+            after_date=args.get("after_date"), before_date=args.get("before_date"),
+            after_event=args.get("after_event_date"), before_event=args.get("before_event_date"),
+            session_id=args.get("session_id"), atomic_only=args.get("atomic_only"),
+            temporal_weight=args.get("temporal_weight", 0.3),
+        )
+        if not results:
+            return _text("No matching memories.")
+        return _text("\n".join(f"- {r.content} ({r.temporal_context})" for r in results))
+
+    if name == "get_temporal_stats":
+        return _text(_dump(agent.stats()))
+
+    if name == "get_memory_chain":
+        return _text(_dump(agent.memory_chain(args.get("memory_id"))))
+
+    if name in ("find_contradictions", "analyze_conflicts"):
+        return _text(agent.client.analyze_conflicts(agent.agent_id, agent._private_key))
+
+    if name == "generate_atomic_facts":
+        return _text(agent.client.generate_atoms(agent.agent_id, agent._private_key, args.get("text", "")))
+
+    if name == "mee_reason":
+        r = agent.reason(args.get("query"))
+        return _text({"answer": r.answer, "confidence": r.confidence, "why": r.why,
+                      "based_on": r.based_on, "paths": r.paths})
+
+    if name == "mee_resolve":
+        return _text(agent.resolve_conflict(args.get("memory_a_id"), args.get("memory_b_id")))
+
+    if name == "mee_evolve":
+        return _text(_dump(agent.evolve()))
+
+    if name == "get_timeline":
+        return _text(_dump(agent.timeline(args.get("memory_id"))))
+
+    if name == "pre_action_check":
+        return _text(CoordinationEngine(agent, session_id).can_act(args.get("resource"), args.get("intent")))
+
+    if name == "claim_task":
+        resource, intent = args.get("resource"), args.get("intent")
+        check = CoordinationEngine(agent, session_id).can_act(resource, intent)
+        if check["decision"] == Decision.BLOCK:
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=f"Block: {check['reason']}")])
+        agent.remember(content=f"[CLAIMED] {resource}: {intent}", type="procedural", metadata={
+            "action": "claim", "resource": resource, "status": "active", "session_id": session_id, "agent_id": agent.agent_id})
+        return _text(f"Resource '{resource}' claimed in session '{session_id}'.")
+
+    if name == "release_task":
+        resource, status = args.get("resource"), args.get("status", "completed")
+        agent.remember(content=f"[RELEASED] {resource} ({status})", type="procedural", metadata={
+            "action": "release", "resource": resource, "status": status, "session_id": session_id, "agent_id": agent.agent_id})
+        return _text(f"Resource '{resource}' released.")
+
+    if name == "log_intent":
+        intent, resource = args.get("intent"), args.get("resource")
+        agent.remember(content=f"[INTENT] {resource}: {intent}", type="procedural", metadata={
+            "action": "intent", "resource": resource, "session_id": session_id, "agent_id": agent.agent_id})
+        return _text(f"Intent for {resource} logged.")
+
+    if name in ("get_active_work", "get_active_context"):
+        claims, intents = CoordinationEngine(agent, session_id)._get_active_claims(args.get("resource"))
+        return _text({"claims": claims, "intents": intents})
+
+    if name == "handoff_task":
+        resource, summary, nxt = args.get("resource"), args.get("summary"), args.get("next_agent_id")
+        agent.remember(content=f"[HANDOFF] from {agent.agent_id}: {summary}", type="procedural", metadata={
+            "action": "handoff", "resource": resource, "from": agent.agent_id, "to": nxt or "Anyone", "session_id": session_id})
+        agent.remember(content=f"[RELEASED] {resource} (handoff)", type="procedural", metadata={
+            "action": "release", "resource": resource, "status": "handoff", "session_id": session_id, "agent_id": agent.agent_id})
+        return _text(f"Handoff completed for {resource}.")
+
+    if name == "get_system_status":
+        return _text({"status": "online", "version": SERVER_VERSION, "agent_id": agent.agent_id,
+                      "api": agent.client.base_url, "api_health": agent.client.health()})
+
+    return CallToolResult(isError=True, content=[TextContent(type="text", text=f"Unknown tool: {name}")])
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> CallToolResult:
-    """Standard Tool Execution with Session/Agent scoping."""
+    """Runs a tool as the connection's agent, off the event loop so one slow
+    API call does not stall other users' requests."""
     try:
-        session_id = current_session_id.get()
         agent = current_request_agent()
         logger.info(f"Tool call: {name} | agent={agent.agent_id[:12]}")
-        
-        if name == "remember":
-            content = arguments.get("content")
-            m_type = arguments.get("type", "episodic")
-            visibility = arguments.get("visibility", "private")
-            memory = agent.remember(content=content, type=m_type, visibility=visibility)
-            return CallToolResult(content=[TextContent(type="text", text=f"Remembered: {memory.content[:100]}... (ID: {memory.id})")])
-
-        elif name == "recall":
-            query = arguments.get("query")
-            limit = arguments.get("limit", 5)
-            m_type = arguments.get("type")
-            results = agent.recall(query=query, limit=limit, type=m_type)
-            if not results:
-                return CallToolResult(content=[TextContent(type="text", text=json.dumps([]))])
-            
-            # Return structured list for DevTools
-            serializable = [
-                {
-                    "id": r.memory_id,
-                    "content": r.content,
-                    "type": r.memory_type,
-                    "score": r.score,
-                    "metadata": getattr(r, 'metadata', {})
-                } for r in results
-            ]
-            return CallToolResult(content=[TextContent(type="text", text=json.dumps(serializable))])
-
-        elif name == "delete_memory":
-            mid = arguments.get("memory_id")
-            success = agent.delete_memory(mid)
-            return CallToolResult(content=[TextContent(type="text", text="Memory deleted." if success else "Failed to delete memory.")])
-
-        elif name == "export_memories":
-            data = agent.export()
-            return CallToolResult(content=[TextContent(type="text", text=f"Exported {len(data.memories)} memories.")])
-
-        elif name == "get_recent_memories":
-            limit = arguments.get("limit", 10)
-            m_type = arguments.get("type")
-            results = agent.get_recent(limit=limit, type=m_type)
-            if not results:
-                return CallToolResult(content=[TextContent(type="text", text=json.dumps([]))])
-            
-            serializable = [
-                {
-                    "id": m.id,
-                    "content": m.content,
-                    "type": m.memory_type,
-                    "metadata": getattr(m, 'metadata', {})
-                } for m in results
-            ]
-            return CallToolResult(content=[TextContent(type="text", text=json.dumps(serializable))])
-
-        elif name == "search_temporal":
-            params = {
-                "agent_id": agent.agent_id,
-                "query": arguments.get("query"),
-                "limit": arguments.get("limit", 10),
-                "after_date": arguments.get("after_date"),
-                "before_date": arguments.get("before_date"),
-                "temporal_weight": arguments.get("temporal_weight", 0.3),
-                "atomic_only": arguments.get("atomic_only"),
-            }
-            params = {k: v for k, v in params.items() if v is not None}
-            headers = agent.client._auth_headers(agent.agent_id, agent._private_key, b"")
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(f"{agent.client.base_url}/search/temporal", params=params, headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-            results = data.get("results", [])
-            output = "\n".join([f"- {r['content']} ({r['temporal_context']})" for r in results])
-            return CallToolResult(content=[TextContent(type="text", text=f"Temporal Search Results:\n{output}")])
-
-        elif name == "get_temporal_stats":
-            headers = agent.client._auth_headers(agent.agent_id, agent._private_key, b"")
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(f"{agent.client.base_url}/stats/temporal", headers=headers)
-                resp.raise_for_status()
-                stats = resp.json()
-            return CallToolResult(content=[TextContent(type="text", text=json.dumps(stats, indent=2))])
-
-        elif name == "remember_with_context":
-            content = arguments.get("content")
-            memory = agent.remember(
-                content=content, 
-                type=arguments.get("type", "episodic"),
-                event_date=arguments.get("event_date")
-            )
-            return CallToolResult(content=[TextContent(type="text", text=f"Remembered with context: {memory.content[:100]}... (ID: {memory.id})")])
-
-        elif name == "generate_atomic_facts":
-            headers = agent.client._auth_headers(agent.agent_id, agent._private_key, b"")
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    f"{agent.client.base_url}/memory/generate-atoms", 
-                    json={"chunk": arguments.get("text"), "context": arguments.get("context")},
-                    headers=headers
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            return CallToolResult(content=[TextContent(type="text", text=json.dumps(data, indent=2))])
-
-        elif name == "mee_reason":
-            headers = agent.client._auth_headers(agent.agent_id, agent._private_key, b"")
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    f"{agent.client.base_url}/mee/reason", 
-                    json={"query": arguments.get("query")},
-                    headers=headers
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                # Ensure structure for Reasoning Inspector
-                payload = {
-                    "answer": data.get("answer", ""),
-                    "confidence": data.get("confidence", 0.0),
-                    "sources": data.get("sources", []), # List of source memories
-                    "logic": data.get("reasoning_path", "Hybrid semantic/recency inference")
-                }
-            return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload))])
-
-        elif name == "mee_resolve":
-            headers = agent.client._auth_headers(agent.agent_id, agent._private_key, b"")
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    f"{agent.client.base_url}/mee/resolve", 
-                    json={"memory_a_id": arguments.get("memory_a_id"), "memory_b_id": arguments.get("memory_b_id")},
-                    headers=headers
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            return CallToolResult(content=[TextContent(type="text", text=json.dumps(data, indent=2))])
-
-        elif name == "mee_evolve":
-            headers = agent.client._auth_headers(agent.agent_id, agent._private_key, b"")
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(f"{agent.client.base_url}/mee/evolve", headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-            return CallToolResult(content=[TextContent(type="text", text=json.dumps(data, indent=2))])
-
-        elif name == "get_timeline":
-            mid = arguments.get("memory_id")
-            headers = agent.client._auth_headers(agent.agent_id, agent._private_key, b"")
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(f"{agent.client.base_url}/mee/timeline/{mid}", headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-            return CallToolResult(content=[TextContent(type="text", text=json.dumps(data, indent=2))])
-
-        elif name == "pre_action_check":
-            engine = CoordinationEngine(agent, session_id)
-            decision = engine.can_act(arguments.get("resource"), arguments.get("intent"))
-            return CallToolResult(content=[TextContent(type="text", text=json.dumps(decision))])
-
-        elif name == "claim_task":
-            resource = arguments.get("resource")
-            intent = arguments.get("intent")
-            engine = CoordinationEngine(agent, session_id)
-            
-            # Auto-check before claim
-            check = engine.can_act(resource, intent)
-            if check["decision"] == Decision.BLOCK:
-                return CallToolResult(isError=True, content=[TextContent(type="text", text=f"Block: {check['reason']}")])
-            
-            agent.remember(
-                content=f"[CLAIMED] {resource}: {intent}",
-                type="procedural",
-                metadata={
-                    "action": "claim", 
-                    "resource": resource, 
-                    "status": "active",
-                    "session_id": session_id,
-                    "agent_id": agent.agent_id
-                }
-            )
-            return CallToolResult(content=[TextContent(type="text", text=f"Resource '{resource}' claimed successfully in session '{session_id}'.")])
-
-        elif name == "release_task":
-            resource = arguments.get("resource")
-            status = arguments.get("status", "completed")
-            agent.remember(
-                content=f"[RELEASED] {resource} ({status})",
-                type="procedural",
-                metadata={
-                    "action": "release", 
-                    "resource": resource, 
-                    "status": status,
-                    "session_id": session_id,
-                    "agent_id": agent.agent_id
-                }
-            )
-            return CallToolResult(content=[TextContent(type="text", text=f"Resource '{resource}' released.")])
-
-        elif name == "log_intent":
-            intent = arguments.get("intent")
-            resource = arguments.get("resource")
-            agent.remember(
-                content=f"[INTENT] {resource}: {intent}",
-                type="procedural",
-                metadata={
-                    "action": "intent", 
-                    "resource": resource,
-                    "session_id": session_id,
-                    "agent_id": agent.agent_id
-                }
-            )
-            return CallToolResult(content=[TextContent(type="text", text=f"Intent for {resource} logged.")])
-
-        elif name == "get_active_work":
-            engine = CoordinationEngine(agent, session_id)
-            claims, intents = engine._get_active_claims(None)
-            return CallToolResult(content=[TextContent(type="text", text=json.dumps({"claims": claims, "intents": intents}))])
-
-        elif name == "get_active_context":
-            engine = CoordinationEngine(agent, session_id)
-            resource = arguments.get("resource")
-            claims, intents = engine._get_active_claims(resource)
-            return CallToolResult(content=[TextContent(type="text", text=json.dumps({"claims": claims, "intents": intents}))])
-
-        elif name == "handoff_task":
-            resource = arguments.get("resource")
-            summary = arguments.get("summary")
-            next_agent_id = arguments.get("next_agent_id")
-            
-            agent.remember(
-                content=f"[HANDOFF] from {agent.agent_id}: {summary}",
-                type="procedural",
-                metadata={
-                    "action": "handoff",
-                    "resource": resource,
-                    "from": agent.agent_id,
-                    "to": next_agent_id or "Anyone",
-                    "session_id": session_id
-                }
-            )
-            
-            # Release the claim
-            agent.remember(
-                content=f"[RELEASED] {resource} (handoff)",
-                type="procedural",
-                metadata={
-                    "action": "release", 
-                    "resource": resource, 
-                    "status": "handoff",
-                    "session_id": session_id,
-                    "agent_id": agent.agent_id
-                }
-            )
-            
-            return CallToolResult(content=[TextContent(type="text", text=f"Handoff completed for {resource}.")])
-
-        elif name == "get_system_status":
-            return CallToolResult(content=[TextContent(type="text", text=json.dumps({
-                "status": "online",
-                "version": "0.1.0",
-                "engine": "CoordinationEngine active",
-                "mcp_version": "1.0.0"
-            }))])
-
-        elif name in ["recall_multi_session", "get_memory_chain", "find_contradictions", "analyze_conflicts"]:
-            # These are legacy aliases or in-prog, handle gracefully
-            msg = f"Tool '{name}' is being merged into the newer MEE toolset. Please use 'mee_reason', 'search_temporal', or 'get_timeline' for best results."
-            return CallToolResult(content=[TextContent(type="text", text=msg)])
-
-        return CallToolResult(isError=True, content=[TextContent(type="text", text=f"Unknown tool: {name}")])
-
+        # to_thread copies the context, so the caller's IP is still forwarded.
+        return await asyncio.to_thread(_run_tool, agent, current_session_id.get(), name, arguments or {})
+    except MemroError as e:
+        return CallToolResult(isError=True, content=[TextContent(type="text", text=f"Memro API error {e.status_code}: {e.message}")])
     except Exception as e:
         logger.exception("Error in call_tool")
-        return CallToolResult(isError=True, content=[TextContent(type="text", text=f"Tool execution failed: {str(e)}")])
+        return CallToolResult(isError=True, content=[TextContent(type="text", text=f"Tool execution failed: {e}")])
 
 # --- ASGI / SSE Application Logic ---
-
-import httpx
 # --- Middleware for Auth/Context ---
 
 class AuthMiddleware:

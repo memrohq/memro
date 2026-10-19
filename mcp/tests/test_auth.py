@@ -61,7 +61,7 @@ def test_api_calls_carry_the_end_users_ip():
     client = srv.ForwardingClient("http://api.invalid", api_key="memro_sk_a")
     token = srv.current_client_ip.set("203.0.113.7")
     try:
-        assert client._auth_headers("", "", b"")["X-Real-IP"] == "203.0.113.7"
+        assert client._headers("GET", "/search", b"", None, None)["X-Real-IP"] == "203.0.113.7"
     finally:
         srv.current_client_ip.reset(token)
-    assert "X-Real-IP" not in client._auth_headers("", "", b"")
+    assert "X-Real-IP" not in client._headers("GET", "/search", b"", None, None)
