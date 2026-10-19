@@ -1,0 +1,101 @@
+# JavaScript / TypeScript SDK
+
+```bash
+npm install @memro/sdk     # Node.js 18+, Deno, Bun, browsers; ESM and CommonJS
+```
+
+Uses the platform `fetch`; the only dependency is `tweetnacl` for signing.
+
+## Connect
+
+```ts
+import { Agent } from '@memro/sdk';
+
+const agent = await Agent.fromEnv();                          // MEMRO_API_KEY (+ MEMRO_BASE_URL)
+const agent2 = await Agent.fromApiKey('memro_sk_...');        // Memro Cloud
+const local = await Agent.fromApiKey(key, { baseUrl: 'http://localhost:8081' });
+```
+
+Don't ship API keys to browsers; call Memro from your server.
+
+Self-owned identity (Node.js file helpers shown):
+
+```ts
+const agent = await Agent.create();           // key pair generated locally
+await agent.save('identity.json');            // mode 0600; keep secret
+const same = await Agent.fromFile('identity.json');
+```
+
+## Memories
+
+```ts
+const m = await agent.remember('The billing service was rewritten in Go', {
+  type: 'semantic',            // omit or 'auto' to let the server classify
+  visibility: 'private',
+  eventDate: '2026-03-01T00:00:00Z',
+  metadata: { source: 'standup' },
+});
+await agent.getRecent({ limit: 20, type: 'profile' });
+await agent.deleteMemory(m.id);               // false if it didn't exist
+await agent.export();
+```
+
+## Search
+
+```ts
+const results = await agent.recall('what language is billing in?', { limit: 5, mode: 'hybrid', minScore: 0.3 });
+const recent = await agent.recallTemporal('deploy incidents', { afterDate: '2026-09-01T00:00:00Z', temporalWeight: 0.6 });
+```
+
+## Memory engine
+
+```ts
+const ans = await agent.reason('why did 500s spike after the billing release?');
+await agent.evolve();
+await agent.resolveConflict(aId, bId);
+await agent.memoryChain(m.id);
+await agent.timeline(m.id);
+await agent.analyzeConflicts();
+await agent.stats();
+await agent.usage();
+```
+
+## Files and webhooks
+
+```ts
+import { readFile } from 'node:fs/promises';
+
+await agent.uploadFile({ name: 'notes.pdf', data: await readFile('notes.pdf'), type: 'application/pdf' });
+await agent.uploadFile(fileInput.files[0], { remember: false });   // a Blob/File works too
+await agent.uploadImage({ name: 'board.png', data: png, type: 'image/png' });
+await agent.uploadDocument({ name: 'handbook.pdf', data: pdf });
+
+await agent.addWebhook('https://example.com/memro-hook');
+await agent.webhooks();
+await agent.removeWebhook('https://example.com/memro-hook');
+```
+
+## Errors and retries
+
+```ts
+import { MemroError, RateLimitError } from '@memro/sdk';
+
+try {
+  await agent.remember('…');
+} catch (e) {
+  if (e instanceof RateLimitError) { /* 429 after retries */ }
+  else if (e instanceof MemroError) console.log(e.status, e.message);
+}
+```
+
+Options: `{ baseUrl, apiKey, timeout: 30_000, maxRetries: 2, fetch }`.
+429s are retried (honouring `Retry-After`); gateway errors only for `GET`
+and `DELETE`.
+
+## Low-level client
+
+`agent.client` is a `MemroClient` with one method per endpoint and
+`request(method, path, { query, json, form, signer })` for anything else.
+Without an API key, requests are signed with
+[v2 signatures](../authentication.md#signed-requests) (`signRequest` is
+exported if you need it elsewhere).

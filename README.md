@@ -68,6 +68,7 @@ curl http://localhost:8081/health
 | [`integrations/`](integrations) | VS Code and Acode extensions |
 | [`apps/dashboard/`](apps/dashboard) | Developer dashboard |
 | [`deploy/`](deploy), [`docs/deploy/`](docs/deploy) | Self-hosting configs and guides |
+| [`docs/`](docs/README.md) | Developer documentation: quickstart, API reference, SDKs, MCP |
 | [`docs/spec/`](docs/spec) | Protocol specification |
 | [`bench/`](bench) | Benchmarks |
 
@@ -179,9 +180,6 @@ See [docs/deploy/gcp.md](docs/deploy/gcp.md)
 #### DigitalOcean (Droplet + Managed DB)
 See [docs/deploy/digitalocean.md](docs/deploy/digitalocean.md)
 
-#### Kubernetes
-See [docs/deploy/kubernetes.md](docs/deploy/kubernetes.md)
-
 ---
 
 ## Configuration
@@ -284,7 +282,7 @@ commercial license from us via [memro.co](https://memro.co).
 
 ## Support
 
-- **Documentation**: [docs.memro.co](https://docs.memro.co)
+- **Documentation**: [docs/](docs/README.md)
 - **GitHub Issues**: [github.com/memrohq/memro/issues](https://github.com/memrohq/memro/issues)
 - **Discord**: [discord.gg/memro](https://discord.gg/memro)
 - **Email**: support@memro.co
