@@ -13,13 +13,15 @@ A VS Code extension that provides persistent memory capabilities via the Memro M
 ssssss
 ## Setup
 
-1. Start Memro backend:
-   - See instructions in the Memro repository
-2. Start memro-mcp to generate credentials (first run)
+1. Get an API key: run `npx memro connect`, or create one in the dashboard
+   (app.memro.co → API keys).
+2. Open this folder in VS Code and run the extension (F5).
+3. Run **Memro: Set API Key** and paste the `memro_sk_…` key. It is stored in
+   VS Code's secret storage (your OS keychain), not in settings.
+4. Self-hosting? Set `memro.mcpUrl` to your MCP server, e.g.
+   `http://localhost:8080/mcp`. Memro Cloud (`https://mcp.memro.co/mcp`) is the default.
 
-3. Open this folder in VS Code and run the extension (F5)
-
-4. Enter credentials when prompted (Agent ID and Private Key)
+**Memro: Sign Out** removes the key from this machine.
 
 ## Build & Run
 

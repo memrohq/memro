@@ -2,7 +2,7 @@
   "name": "memro-vscode-extension",
   "displayName": "Memro MCP Extension",
   "description": "VS Code extension for Memro MCP integration",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "memro",
   "license": "PolyForm-Noncommercial-1.0.0",
   "repository": {
@@ -14,25 +14,70 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other"],
+  "categories": [
+    "Other"
+  ],
   "activationEvents": [
     "onView:memro.memoryExplorer",
     "onCommand:memro.remember",
     "onCommand:memro.recall",
     "onCommand:memro.claim",
-    "onCommand:memro.logIntent"
+    "onCommand:memro.logIntent",
+    "onCommand:memro.setApiKey"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
-      { "command": "memro.remember", "title": "Memro: Remember", "category": "Memro" },
-      { "command": "memro.recall", "title": "Memro: Recall", "category": "Memro" },
-      { "command": "memro.getRecent", "title": "Memro: Get Recent Memories", "category": "Memro" },
-      { "command": "memro.deleteMemory", "title": "Memro: Delete Memory", "category": "Memro" },
-      { "command": "memro.exportMemories", "title": "Memro: Export Memories", "category": "Memro" },
-      { "command": "memro.queryGraph", "title": "Memro: Query Knowledge Graph", "category": "Memro" },
-      { "command": "memro.claim", "title": "⬢ Memro: Claim File/Task", "category": "Memro" },
-      { "command": "memro.logIntent", "title": "⬢ Memro: Declare Intent", "category": "Memro" },
+      {
+        "command": "memro.setApiKey",
+        "title": "Memro: Set API Key",
+        "category": "Memro"
+      },
+      {
+        "command": "memro.signOut",
+        "title": "Memro: Sign Out",
+        "category": "Memro"
+      },
+      {
+        "command": "memro.remember",
+        "title": "Memro: Remember",
+        "category": "Memro"
+      },
+      {
+        "command": "memro.recall",
+        "title": "Memro: Recall",
+        "category": "Memro"
+      },
+      {
+        "command": "memro.getRecent",
+        "title": "Memro: Get Recent Memories",
+        "category": "Memro"
+      },
+      {
+        "command": "memro.deleteMemory",
+        "title": "Memro: Delete Memory",
+        "category": "Memro"
+      },
+      {
+        "command": "memro.exportMemories",
+        "title": "Memro: Export Memories",
+        "category": "Memro"
+      },
+      {
+        "command": "memro.queryGraph",
+        "title": "Memro: Query Knowledge Graph",
+        "category": "Memro"
+      },
+      {
+        "command": "memro.claim",
+        "title": "\u2b22 Memro: Claim File/Task",
+        "category": "Memro"
+      },
+      {
+        "command": "memro.logIntent",
+        "title": "\u2b22 Memro: Declare Intent",
+        "category": "Memro"
+      },
       {
         "command": "memro.release",
         "title": "Memro: Release Resource",
@@ -66,7 +111,11 @@
     },
     "menus": {
       "editor/title": [
-        { "command": "memro.remember", "group": "navigation", "when": "editorTextFocus" }
+        {
+          "command": "memro.remember",
+          "group": "navigation",
+          "when": "editorTextFocus"
+        }
       ],
       "explorer/context": [
         {
@@ -93,20 +142,10 @@
     "configuration": {
       "title": "Memro",
       "properties": {
-        "memro.mcpBaseUrl": {
+        "memro.mcpUrl": {
           "type": "string",
-          "default": "http://localhost:8080/sse",
-          "description": "Base URL for the Memro MCP SSE server."
-        },
-        "memro.agentId": {
-          "type": "string",
-          "default": "",
-          "description": "Your Memro Agent ID."
-        },
-        "memro.privateKey": {
-          "type": "string",
-          "default": "",
-          "description": "Your Memro Private Key."
+          "default": "https://mcp.memro.co/mcp",
+          "description": "Memro MCP server (Streamable HTTP). Self-hosted: http://localhost:8080/mcp. The API key is kept in VS Code's secret storage, not in settings."
         }
       }
     }
@@ -126,7 +165,7 @@
     "eslint": "^8.55.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.20.0",
     "zod": "^3.22.0"
   }
 }

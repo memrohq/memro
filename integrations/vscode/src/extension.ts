@@ -1,12 +1,15 @@
 import * as vscode from 'vscode';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { MemoryWebviewProvider } from './webview.js';
 
 // MCP Client singleton
 let mcpClient: Client | null = null;
 let statusBarItem: vscode.StatusBarItem;
 let currentSessionId: string = 'default';
+let secrets: vscode.SecretStorage;
+
+const API_KEY_SECRET = 'memro.apiKey';
 
 function resetMcpClient() {
   if (mcpClient) {
@@ -15,66 +18,61 @@ function resetMcpClient() {
   }
 }
 
+/** Asks for an API key and stores it in VS Code's secret storage (the OS keychain). */
+async function promptForApiKey(): Promise<string | undefined> {
+  const key = await vscode.window.showInputBox({
+    prompt: 'Paste a Memro API key (memro_sk_…). Get one with `npx memro connect` or Dashboard → API keys.',
+    password: true,
+    ignoreFocusOut: true,
+    validateInput: (v) => (v.trim().startsWith('memro_sk_') ? undefined : 'API keys start with memro_sk_'),
+  });
+  if (key) {
+    await secrets.store(API_KEY_SECRET, key.trim());
+    resetMcpClient();
+  }
+  return key?.trim();
+}
+
 async function getMcpClient(): Promise<Client> {
   if (mcpClient) return mcpClient;
 
   const config = vscode.workspace.getConfiguration('memro');
-  let agentId = config.get<string>('agentId');
-  let privateKey = config.get<string>('privateKey');
-  let mcpBaseUrl = config.get<string>('mcpBaseUrl');
+  const mcpUrl = config.get<string>('mcpUrl') || 'https://mcp.memro.co/mcp';
   currentSessionId = config.get<string>('sessionId') || 'default';
 
-  // Interactive Onboarding: Prompt if missing
-  if (!agentId) {
-    agentId = await vscode.window.showInputBox({ 
-      prompt: 'Enter your Memro Agent ID',
-      ignoreFocusOut: true 
-    });
-    if (agentId) {
-      await config.update('agentId', agentId, vscode.ConfigurationTarget.Global);
+  const apiKey = (await secrets.get(API_KEY_SECRET)) || (await promptForApiKey());
+  if (!apiKey) {
+    vscode.window.showErrorMessage('Memro needs an API key. Run "Memro: Set API Key".');
+    throw new Error('Missing API key');
+  }
+
+  // Streamable HTTP with the key in a header: it never appears in a URL or log.
+  const transport = new StreamableHTTPClientTransport(new URL(mcpUrl), {
+    requestInit: { headers: { Authorization: `Bearer ${apiKey}` } },
+  });
+  const client = new Client({ name: 'vscode-memro', version: '0.1.0' }, {});
+  try {
+    await client.connect(transport);
+  } catch (e) {
+    if (String(e).includes('401')) {
+      vscode.window.showErrorMessage('Memro rejected the API key (revoked or wrong server). Run "Memro: Set API Key".');
     }
+    throw e;
   }
-
-  if (!privateKey) {
-    privateKey = await vscode.window.showInputBox({ 
-      prompt: 'Enter your Memro Private Key',
-      password: true,
-      ignoreFocusOut: true 
-    });
-    if (privateKey) {
-      await config.update('privateKey', privateKey, vscode.ConfigurationTarget.Global);
-    }
-  }
-
-  if (!mcpBaseUrl || mcpBaseUrl === 'http://localhost:8080/sse') {
-    const newUrl = await vscode.window.showInputBox({ 
-      prompt: 'Enter Memro MCP Server URL (SSE)',
-      value: mcpBaseUrl || 'http://localhost:8080/sse',
-      ignoreFocusOut: true 
-    });
-    if (newUrl) {
-      mcpBaseUrl = newUrl;
-      await config.update('mcpBaseUrl', mcpBaseUrl, vscode.ConfigurationTarget.Global);
-    }
-  }
-
-  if (!agentId || !privateKey || !mcpBaseUrl) {
-    vscode.window.showErrorMessage('Memro Agent ID, Private Key, and Server URL are required.');
-    throw new Error('Missing credentials');
-  }
-
-  const sseUrl = new URL(mcpBaseUrl);
-  sseUrl.searchParams.set('agent_id', agentId);
-  sseUrl.searchParams.set('token', privateKey);
-  sseUrl.searchParams.set('session_id', currentSessionId);
-
-  const transport = new SSEClientTransport(sseUrl);
-  mcpClient = new Client({ name: 'vscode-memro', version: '1.0.0' }, {});
-  await mcpClient.connect(transport);
+  mcpClient = client;
   return mcpClient;
 }
 
 export function activate(context: vscode.ExtensionContext) {
+  secrets = context.secrets;
+  context.subscriptions.push(
+    vscode.commands.registerCommand('memro.setApiKey', promptForApiKey),
+    vscode.commands.registerCommand('memro.signOut', async () => {
+      await secrets.delete(API_KEY_SECRET);
+      resetMcpClient();
+      vscode.window.showInformationMessage('Memro: API key removed from this machine.');
+    }),
+  );
   console.log('Memro Extension is now active!');
 
   // Session Reactivity: Reset client on config change
