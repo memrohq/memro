@@ -7,6 +7,7 @@ package api_test
 //	MEMRO_TEST_DATABASE_URL=postgres://memro:memro@localhost:55432/memro go test ./internal/api/
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -852,4 +853,122 @@ func TestDeletingAMemoryRemovesItsFile(t *testing.T) {
 	e.must(204, code, body, "delete second memory")
 	code, body = e.do(nil, "", "GET", "/assets/"+up.FileID, nil, nil)
 	e.must(404, code, body, "file after its last memory is deleted")
+}
+
+func (e *env) uploadForm(a *agent, path, field, name string, data []byte, extra map[string]string) (int, []byte) {
+	e.t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile(field, name)
+	fw.Write(data)
+	for k, v := range extra {
+		mw.WriteField(k, v)
+	}
+	mw.Close()
+	return e.do(a, "v2", "POST", path, buf.Bytes(), map[string]string{"Content-Type": mw.FormDataContentType()})
+}
+
+func docx(t *testing.T, paragraphs []string) []byte {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, _ := zw.Create("word/document.xml")
+	var sb strings.Builder
+	sb.WriteString(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>`)
+	for _, p := range paragraphs {
+		sb.WriteString("<w:p><w:r><w:t>" + p + "</w:t></w:r></w:p>")
+	}
+	sb.WriteString("</w:body></w:document>")
+	w.Write([]byte(sb.String()))
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// A Word document becomes overlapping chunks linked to the stored file; the
+// file goes away with its last chunk.
+func TestUploadDocumentChunksOfficeFiles(t *testing.T) {
+	e := setup(t)
+	a := newAgent(t)
+	e.register(a)
+	var paras []string
+	for i := range 30 {
+		paras = append(paras, fmt.Sprintf("Section %d: the billing service retries failed charges three times before alerting on-call.", i))
+	}
+	code, body := e.uploadForm(&a, "/upload/document", "document", "runbook.docx", docx(t, paras), nil)
+	e.must(200, code, body, "upload docx")
+	var mems []struct {
+		ID       string `json:"id"`
+		Content  string `json:"content"`
+		FileID   string `json:"file_id"`
+		Metadata struct {
+			Source string `json:"source"`
+			Chunk  int    `json:"chunk"`
+			Chunks int    `json:"chunks"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &mems); err != nil || len(mems) < 2 {
+		t.Fatalf("chunks = %s (%v)", body, err)
+	}
+	for i, m := range mems {
+		if len([]rune(m.Content)) > 1500 || strings.HasPrefix(m.Content, "[DOC CHUNK]") || !strings.HasSuffix(m.Content, ".") {
+			t.Errorf("chunk %d is malformed: %q", i, m.Content)
+		}
+		if m.FileID == "" || m.FileID != mems[0].FileID || m.Metadata.Source != "runbook.docx" ||
+			m.Metadata.Chunk != i+1 || m.Metadata.Chunks != len(mems) {
+			t.Errorf("chunk %d metadata = %+v file %s", i, m.Metadata, m.FileID)
+		}
+	}
+	code, body = e.do(&a, "v2", "GET", "/search?mode=keyword&query=retries+failed+charges", nil, nil)
+	e.must(200, code, body, "search chunks")
+	if !strings.Contains(string(body), "retries failed charges") {
+		t.Fatalf("chunks not searchable: %s", body)
+	}
+	code, body = e.do(nil, "", "GET", "/assets/"+mems[0].FileID, nil, nil)
+	e.must(200, code, body, "document file stored")
+	for _, m := range mems {
+		code, body = e.do(&a, "v2", "DELETE", "/memory/"+m.ID, nil, nil)
+		e.must(204, code, body, "delete chunk")
+	}
+	code, body = e.do(nil, "", "GET", "/assets/"+mems[0].FileID, nil, nil)
+	e.must(404, code, body, "file deleted with its last chunk")
+}
+
+func TestUploadDocumentRejectsUnsupportedFiles(t *testing.T) {
+	e := setup(t)
+	a := newAgent(t)
+	e.register(a)
+	code, body := e.uploadForm(&a, "/upload/document", "document", "photo.png", []byte{0x89, 'P', 'N', 'G', 0, 1}, nil)
+	e.must(400, code, body, "image as document")
+	code, body = e.uploadForm(&a, "/upload/document", "document", "broken.pdf", []byte("%PDF-1.4 truncated"), nil)
+	e.must(400, code, body, "broken PDF")
+}
+
+// Long extracted text becomes several memories instead of being cut at 10,000 characters.
+func TestMemoryFromLongFileIsChunked(t *testing.T) {
+	e := setup(t)
+	a := newAgent(t)
+	e.register(a)
+	text := strings.Repeat("Memro keeps long documents whole by chunking them. ", 400) + "The final sentence is kept."
+	code, body := e.uploadForm(&a, "/upload", "file", "long.txt", []byte(text), map[string]string{"agent_id": a.id})
+	e.must(200, code, body, "upload")
+	var up struct {
+		FileID string `json:"file_id"`
+	}
+	_ = json.Unmarshal(body, &up)
+	code, body = e.do(&a, "v2", "POST", "/memory/from-file", j(map[string]string{"file_id": up.FileID, "memory_type": "semantic"}), nil)
+	e.must(200, code, body, "memory from long file")
+	var res struct {
+		MemoryIDs []string `json:"memory_ids"`
+		Chunks    int      `json:"chunks"`
+	}
+	_ = json.Unmarshal(body, &res)
+	if res.Chunks < 10 || len(res.MemoryIDs) != res.Chunks {
+		t.Fatalf("from-file = %s", body)
+	}
+	code, body = e.do(&a, "v2", "GET", "/search?mode=keyword&query=final+sentence+kept", nil, nil)
+	e.must(200, code, body, "search tail")
+	if !strings.Contains(string(body), "The final sentence is kept.") {
+		t.Fatalf("end of the document was lost: %s", body)
+	}
 }

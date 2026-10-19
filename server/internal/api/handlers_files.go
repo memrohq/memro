@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -21,8 +22,6 @@ import (
 	"github.com/memrohq/memro/server/internal/metrics"
 	"github.com/memrohq/memro/server/internal/store"
 )
-
-const docChunkRunes = 1500
 
 // formFile returns the named part of a multipart request plus any text
 // fields that were sent alongside it.
@@ -103,11 +102,6 @@ func (s *Server) extractText(r *http.Request, fileType, name, mimeType string, d
 	var text string
 	var err error
 	switch fileType {
-	case "pdf":
-		text, err = extract.PDFText(data)
-		if err == nil && text == "" {
-			text = "[PDF: " + name + " (no text extracted)]"
-		}
 	case "image":
 		text, err = s.embed.DescribeImage(r.Context(), base64.StdEncoding.EncodeToString(data), mimeType)
 		if err == nil {
@@ -115,15 +109,14 @@ func (s *Server) extractText(r *http.Request, fileType, name, mimeType string, d
 		}
 	case "audio":
 		text, err = s.embed.Transcribe(r.Context(), name, data)
-	case "text":
-		if !utf8.Valid(data) {
+	default:
+		text, err = extract.Text(fileType, data)
+		if errors.Is(err, extract.ErrUnsupported) {
 			return nil
 		}
-		text = string(data)
-	case "docx":
-		text = "[Word Document: " + name + "]"
-	default:
-		return nil
+		if err == nil && text == "" && fileType == "pdf" {
+			text = "[PDF: " + name + " (no text extracted)]"
+		}
 	}
 	if err != nil {
 		slog.Warn("text extraction failed", "type", fileType, "err", err)
@@ -175,16 +168,64 @@ func (s *Server) memoryFromFile(w http.ResponseWriter, r *http.Request) {
 	if f.ExtractedText != nil && *f.ExtractedText != "" {
 		content = *f.ExtractedText
 	}
-	if runes := []rune(content); len(runes) > maxContentChars {
-		content = string(runes[:maxContentChars])
-	}
-	now := time.Now().UTC()
-	m := &domain.Memory{ID: uuid.New(), AgentID: a.ID, TenantID: a.TenantID, Content: content, MemoryType: memType,
-		Visibility: vis, CreatedAt: now, DocumentDate: now, LastAccessedAt: now, Confidence: 1, FileID: &fileID}
-	if !s.saveMemory(w, r, a, m, "memory.from_file") {
+	// Text that fits is one memory; longer text becomes overlapping chunks
+	// rather than being cut off.
+	if utf8.RuneCountInString(content) <= maxContentChars {
+		now := time.Now().UTC()
+		m := &domain.Memory{ID: uuid.New(), AgentID: a.ID, TenantID: a.TenantID, Content: content, MemoryType: memType,
+			Visibility: vis, CreatedAt: now, DocumentDate: now, LastAccessedAt: now, Confidence: 1, FileID: &fileID}
+		if !s.saveMemory(w, r, a, m, "memory.from_file") {
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"memory_id": m.ID.String(), "memory_ids": []string{m.ID.String()},
+			"file_id": req.FileID, "content": content, "chunks": 1})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"memory_id": m.ID.String(), "file_id": req.FileID, "content": content})
+	mems, ok := s.storeChunks(w, r, a, f, content, memType, vis, "memory.from_file")
+	if !ok {
+		return
+	}
+	ids := make([]string, len(mems))
+	for i, m := range mems {
+		ids[i] = m.ID.String()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"memory_id": ids[0], "memory_ids": ids, "file_id": req.FileID,
+		"content": mems[0].Content, "chunks": len(mems)})
+}
+
+// storeChunks splits a file's text into overlapping chunks and stores each
+// as a memory linked to the file, with its position in metadata.
+func (s *Server) storeChunks(w http.ResponseWriter, r *http.Request, a Agent, f *store.File, text string,
+	memType domain.MemoryType, vis domain.Visibility, action string) ([]domain.Memory, bool) {
+	chunks := extract.ChunkText(text, extract.DefaultChunkSize, extract.DefaultChunkOverlap)
+	if len(chunks) == 0 {
+		httpError(w, http.StatusBadRequest, "No text to store")
+		return nil, false
+	}
+	if !s.allowWrite(w, r, a, len(chunks)) {
+		return nil, false
+	}
+	mems := make([]domain.Memory, 0, len(chunks))
+	for i, c := range chunks {
+		now := time.Now().UTC()
+		meta, _ := json.Marshal(map[string]any{"source": f.FileName, "file_id": f.ID, "chunk": i + 1, "chunks": len(chunks)})
+		m := domain.Memory{ID: uuid.New(), AgentID: a.ID, TenantID: a.TenantID, Content: c, MemoryType: memType,
+			Visibility: vis, CreatedAt: now, DocumentDate: now, LastAccessedAt: now, Confidence: 1,
+			EntityTags: extract.Entities(c), RelationshipTypes: []string{}, FileID: &f.ID, Metadata: meta}
+		if err := s.store.InsertMemory(r.Context(), &m); err != nil {
+			slog.Error("store chunk", "err", err)
+			httpError(w, http.StatusInternalServerError, "Failed to store memory")
+			return nil, false
+		}
+		s.indexer.Enqueue(m.ID, m.AgentID, m.TenantID, m.Content)
+		mems = append(mems, m)
+	}
+	s.engine.Cache().InvalidateAgent(a.ID)
+	metrics.MemoriesCreated.Add(float64(len(mems)))
+	fid := f.ID.String()
+	s.audit(r, a, action, &fid)
+	s.recordUsage(r, a, extension.MetricMemoriesStored, int64(len(mems)))
+	return mems, true
 }
 
 var imageExt = map[string]string{"image/png": "png", "image/gif": "gif", "image/webp": "webp"}
@@ -234,45 +275,50 @@ func (s *Server) uploadImage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, m)
 }
 
-// POST /upload/document — split a PDF into ~1500-character memories.
+// POST /upload/document — store a document (PDF, Word, PowerPoint, Excel or
+// text) and its text as ~1,500-character overlapping memories linked to it.
 func (s *Server) uploadDocument(w http.ResponseWriter, r *http.Request) {
 	a := agentFrom(r)
-	data, _, _, err := formFile(r, "document")
+	data, h, _, err := formFile(r, "document")
 	if err != nil {
 		httpError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	text, err := extract.PDFText(data)
+	fileType := extract.DetectType(h.Filename, data)
+	text, err := extract.Text(fileType, data)
+	switch {
+	case errors.Is(err, extract.ErrUnsupported):
+		httpError(w, http.StatusBadRequest, "Unsupported document type: upload a PDF, Word, PowerPoint, Excel or text file")
+		return
+	case err != nil:
+		httpError(w, http.StatusBadRequest, "Could not read document: "+err.Error())
+		return
+	case text == "":
+		httpError(w, http.StatusBadRequest, "No text could be extracted from this document")
+		return
+	}
+	id := uuid.New()
+	path, err := s.files.Save(id, h.Filename, data)
 	if err != nil {
-		httpError(w, http.StatusBadRequest, "Invalid PDF: "+err.Error())
+		slog.Error("save document", "err", err)
+		httpError(w, http.StatusInternalServerError, "Storage failed")
 		return
 	}
-	if text == "" {
-		httpError(w, http.StatusBadRequest, "No text extractable from PDF")
+	f := &store.File{ID: id, AgentID: a.ID, TenantID: a.TenantID, FileName: h.Filename, FileType: fileType,
+		FilePath: path, FileSize: int64(len(data)), MimeType: mimeOf(h), ExtractedText: &text}
+	if err := s.store.InsertFile(r.Context(), f); err != nil {
+		slog.Error("insert document file", "err", err)
+		httpError(w, http.StatusInternalServerError, "Database error")
 		return
 	}
-	chunks := extract.Chunk(text, docChunkRunes)
-	if !s.allowWrite(w, r, a, len(chunks)) {
-		return
-	}
-	mems := []domain.Memory{}
-	for _, c := range chunks {
-		now := time.Now().UTC()
-		m := domain.Memory{ID: uuid.New(), AgentID: a.ID, TenantID: a.TenantID, Content: "[DOC CHUNK] " + c,
-			MemoryType: domain.Semantic, Visibility: domain.Private, CreatedAt: now, DocumentDate: now,
-			LastAccessedAt: now, Confidence: 1, EntityTags: extract.Entities(c), RelationshipTypes: []string{}}
-		if err := s.store.InsertMemory(r.Context(), &m); err != nil {
-			slog.Error("store doc chunk", "err", err)
-			httpError(w, http.StatusInternalServerError, "Failed to store memory")
-			return
+	mems, ok := s.storeChunks(w, r, a, f, text, domain.Semantic, domain.Private, "memory.doc_upload")
+	if !ok {
+		// Don't keep a file nothing refers to.
+		if p, err := s.store.DeleteOrphanFile(r.Context(), id, a.ID); err == nil && p != "" {
+			_ = s.files.Remove(p)
 		}
-		s.indexer.Enqueue(m.ID, m.AgentID, m.TenantID, m.Content)
-		mems = append(mems, m)
+		return
 	}
-	s.engine.Cache().InvalidateAgent(a.ID)
-	metrics.MemoriesCreated.Add(float64(len(mems)))
-	s.audit(r, a, "memory.doc_upload", nil)
-	s.recordUsage(r, a, extension.MetricMemoriesStored, int64(len(mems)))
 	writeJSON(w, http.StatusOK, mems)
 }
 

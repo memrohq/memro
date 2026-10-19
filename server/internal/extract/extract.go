@@ -4,6 +4,7 @@ package extract
 
 import (
 	"bytes"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/ledongthuc/pdf"
 )
@@ -24,29 +26,41 @@ var (
 	reMonthDay = map[string]*regexp.Regexp{}
 )
 
+var reEntityWords []*regexp.Regexp
+
 func init() {
+	for _, w := range entityWords {
+		reEntityWords = append(reEntityWords, regexp.MustCompile(`\b`+w+`\b`))
+	}
 	for _, m := range monthNames {
-		reMonthDay[m] = regexp.MustCompile(m + `\s+(\d{1,2})`)
+		reMonthDay[m] = regexp.MustCompile(`\b` + m + `\s+(\d{1,2})\b`)
 	}
 }
 
+var reRelative = []struct {
+	re    *regexp.Regexp
+	delta time.Duration
+}{
+	{regexp.MustCompile(`\byesterday\b`), -24 * time.Hour},
+	{regexp.MustCompile(`\btomorrow\b`), 24 * time.Hour},
+	{regexp.MustCompile(`\btoday\b`), 0},
+	{regexp.MustCompile(`\blast week\b`), -7 * 24 * time.Hour},
+	{regexp.MustCompile(`\bnext week\b`), 7 * 24 * time.Hour},
+	{regexp.MustCompile(`\blast month\b`), -30 * 24 * time.Hour},
+	{regexp.MustCompile(`\bnext month\b`), 30 * 24 * time.Hour},
+}
+
 // EventDate finds when the event described in content happened: an ISO
-// date, a relative phrase ("yesterday", "last week") or "March 15".
+// date, a relative phrase ("yesterday", "last week") or "March 15". A month
+// and day without a year that would be more than two months in the future
+// is taken to be last year ("December 20", written in January).
 func EventDate(content string, now time.Time) *time.Time {
 	if t := isoDate(content); t != nil {
 		return t
 	}
 	lower := strings.ToLower(content)
-	rel := []struct {
-		phrase string
-		delta  time.Duration
-	}{
-		{"yesterday", -24 * time.Hour}, {"today", 0}, {"tomorrow", 24 * time.Hour},
-		{"last week", -7 * 24 * time.Hour}, {"next week", 7 * 24 * time.Hour},
-		{"last month", -30 * 24 * time.Hour}, {"next month", 30 * 24 * time.Hour},
-	}
-	for _, r := range rel {
-		if strings.Contains(lower, r.phrase) {
+	for _, r := range reRelative {
+		if r.re.MatchString(lower) {
 			t := now.Add(r.delta)
 			return &t
 		}
@@ -58,9 +72,13 @@ func EventDate(content string, now time.Time) *time.Time {
 		if c := reMonthDay[m].FindStringSubmatch(lower); c != nil {
 			day, _ := strconv.Atoi(c[1])
 			t := time.Date(now.Year(), time.Month(i+1), day, 0, 0, 0, 0, time.UTC)
-			if t.Day() == day { // reject overflow like "February 31"
-				return &t
+			if t.Day() != day { // reject overflow like "February 31"
+				continue
 			}
+			if t.After(now.AddDate(0, 2, 0)) {
+				t = t.AddDate(-1, 0, 0)
+			}
+			return &t
 		}
 	}
 	return nil
@@ -92,34 +110,77 @@ var (
 		"javascript", "react", "typescript", "database", "api", "server", "client"}
 )
 
-// Entities extracts up to 20 lowercase tags used for search pre-filtering.
+// Capitalized words that start sentences rather than name things.
+var notEntities = map[string]bool{
+	"the": true, "this": true, "that": true, "these": true, "those": true, "a": true, "an": true,
+	"we": true, "i": true, "it": true, "he": true, "she": true, "they": true, "you": true, "our": true,
+	"my": true, "your": true, "their": true, "its": true, "in": true, "on": true, "at": true, "for": true,
+	"to": true, "of": true, "and": true, "but": true, "or": true, "if": true, "when": true, "then": true,
+	"there": true, "here": true, "please": true, "also": true, "after": true, "before": true, "with": true,
+	"from": true, "by": true, "as": true, "is": true, "was": true, "are": true, "were": true, "be": true,
+	"do": true, "does": true, "did": true, "not": true, "no": true, "yes": true, "so": true, "all": true,
+	"some": true, "any": true, "each": true, "every": true, "what": true, "why": true, "how": true,
+	"who": true, "where": true, "which": true, "use": true, "run": true, "remember": true, "note": true,
+}
+
+// Entities extracts up to 20 lowercase tags used for search pre-filtering:
+// proper nouns first (most frequent first), then topic keywords, people
+// from email-style handles and time words.
 func Entities(content string) []string {
-	set := map[string]struct{}{}
-	for _, m := range reProperNoun.FindAllString(content, -1) {
-		if l := len(m); l > 2 && l < 50 {
-			set[strings.ToLower(m)] = struct{}{}
+	counts := map[string]int{}
+	first := map[string]int{}
+	for i, m := range reProperNoun.FindAllString(content, -1) {
+		l := len(m)
+		if l <= 2 || l >= 50 {
+			continue
 		}
+		key := strings.ToLower(m)
+		if notEntities[key] {
+			continue
+		}
+		// "The Billing Team" -> "billing team"
+		if w, rest, ok := strings.Cut(key, " "); ok && notEntities[w] {
+			key = rest
+		}
+		if _, seen := first[key]; !seen {
+			first[key] = i
+		}
+		counts[key]++
+	}
+	nouns := make([]string, 0, len(counts))
+	for k := range counts {
+		nouns = append(nouns, k)
+	}
+	sort.Slice(nouns, func(i, j int) bool {
+		if counts[nouns[i]] != counts[nouns[j]] {
+			return counts[nouns[i]] > counts[nouns[j]]
+		}
+		return first[nouns[i]] < first[nouns[j]]
+	})
+
+	seen := map[string]bool{}
+	var out []string
+	add := func(tag string) {
+		if !seen[tag] && len(out) < 20 {
+			seen[tag] = true
+			out = append(out, tag)
+		}
+	}
+	for _, n := range nouns {
+		add(n)
 	}
 	lower := strings.ToLower(content)
-	for _, w := range entityWords {
-		if strings.Contains(lower, w) {
-			set[w] = struct{}{}
+	for i, w := range entityWords {
+		if reEntityWords[i].MatchString(lower) {
+			add(w)
 		}
-	}
-	for _, m := range reTimeWord.FindAllString(lower, -1) {
-		set["time:"+m] = struct{}{}
 	}
 	for _, m := range reEmailHandle.FindAllString(content, -1) {
 		name, _, _ := strings.Cut(strings.ToLower(m), "@")
-		set["person:"+name] = struct{}{}
+		add("person:" + name)
 	}
-	out := make([]string, 0, len(set))
-	for k := range set {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	if len(out) > 20 {
-		out = out[:20]
+	for _, m := range reTimeWord.FindAllString(lower, -1) {
+		add("time:" + m)
 	}
 	return out
 }
@@ -141,8 +202,8 @@ var relationAliases = []struct{ phrase, alias string }{
 // Atoms splits a chunk into sentence-level facts.
 func Atoms(chunk string) []Atom {
 	atoms := []Atom{}
-	for _, s := range strings.FieldsFunc(chunk, func(r rune) bool { return r == '.' || r == '!' || r == '?' }) {
-		s = strings.TrimSpace(s)
+	for _, s := range SplitSentences(chunk) {
+		s = strings.TrimRight(strings.TrimSpace(s), ".!?")
 		if s == "" {
 			continue
 		}
@@ -186,8 +247,15 @@ func FileType(name string) string {
 	return "unknown"
 }
 
-// PDFText extracts the plain text of every page.
-func PDFText(data []byte) (string, error) {
+// PDFText extracts the plain text of every page, pages separated by a
+// blank line. Malformed PDFs return an error instead of crashing (the
+// parser panics on some inputs).
+func PDFText(data []byte) (text string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			text, err = "", fmt.Errorf("could not read PDF: %v", r)
+		}
+	}()
 	r, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return "", err
@@ -198,25 +266,17 @@ func PDFText(data []byte) (string, error) {
 		if p.V.IsNull() {
 			continue
 		}
-		text, err := p.GetPlainText(nil)
+		pageText, err := p.GetPlainText(nil)
 		if err != nil {
 			continue
 		}
-		sb.WriteString(text)
-		sb.WriteByte(' ')
-	}
-	return strings.TrimSpace(sb.String()), nil
-}
-
-// Chunk splits text into pieces of at most size runes.
-func Chunk(text string, size int) []string {
-	runes := []rune(text)
-	var out []string
-	for i := 0; i < len(runes); i += size {
-		end := min(i+size, len(runes))
-		if c := strings.TrimSpace(string(runes[i:end])); c != "" {
-			out = append(out, c)
+		sb.WriteString(pageText)
+		sb.WriteString("\n\n")
+		if sb.Len() > maxExtractedText*4 {
+			break
 		}
 	}
-	return out
+	return Normalize(sb.String()), nil
 }
+
+func isUTF8(b []byte) bool { return utf8.Valid(b) }
