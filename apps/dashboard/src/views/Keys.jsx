@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Panel, Icon, Modal, Field, Empty, timeAgo } from "../components/ui";
+import { Panel, Icon, Modal, Field, Empty, timeAgo, PageHeader, Skeleton } from "../components/ui";
 import { api } from "../lib/api";
 
 export default function Keys({ apiBase, auth, onCopy, notify }) {
@@ -53,14 +53,10 @@ export default function Keys({ apiBase, auth, onCopy, notify }) {
   };
 
   return (
-    <div className="space-y-4 max-w-3xl">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-[24px] font-semibold tracking-tight">API keys</h1>
-          <p className="text-[13px] text-muted mt-1">Keys let your tools, SDKs and MCP clients use this account's memory. `npx memro connect` creates one for you.</p>
-        </div>
-        <button className="btn-primary" onClick={() => setCreateOpen(true)}><Icon name="add" className="!text-[17px]" /> New key</button>
-      </div>
+    <div className="space-y-6 max-w-3xl">
+      <PageHeader title="API keys" description="Keys let your tools, SDKs and MCP clients use this account's memory. npx memro connect creates one for you.">
+        <button className="btn-primary" onClick={() => setCreateOpen(true)}><Icon name="add" className="!text-[18px]" /> New key</button>
+      </PageHeader>
 
       {created && (
         <div className="card p-5 border-ok/40">
@@ -78,9 +74,9 @@ export default function Keys({ apiBase, auth, onCopy, notify }) {
 
       <Panel title={`Active keys${keys ? ` · ${keys.length}` : ""}`} bodyClass="p-0">
         {keys === null ? (
-          <p className="text-[13px] text-muted p-5">Loading…</p>
+          <div className="p-5 space-y-3"><Skeleton className="h-4 w-1/2" /><Skeleton className="h-4 w-1/3" /></div>
         ) : keys.length === 0 ? (
-          <Empty icon="vpn_key" title="No API keys yet">Run `npx memro connect` or create a key to connect a tool.</Empty>
+          <Empty icon="key" title="No API keys yet">Run npx memro connect, or create a key to connect a tool.</Empty>
         ) : (
           <ul>
             {keys.map((k) => (

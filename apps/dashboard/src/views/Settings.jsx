@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Panel, Field, StatusPill } from "../components/ui";
+import { Panel, Field, StatusPill, PageHeader, Segmented } from "../components/ui";
 
-export default function Settings({ apiBaseUrl, health, onSave }) {
+export default function Settings({ apiBaseUrl, health, onSave, theme, onTheme }) {
   const [url, setUrl] = useState(apiBaseUrl);
   const [error, setError] = useState("");
 
@@ -16,11 +16,16 @@ export default function Settings({ apiBaseUrl, health, onSave }) {
   };
 
   return (
-    <div className="space-y-4 max-w-3xl">
-      <div>
-        <h1 className="text-[24px] font-semibold tracking-tight">Settings</h1>
-        <p className="text-[13px] text-muted mt-1">Connection settings for this browser.</p>
-      </div>
+    <div className="space-y-6 max-w-3xl">
+      <PageHeader title="Settings" description="Connection settings for this browser." />
+
+      <Panel title="Appearance" description="Saved in this browser." bodyClass="p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-[13px]">Theme</span>
+          <Segmented value={theme} onChange={onTheme}
+            options={[{ id: "light", label: "Light" }, { id: "dark", label: "Dark" }, { id: "system", label: "System" }]} />
+        </div>
+      </Panel>
 
       <Panel title="Server status" bodyClass="p-0">
         {[

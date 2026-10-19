@@ -1,12 +1,9 @@
-import { Panel, Empty } from "../components/ui";
+import { Panel, Empty, PageHeader } from "../components/ui";
 
 export default function Activity({ events }) {
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-[24px] font-semibold tracking-tight">Activity</h1>
-        <p className="text-[13px] text-muted mt-1">What you did in this browser session. It isn't stored on the server.</p>
-      </div>
+      <PageHeader title="Activity" description="What you did in this browser session. It isn't stored on the server." />
       <Panel title={`${events.length} events`} bodyClass="p-0">
         {events.length === 0 ? (
           <Empty icon="history" title="Nothing yet">Searches, uploads and new memories will show up here.</Empty>

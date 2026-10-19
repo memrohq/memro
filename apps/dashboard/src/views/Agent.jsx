@@ -1,4 +1,4 @@
-import { Panel, Icon } from "../components/ui";
+import { Panel, Icon, PageHeader } from "../components/ui";
 
 const Row = ({ label, children }) => (
   <div className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-1 sm:gap-6 px-5 py-4 border-b border-line last:border-0">
@@ -9,11 +9,8 @@ const Row = ({ label, children }) => (
 
 export default function Agent({ agentId, email, onCopy, onExport, onSignOut, onOpenKeys }) {
   return (
-    <div className="space-y-4 max-w-3xl">
-      <div>
-        <h1 className="text-[24px] font-semibold tracking-tight">Account</h1>
-        <p className="text-[13px] text-muted mt-1">Your account and the agent that holds its memory.</p>
-      </div>
+    <div className="space-y-6 max-w-3xl">
+      <PageHeader title="Account" description="Your account and the agent that holds its memory." />
 
       <Panel title="Account" bodyClass="p-0">
         <Row label="Signed in as"><span className="text-[13px]">{email || "—"}</span></Row>

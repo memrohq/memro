@@ -1,72 +1,161 @@
 @import "tailwindcss";
 
-/* Cool neutral palette with the logo's indigo (#5746d5) as the accent for
-   primary actions, selection and charts; memory types get their own hues. */
-@theme {
-  --color-canvas: #eef0f4;
-  --color-surface: #ffffff;
-  --color-panel: #f6f7f9;
-  --color-line: #e6e8ee;
-  --color-line-strong: #d5d9e2;
-  --color-ink: #0f172a;
-  --color-muted: #5b6475;
-  --color-subtle: #8c93a3;
-  --color-accent: #5746d5;
-  --color-accent-strong: #4535bd;
-  --color-accent-soft: #f0eefc;
-  --color-accent-line: #dcd7f8;
-  --color-ok: #16a34a;
-  --color-warn: #d97706;
-  --color-danger: #dc2626;
+/* Dark mode follows the .dark class on <html> (set before first paint from
+   the saved choice or the system setting; see index.html). */
+@custom-variant dark (&:where(.dark, .dark *));
 
-  --color-episodic: #8b5cf6;
-  --color-semantic: #2563eb;
-  --color-procedural: #059669;
-  --color-profile: #d97706;
+/* Utilities read CSS variables, so one class set serves both themes. Brand:
+   the logo's indigo is the accent. Memory-type colors are a validated
+   categorical set (indigo, orange, aqua, yellow), stepped per theme. */
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-panel: var(--panel);
+  --color-elevated: var(--elevated);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-line: var(--accent-line);
+  --color-on-accent: var(--on-accent);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-episodic: var(--t-episodic);
+  --color-semantic: var(--t-semantic);
+  --color-procedural: var(--t-procedural);
+  --color-profile: var(--t-profile);
 
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
+}
+
+:root {
+  color-scheme: light;
+  --canvas: #f6f6f8;
+  --surface: #ffffff;
+  --panel: #f9f9fb;
+  --elevated: #ffffff;
+  --line: #ebebef;
+  --line-strong: #dcdce3;
+  --ink: #0e0f13;
+  --muted: #5d5f6b;
+  --subtle: #8e909c;
+  --accent: #5746d5;
+  --accent-strong: #4535bd;
+  --accent-soft: #f2f0fd;
+  --accent-line: #dedafa;
+  --on-accent: #ffffff;
+  --ok: #16a34a;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --t-episodic: #5746d5;
+  --t-semantic: #eb6834;
+  --t-procedural: #1baf7a;
+  --t-profile: #eda100;
+  --shadow-card: 0 1px 2px rgba(16, 17, 24, 0.04), 0 1px 1px rgba(16, 17, 24, 0.02);
+  --shadow-pop: 0 24px 48px -16px rgba(16, 17, 24, 0.22), 0 0 0 1px rgba(16, 17, 24, 0.06);
+}
+
+.dark {
+  color-scheme: dark;
+  --canvas: #0b0c0f;
+  --surface: #131418;
+  --panel: #17181d;
+  --elevated: #1b1c22;
+  --line: #24252c;
+  --line-strong: #31323a;
+  --ink: #ededf2;
+  --muted: #a3a5b1;
+  --subtle: #70727e;
+  --accent: #8f86f0;
+  --accent-strong: #a79ff5;
+  --accent-soft: #1d1b33;
+  --accent-line: #312d58;
+  --on-accent: #0b0c0f;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --danger: #f87171;
+  --t-episodic: #9085e9;
+  --t-semantic: #d95926;
+  --t-procedural: #199e70;
+  --t-profile: #c98500;
+  --shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.02);
+  --shadow-pop: 0 24px 48px -16px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 @layer base {
   html, body, #root { height: 100%; }
   body {
     @apply bg-canvas text-ink font-sans antialiased;
-    font-feature-settings: "cv11", "ss01";
+    font-feature-settings: "ss01", "cv11";
+    text-rendering: optimizeLegibility;
   }
-  ::selection { background: #5746d5; color: #fff; }
-  :focus-visible { outline: 2px solid #5746d5; outline-offset: 2px; }
+  ::selection { background: var(--accent); color: var(--on-accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+  .tabular { font-variant-numeric: tabular-nums; }
 }
 
 @layer components {
   .icon {
-    font-family: "Material Symbols Outlined";
-    font-weight: 300;
+    font-family: "Material Symbols Rounded";
+    font-weight: 400;
     font-size: 18px;
     line-height: 1;
-    font-variation-settings: "opsz" 20, "wght" 300, "FILL" 0;
+    font-variation-settings: "opsz" 20, "wght" 400, "FILL" 0, "GRAD" 0;
     -webkit-font-smoothing: antialiased;
     user-select: none;
   }
-  /* Small uppercase monospace section label, as in the reference */
+  .icon-fill { font-variation-settings: "opsz" 20, "wght" 400, "FILL" 1, "GRAD" 0; }
+  /* Small uppercase section label */
   .label {
-    @apply font-mono text-[11px] uppercase tracking-[0.08em] text-muted;
+    @apply text-[11px] font-medium uppercase tracking-[0.08em] text-subtle;
   }
   .card {
-    @apply bg-surface border border-line rounded-xl;
+    @apply bg-surface border border-line rounded-2xl shadow-card;
   }
   .input {
-    @apply w-full h-9 px-3 rounded-lg bg-surface border border-line text-[13px] placeholder:text-subtle outline-none focus:border-accent focus:ring-3 focus:ring-accent/15 transition-[border-color,box-shadow];
+    @apply w-full h-9 px-3 rounded-[10px] bg-surface border border-line text-[13px] text-ink placeholder:text-subtle outline-none focus:border-accent focus:ring-4 focus:ring-accent/15 transition-[border-color,box-shadow];
   }
-  .scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
-  .scroll-thin::-webkit-scrollbar-thumb { background: #d5d9e2; border-radius: 8px; }
+  .kbd {
+    @apply inline-flex items-center h-5 px-1.5 rounded-md border border-line bg-panel font-mono text-[10.5px] text-subtle;
+  }
+  .skeleton {
+    @apply rounded-md bg-line/70;
+    background-image: linear-gradient(90deg, transparent, color-mix(in oklab, var(--surface) 60%, transparent), transparent);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+  .scroll-thin::-webkit-scrollbar { width: 10px; height: 10px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
+  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+  .fade-in { animation: fade-in 0.18s ease-out; }
+  .pop-in { animation: pop-in 0.18s cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+  .slide-in { animation: slide-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+}
+
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes slide-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .skeleton, .fade-in, .pop-in, .slide-in { animation: none; }
 }
 
 /* Buttons are utilities so variants can build on the base with @apply. */
 @utility btn {
-  @apply inline-flex items-center justify-center gap-1.5 h-9 px-3.5 rounded-lg text-[13px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  @apply inline-flex items-center justify-center gap-1.5 h-9 px-3.5 rounded-[10px] text-[13px] font-medium whitespace-nowrap transition-[background-color,border-color,color,box-shadow,transform] active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed disabled:active:translate-y-0;
 }
-@utility btn-primary { @apply btn bg-accent text-white hover:bg-accent-strong shadow-[0_1px_2px_rgba(87,70,213,0.25)]; }
-@utility btn-secondary { @apply btn bg-surface text-ink border border-line hover:bg-panel; }
+@utility btn-primary {
+  @apply btn bg-accent text-on-accent hover:bg-accent-strong shadow-[0_1px_2px_rgba(16,17,24,0.12),inset_0_1px_0_rgba(255,255,255,0.14)];
+}
+@utility btn-secondary { @apply btn bg-surface text-ink border border-line hover:bg-panel hover:border-line-strong shadow-card; }
 @utility btn-ghost { @apply btn text-muted hover:text-ink hover:bg-panel; }
-@utility btn-danger { @apply btn bg-surface text-danger border border-line hover:bg-red-50; }
+@utility btn-danger { @apply btn bg-surface text-danger border border-line hover:bg-danger/8 hover:border-danger/30; }

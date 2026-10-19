@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Panel, Icon } from "../components/ui";
+import { Panel, Icon, PageHeader } from "../components/ui";
 import { api, connectFlags, mcpUrl } from "../lib/api";
 
 const KEY = "<your API key>";
@@ -95,11 +95,8 @@ export default function Connect({ apiBase, auth, code, onDone, onCopy, notify })
   const command = `npx memro connect${connectFlags()}`;
 
   return (
-    <div className="space-y-4 max-w-3xl">
-      <div>
-        <h1 className="text-[24px] font-semibold tracking-tight">Connect your tools</h1>
-        <p className="text-[13px] text-muted mt-1">Give Claude Code, Codex, Cursor, Antigravity, OpenCode and other agents a shared, persistent memory.</p>
-      </div>
+    <div className="space-y-6 max-w-3xl">
+      <PageHeader title="Connect your tools" description="Give Claude Code, Codex, Cursor, Antigravity, OpenCode and other agents a shared, persistent memory." />
 
       {code && <Approve apiBase={apiBase} auth={auth} code={code} onDone={onDone} notify={notify} />}
 
