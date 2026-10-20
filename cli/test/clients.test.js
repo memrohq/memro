@@ -114,3 +114,22 @@ test("API URLs must use https unless they point at this machine", async () => {
   assert.throws(() => checkURL("http://localhost.evil.com", "API"), /https/);
   assert.throws(() => checkURL("not a url", "API"), /Invalid/);
 });
+
+// Regression: a leftover ~/.codeium/windsurf (Windsurf uninstalled, or
+// created by another tool) made Windsurf look installed.
+test("Windsurf counts as installed only when the app or its command exists", () => {
+  const windsurf = findClient("windsurf");
+  fs.mkdirSync(path.join(HOME, ".codeium", "windsurf"), { recursive: true });
+  const savedPath = process.env.PATH;
+  try {
+    process.env.PATH = path.join(HOME, "bin");
+    assert.equal(windsurf.detect(), false, "settings folder alone is not an install");
+    fs.mkdirSync(path.join(HOME, "bin"));
+    const exe = path.join(HOME, "bin", process.platform === "win32" ? "windsurf.EXE" : "windsurf");
+    fs.writeFileSync(exe, "", { mode: 0o755 });
+    assert.equal(windsurf.detect(), true, "windsurf command on PATH");
+  } finally {
+    process.env.PATH = savedPath;
+  }
+  assert.equal(windsurf.supportsScope("project"), false, "Windsurf has no per-project MCP config");
+});

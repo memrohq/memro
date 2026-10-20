@@ -22,20 +22,36 @@ Memro is my long-term memory across tools and sessions (MCP server \`memro\`). U
 Never store secrets (keys, passwords, tokens), one-off chatter, or anything I ask you not to keep. Don't announce routine saves.
 ${END}`;
 
-const blockPattern = new RegExp(`\\n*${START}[\\s\\S]*?${END}\\n*`);
+export const PROJECT_BLOCK = `${START}
+## Memro — long-term memory
 
-/** Text with the Memro block added, or replaced if it is already there. */
-export function upsertBlock(text) {
-  if (blockPattern.test(text)) return text.replace(blockPattern, `\n\n${BLOCK}\n`).replace(/^\n+/, "");
-  const body = text.replace(/\s+$/, "");
-  return (body ? body + "\n\n" : "") + BLOCK + "\n";
+- At the start of a task, recall relevant context from Memro.
+- Remember durable decisions, preferences, and architectural changes.
+- Never store secrets, API keys, passwords, or sensitive client data.
+- Follow this repository's privacy and memory-sharing boundaries.
+${END}`;
+
+const globalBlockPattern = new RegExp(`\\n*${START}[\\s\\S]*?${END}\\n*`, "g");
+
+/** Text without the Memro block (removes all instances and cleans up orphan markers). */
+export function removeBlock(text) {
+  if (!text.includes(START) && !text.includes(END)) return text;
+  let out = text.replace(globalBlockPattern, "\n\n");
+  // Clean up any orphan markers if one was deleted accidentally
+  if (out.includes(START)) {
+    out = out.replace(new RegExp(`\\n*${START}[^\\n]*\\n*`, "g"), "\n\n");
+  }
+  if (out.includes(END)) {
+    out = out.replace(new RegExp(`\\n*${END}\\n*`, "g"), "\n\n");
+  }
+  out = out.replace(/^\n+/, "").replace(/\n{3,}/g, "\n\n");
+  return out.trim() ? out.replace(/\s+$/, "") + "\n" : "";
 }
 
-/** Text without the Memro block (unchanged if it has none). */
-export function removeBlock(text) {
-  if (!blockPattern.test(text)) return text;
-  const out = text.replace(blockPattern, "\n\n").replace(/^\n+/, "").replace(/\n{3,}/g, "\n\n");
-  return out.trim() ? out.replace(/\s+$/, "") + "\n" : "";
+/** Text with the Memro block added, or replaced if it is already there. */
+export function upsertBlock(text, block = BLOCK) {
+  const cleaned = removeBlock(text).replace(/\s+$/, "");
+  return (cleaned ? cleaned + "\n\n" : "") + block + "\n";
 }
 
 /** Atomically replace a text file, keeping a one-time backup of the original
@@ -66,14 +82,15 @@ export function hasOwnMemroGuidance(text) {
  * older block of ours so the agent never gets the rules twice. Returns
  * "added", "updated", "unchanged" or "kept-own".
  */
-export function installInstructions(file) {
+export function installInstructions(file, { scope = "user", block } = {}) {
+  const targetBlock = block || (scope === "project" ? PROJECT_BLOCK : BLOCK);
   const before = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
   if (hasOwnMemroGuidance(before)) {
     const after = removeBlock(before);
     if (after !== before) writeText(file, after);
     return "kept-own";
   }
-  const after = upsertBlock(before);
+  const after = upsertBlock(before, targetBlock);
   if (after === before) return "unchanged";
   writeText(file, after);
   return before.includes(START) ? "updated" : "added";
