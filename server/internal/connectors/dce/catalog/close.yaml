@@ -1,0 +1,45 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: close
+  version: 1.0.0
+  description: Sync leads, opportunities, and sales activities from Close CRM
+
+spec:
+  type: rest
+  baseURL: https://api.close.com/api/v1
+
+  auth:
+    type: apiKey
+    header: Authorization
+    prefix: "Bearer "
+    secretRef: CLOSE_API_KEY
+
+  operations:
+    - name: list_leads
+      method: GET
+      path: /lead
+      pagination:
+        type: offset
+        offsetParam: _skip
+        limitParam: _limit
+        limit: 50
+      response:
+        itemsPath: data
+
+  mapping:
+    id: $.id
+    title: $.name
+    content: $.description
+    eventDate: $.date_updated
+    url: $.url
+
+  sync:
+    mode: incremental
+    checkpoint: date_updated
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 100

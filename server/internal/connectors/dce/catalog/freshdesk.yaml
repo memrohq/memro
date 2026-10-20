@@ -1,0 +1,43 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: freshdesk
+  version: 1.0.0
+  description: Sync support tickets, conversations, and resolutions from Freshdesk
+
+spec:
+  type: rest
+  baseURL: https://api.freshdesk.com/v2
+
+  auth:
+    type: apiKey
+    header: Authorization
+    secretRef: FRESHDESK_API_KEY
+
+  operations:
+    - name: list_tickets
+      method: GET
+      path: /tickets
+      queryParams:
+        per_page: "50"
+      pagination:
+        type: page
+        pageParam: page
+      response:
+        itemsPath: "$"
+
+  mapping:
+    id: $.id
+    title: $.subject
+    content: $.description_text
+    eventDate: $.updated_at
+
+  sync:
+    mode: incremental
+    checkpoint: updated_at
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 60

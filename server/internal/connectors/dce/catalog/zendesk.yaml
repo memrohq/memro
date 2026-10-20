@@ -1,0 +1,42 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: zendesk
+  version: 1.0.0
+  description: Sync support tickets, satisfaction ratings, and customer comments from Zendesk
+
+spec:
+  type: rest
+  baseURL: https://api.zendesk.com/api/v2
+
+  auth:
+    type: bearer
+    secretRef: ZENDESK_API_TOKEN
+
+  operations:
+    - name: list_tickets
+      method: GET
+      path: /tickets.json
+      pagination:
+        type: cursor
+        cursorParam: page[after]
+        cursorPath: meta.after_cursor
+      response:
+        itemsPath: tickets
+
+  mapping:
+    id: $.id
+    title: $.subject
+    content: $.description
+    eventDate: $.updated_at
+    url: $.url
+
+  sync:
+    mode: incremental
+    checkpoint: updated_at
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 100

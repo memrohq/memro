@@ -1,0 +1,43 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: bitbucket
+  version: 1.0.0
+  description: Sync pull requests, issues, and commit activity from Bitbucket Cloud
+
+spec:
+  type: rest
+  baseURL: https://api.bitbucket.org/2.0
+
+  auth:
+    type: bearer
+    secretRef: BITBUCKET_ACCESS_TOKEN
+
+  operations:
+    - name: list_repositories
+      method: GET
+      path: /repositories
+      queryParams:
+        pagelen: "50"
+      pagination:
+        type: page
+        pageParam: page
+      response:
+        itemsPath: values
+
+  mapping:
+    id: $.uuid
+    title: $.name
+    content: $.description
+    eventDate: $.updated_on
+    url: $.links.html.href
+
+  sync:
+    mode: incremental
+    checkpoint: updated_on
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 120

@@ -1,0 +1,44 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: monday
+  version: 1.0.0
+  description: Sync items, boards, and updates from Monday.com
+
+spec:
+  type: rest
+  baseURL: https://api.monday.com/v2
+
+  auth:
+    type: apiKey
+    header: Authorization
+    secretRef: MONDAY_API_TOKEN
+
+  operations:
+    - name: list_boards
+      method: GET
+      path: /boards
+      queryParams:
+        limit: "50"
+      pagination:
+        type: page
+        pageParam: page
+      response:
+        itemsPath: boards
+
+  mapping:
+    id: $.id
+    title: $.name
+    content: $.description
+    eventDate: $.updated_at
+    url: $.url
+
+  sync:
+    mode: incremental
+    checkpoint: updated_at
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 60

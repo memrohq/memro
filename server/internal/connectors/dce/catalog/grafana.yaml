@@ -1,0 +1,40 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: grafana
+  version: 1.0.0
+  description: Sync alerts, notification policies, and dashboards from Grafana
+
+spec:
+  type: rest
+  baseURL: https://grafana.com/api
+
+  auth:
+    type: bearer
+    secretRef: GRAFANA_SERVICE_ACCOUNT_TOKEN
+
+  operations:
+    - name: list_alerts
+      method: GET
+      path: /alertmanager/grafana/api/v2/alerts
+      pagination:
+        type: none
+      response:
+        itemsPath: "$"
+
+  mapping:
+    id: $.fingerprint
+    title: $.labels.alertname
+    content: $.annotations.description
+    eventDate: $.startsAt
+    url: $.generatorURL
+
+  sync:
+    mode: incremental
+    checkpoint: startsAt
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 120

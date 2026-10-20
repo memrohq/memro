@@ -1,0 +1,45 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: snyk
+  version: 1.0.0
+  description: Sync vulnerabilities, licenses, and security issues from Snyk
+
+spec:
+  type: rest
+  baseURL: https://api.snyk.io/v1
+
+  auth:
+    type: apiKey
+    header: Authorization
+    prefix: "token "
+    secretRef: SNYK_API_TOKEN
+
+  operations:
+    - name: list_issues
+      method: GET
+      path: /reporting/issues
+      queryParams:
+        perPage: "50"
+      pagination:
+        type: page
+        pageParam: page
+      response:
+        itemsPath: results
+
+  mapping:
+    id: $.id
+    title: $.title
+    content: $.issue.severity
+    eventDate: $.introducedDate
+    url: $.url
+
+  sync:
+    mode: incremental
+    checkpoint: introducedDate
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 60

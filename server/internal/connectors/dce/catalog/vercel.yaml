@@ -1,0 +1,43 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: vercel
+  version: 1.0.0
+  description: Sync deployments, project domains, and build logs from Vercel
+
+spec:
+  type: rest
+  baseURL: https://api.vercel.com
+
+  auth:
+    type: bearer
+    secretRef: VERCEL_TOKEN
+
+  operations:
+    - name: list_deployments
+      method: GET
+      path: /v6/deployments
+      queryParams:
+        limit: "50"
+      pagination:
+        type: page
+        pageParam: page
+      response:
+        itemsPath: deployments
+
+  mapping:
+    id: $.uid
+    title: $.name
+    content: $.state
+    eventDate: $.created
+    url: $.url
+
+  sync:
+    mode: incremental
+    checkpoint: created
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 120

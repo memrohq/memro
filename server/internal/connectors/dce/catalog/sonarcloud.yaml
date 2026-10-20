@@ -1,0 +1,43 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: sonarcloud
+  version: 1.0.0
+  description: Sync code smells, bugs, and security hotspots from SonarCloud
+
+spec:
+  type: rest
+  baseURL: https://sonarcloud.io/api
+
+  auth:
+    type: bearer
+    secretRef: SONARCLOUD_TOKEN
+
+  operations:
+    - name: list_issues
+      method: GET
+      path: /issues/search
+      queryParams:
+        ps: "50"
+      pagination:
+        type: page
+        pageParam: p
+      response:
+        itemsPath: issues
+
+  mapping:
+    id: $.key
+    title: $.message
+    content: $.rule
+    eventDate: $.updateDate
+    authorName: $.author
+
+  sync:
+    mode: incremental
+    checkpoint: updateDate
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 60

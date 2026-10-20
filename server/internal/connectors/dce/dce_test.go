@@ -322,3 +322,16 @@ func TestRegistry(t *testing.T) {
 		t.Fatalf("expected 1 manifest in All(), got %d", len(all))
 	}
 }
+
+func TestCatalogManifests(t *testing.T) {
+	reg := NewRegistry()
+	if err := reg.LoadFromDir("./catalog"); err != nil {
+		t.Fatalf("failed to load catalog manifests: %v", err)
+	}
+	t.Logf("Successfully loaded and validated %d manifests from catalog", reg.Count())
+	for _, m := range reg.All() {
+		if err := m.Validate(); err != nil {
+			t.Errorf("manifest %s failed validation: %v", m.Metadata.Name, err)
+		}
+	}
+}

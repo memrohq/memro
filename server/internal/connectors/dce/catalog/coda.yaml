@@ -1,0 +1,44 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: coda
+  version: 1.0.0
+  description: Sync documents, tables, and formulas from Coda
+
+spec:
+  type: rest
+  baseURL: https://coda.io/apis/v1
+
+  auth:
+    type: bearer
+    secretRef: CODA_API_TOKEN
+
+  operations:
+    - name: list_docs
+      method: GET
+      path: /docs
+      queryParams:
+        limit: "50"
+      pagination:
+        type: cursor
+        cursorParam: pageToken
+        cursorPath: nextPageToken
+      response:
+        itemsPath: items
+
+  mapping:
+    id: $.id
+    title: $.name
+    content: $.description
+    eventDate: $.updatedAt
+    url: $.browserLink
+
+  sync:
+    mode: incremental
+    checkpoint: updatedAt
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 100

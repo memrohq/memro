@@ -1,0 +1,42 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: newrelic
+  version: 1.0.0
+  description: Sync alert violations, policy breaches, and APM incidents from New Relic
+
+spec:
+  type: rest
+  baseURL: https://api.newrelic.com/v2
+
+  auth:
+    type: apiKey
+    header: X-Api-Key
+    secretRef: NEW_RELIC_API_KEY
+
+  operations:
+    - name: list_alerts
+      method: GET
+      path: /alerts_violations.json
+      pagination:
+        type: page
+        pageParam: page
+      response:
+        itemsPath: violations
+
+  mapping:
+    id: $.id
+    title: $.label
+    content: $.description
+    eventDate: $.opened_at
+    url: $.links.violation_callback_url
+
+  sync:
+    mode: incremental
+    checkpoint: opened_at
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 60

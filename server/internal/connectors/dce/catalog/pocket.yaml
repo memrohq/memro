@@ -1,0 +1,46 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: pocket
+  version: 1.0.0
+  description: Sync saved articles, reading list items, and tags from Pocket
+
+spec:
+  type: rest
+  baseURL: https://getpocket.com/v3
+
+  auth:
+    type: bearer
+    secretRef: POCKET_ACCESS_TOKEN
+
+  operations:
+    - name: list_articles
+      method: GET
+      path: /get
+      queryParams:
+        state: "all"
+        detailType: "simple"
+      pagination:
+        type: offset
+        offsetParam: offset
+        limitParam: count
+        limit: 50
+      response:
+        itemsPath: list
+
+  mapping:
+    id: $.item_id
+    title: $.resolved_title
+    content: $.excerpt
+    eventDate: $.time_updated
+    url: $.resolved_url
+
+  sync:
+    mode: incremental
+    checkpoint: time_updated
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 60

@@ -1,0 +1,45 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: confluence
+  version: 1.0.0
+  description: Sync spaces, pages, and documentation from Atlassian Confluence
+
+spec:
+  type: rest
+  baseURL: https://api.atlassian.com/ex/confluence
+
+  auth:
+    type: bearer
+    secretRef: CONFLUENCE_ACCESS_TOKEN
+
+  operations:
+    - name: list_pages
+      method: GET
+      path: /wiki/api/v2/pages
+      queryParams:
+        limit: "50"
+      pagination:
+        type: cursor
+        cursorParam: cursor
+        cursorPath: _links.next
+      response:
+        itemsPath: results
+
+  mapping:
+    id: $.id
+    title: $.title
+    content: $.body.storage.value
+    eventDate: $.version.createdAt
+    authorName: $.authorId
+    url: $._links.webui
+
+  sync:
+    mode: incremental
+    checkpoint: version.createdAt
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 100

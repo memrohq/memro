@@ -1,0 +1,45 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: pagerduty
+  version: 1.0.0
+  description: Sync alerts, incidents, and escalation logs from PagerDuty
+
+spec:
+  type: rest
+  baseURL: https://api.pagerduty.com
+
+  auth:
+    type: apiKey
+    header: Authorization
+    prefix: "Token token="
+    secretRef: PAGERDUTY_API_TOKEN
+
+  operations:
+    - name: list_incidents
+      method: GET
+      path: /incidents
+      pagination:
+        type: offset
+        offsetParam: offset
+        limitParam: limit
+        limit: 50
+      response:
+        itemsPath: incidents
+
+  mapping:
+    id: $.id
+    title: $.title
+    content: $.summary
+    eventDate: $.created_at
+    url: $.html_url
+
+  sync:
+    mode: incremental
+    checkpoint: created_at
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 120

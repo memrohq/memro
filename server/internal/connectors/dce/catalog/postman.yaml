@@ -1,0 +1,39 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: postman
+  version: 1.0.0
+  description: Sync API collections, environments, and mock servers from Postman
+
+spec:
+  type: rest
+  baseURL: https://api.getpostman.com
+
+  auth:
+    type: apiKey
+    header: X-Api-Key
+    secretRef: POSTMAN_API_KEY
+
+  operations:
+    - name: list_collections
+      method: GET
+      path: /collections
+      pagination:
+        type: none
+      response:
+        itemsPath: collections
+
+  mapping:
+    id: $.id
+    title: $.name
+    content: $.uid
+    eventDate: $.updatedAt
+
+  sync:
+    mode: full
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 60

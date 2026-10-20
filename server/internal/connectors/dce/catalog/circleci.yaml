@@ -1,0 +1,42 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: circleci
+  version: 1.0.0
+  description: Sync pipelines, workflows, and build statuses from CircleCI
+
+spec:
+  type: rest
+  baseURL: https://circleci.com/api/v2
+
+  auth:
+    type: apiKey
+    header: Circle-Token
+    secretRef: CIRCLECI_TOKEN
+
+  operations:
+    - name: list_pipelines
+      method: GET
+      path: /pipeline
+      pagination:
+        type: cursor
+        cursorParam: page-token
+        cursorPath: next_page_token
+      response:
+        itemsPath: items
+
+  mapping:
+    id: $.id
+    title: $.project_slug
+    content: $.state
+    eventDate: $.updated_at
+
+  sync:
+    mode: incremental
+    checkpoint: updated_at
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 100

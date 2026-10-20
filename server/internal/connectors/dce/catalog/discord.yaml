@@ -1,0 +1,41 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: discord
+  version: 1.0.0
+  description: Sync guilds, channels, and threads from Discord
+
+spec:
+  type: rest
+  baseURL: https://discord.com/api/v10
+
+  auth:
+    type: apiKey
+    header: Authorization
+    prefix: "Bot "
+    secretRef: DISCORD_BOT_TOKEN
+
+  operations:
+    - name: list_guilds
+      method: GET
+      path: /users/@me/guilds
+      pagination:
+        type: cursor
+        cursorParam: after
+        cursorPath: id
+      response:
+        itemsPath: "$"
+
+  mapping:
+    id: $.id
+    title: $.name
+    content: $.description
+
+  sync:
+    mode: full
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 120
