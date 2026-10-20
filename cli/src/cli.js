@@ -6,6 +6,7 @@ import path from "node:path";
 import { CLIENTS, findClient } from "./clients.js";
 import { pick, pickOne, promptText } from "./picker.js";
 import { installInstructions, uninstallInstructions } from "./instructions.js";
+import * as ui from "./ui.js";
 
 const ENVIRONMENTS = {
   prod: "https://api.memro.co",
@@ -133,14 +134,15 @@ async function deviceLogin(api) {
   if (!start.ok) throw new Error(`Couldn't start sign-in: ${start.data?.message || start.status}`);
   const { device_code, user_code, verification_uri_complete, expires_in, interval } = start.data;
 
-  console.log(`\n  Your code: \x1b[1m${user_code}\x1b[0m`);
-  console.log(`  Opening ${verification_uri_complete}`);
-  console.log("  Sign in there and press Connect. (If the browser didn't open, visit the link.)\n");
+  ui.info("Sign in to Memro");
+  ui.line(`Your code: ${ui.c.bold(user_code)}`);
+  ui.line(ui.c.dim(`Opening ${verification_uri_complete}`));
+  ui.line(ui.c.dim("Approve it there. If the browser didn't open, visit the link."));
   openBrowser(verification_uri_complete);
 
   const deadline = Date.now() + (expires_in || 600) * 1000;
   let wait = (interval || 3) * 1000;
-  process.stdout.write("  Waiting for approval…");
+  process.stdout.write(`${ui.bar()}  ${ui.c.dim("Waiting for approval…")}`);
   while (Date.now() < deadline) {
     await sleep(wait);
     let res;
@@ -150,7 +152,7 @@ async function deviceLogin(api) {
       continue; // a dropped connection: keep polling until the code expires
     }
     if (res.ok) {
-      process.stdout.write(" approved.\n");
+      process.stdout.write(` ${ui.c.green("approved")}\n`);
       checkURL(res.data.mcp_url, "MCP");
       return res.data;
     }
@@ -186,6 +188,14 @@ export function isGitTracked(dir = process.cwd()) {
   }
 }
 
+/** The home folder or the filesystem root: never a project. */
+export function isHomeOrRoot(dir) {
+  // Compare real paths: git reports /private/var/… where HOME says /var/….
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const d = real(dir);
+  return d === real(os.homedir()) || d === path.parse(d).root;
+}
+
 export function resolveProjectRoot(startDir = process.cwd()) {
   try {
     const toplevel = execFileSync("git", ["rev-parse", "--show-toplevel"], {
@@ -193,7 +203,7 @@ export function resolveProjectRoot(startDir = process.cwd()) {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    if (toplevel && fs.existsSync(toplevel)) {
+    if (toplevel && fs.existsSync(toplevel) && !isHomeOrRoot(toplevel)) {
       return toplevel;
     }
   } catch {
@@ -280,116 +290,100 @@ async function chooseTargets(opts, cwd = process.cwd()) {
   if (opts.clients) return selectClients(opts.clients, scope, cwd);
   const detected = new Set(supported.filter((c) => c.detect({ scope, cwd })));
   if (opts.yes) return [...detected];
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    console.log("  Not a terminal: pass --yes (every detected tool) or --client <ids>.");
+  if (!interactive()) {
+    ui.warn("Not a terminal: pass --yes (every detected tool) or --client <ids>.");
     return null;
   }
-  console.log("");
+  // Installed tools first, then the rest, each in catalogue order.
+  const ordered = [...supported.filter((c) => detected.has(c)), ...supported.filter((c) => !detected.has(c))];
   const picked = await pick(
     [
-      ...supported.map((c) => ({ label: c.name, hint: detected.has(c) ? "" : "not detected", checked: detected.has(c), client: c })),
+      ...ordered.map((c) => ({ label: c.name, hint: detected.has(c) ? "" : "not installed", checked: detected.has(c), client: c })),
       {
-        label: "Teach these tools to use Memro automatically",
-        hint: scope === "project" ? "adds a note to ./CLAUDE.md, ./AGENTS.md…" : "adds a short note to CLAUDE.md, AGENTS.md…",
+        label: "Teach tools to use Memro automatically",
+        hint: "notes in CLAUDE.md, AGENTS.md…",
+        summary: "+ instructions",
         checked: opts.instructions,
         option: "instructions",
       },
     ],
-    { title: scope === "project" ? "Which tools should use Memro for this project?" : "Which tools should use Memro?" },
+    { title: scope === "project" ? "Which tools should use Memro in this project?" : "Which tools should use Memro?" },
   );
   if (!picked) return null;
   opts.instructions = picked.some((p) => p.option === "instructions");
   return picked.filter((p) => p.client).map((p) => p.client);
 }
 
+const interactive = () => Boolean(process.stdin.isTTY && process.stdout.isTTY);
+const host = (url) => url.replace(/^https?:\/\//, "");
+
 async function connect(opts) {
-  // If scope was not explicitly provided on CLI, ask interactively in a TTY terminal
-  if (!opts.scopeExplicit && process.stdin.isTTY && process.stdout.isTTY && !opts.yes && !opts.clients) {
-    console.log(`\n◆ Memro connect  (${opts.api})`);
+  ui.intro("Memro connect", host(opts.api));
+  ui.gap();
+
+  // Ask where to set up unless a flag already said so.
+  if (!opts.scopeExplicit && interactive() && !opts.yes && !opts.clients) {
+    const here = resolveProjectRoot(process.cwd());
     const scopeChoice = await pickOne(
       [
+        { label: "All my projects", hint: "Adds Memro to your tools globally", summary: "All projects (global)", value: "user" },
         {
-          label: "Global (user-wide across all projects)",
-          hint: "Connect tools everywhere on this machine (recommended for personal dev)",
-          value: "user",
-        },
-        {
-          label: "Current project (this repository only)",
-          hint: "Configure ./.cursor, ./.claude.json, and ./CLAUDE.md in current directory",
+          label: "Only this project",
+          hint: isHomeOrRoot(here) ? "Run this inside a project folder to use it" : tilde(here),
+          summary: `This project · ${tilde(here)}`,
           value: "project",
         },
       ],
-      { title: "Where would you like to configure Memro?" },
+      { title: "Where should Memro be set up?" },
     );
-    if (!scopeChoice) {
-      console.log("  Cancelled.");
-      return;
-    }
+    if (!scopeChoice) return ui.cancelled();
     opts.scope = scopeChoice.value;
   }
 
   const scope = opts.scope || "user";
   const cwd = scope === "project" ? resolveProjectRoot(process.cwd()) : process.cwd();
 
-  if (opts.scopeExplicit || !process.stdin.isTTY) {
-    console.log(`\n◆ Memro connect  (${opts.api})  [scope: ${scope}]`);
-  }
-
   if (scope === "project") {
-    if (cwd !== process.cwd()) {
-      console.log(`  Project root: ${cwd}`);
+    if (isHomeOrRoot(cwd)) {
+      ui.warn(`${tilde(cwd)} is not a project folder.`);
+      ui.line("Run this inside a project, or choose “All my projects”.");
+      return ui.outro("Nothing changed.");
     }
-    console.log("  ℹ Project scope configures MCP and instructions for this directory only.");
-    console.log("    Memories are tied to your Agent ID / API key, not this folder.");
-    console.log("    To isolate memories between projects, use a separate API key or Agent ID.\n");
-    if (isGitTracked(cwd)) {
-      console.log("  \x1b[33m⚠\x1b[0m Note: Current directory appears to be tracked by Git.");
-      console.log("    Configuration files containing your API key (such as .cursor/mcp.json, .claude.json)");
-      console.log("    will be protected or added to .gitignore.\n");
-    }
+    if (opts.scopeExplicit) ui.answered("Project", tilde(cwd));
 
     // Ask about memory isolation if no key was passed and terminal is interactive
-    if (!opts.key && !process.env.MEMRO_API_KEY && process.stdin.isTTY && process.stdout.isTTY && !opts.yes) {
+    if (!opts.key && !process.env.MEMRO_API_KEY && interactive() && !opts.yes) {
       const memoryChoice = await pickOne(
         [
           {
-            label: "Shared account memory (re-use your default credentials)",
-            hint: "Claude Code, Cursor, and other tools share the same memory pool",
+            label: "Shared with my account",
+            hint: "Same memory as your other projects and tools",
+            summary: "Shared with your account",
             value: "shared",
           },
           {
-            label: "Isolated project memory (enter a dedicated API key)",
-            hint: "Strict memory boundary: only tools in this project access this memory",
+            label: "Separate for this project",
+            hint: "Use a dedicated API key; only this project sees its memory",
+            summary: "Separate (project API key)",
             value: "isolated",
           },
         ],
-        { title: "Memory space for this project:" },
+        { title: "Which memory should this project use?" },
       );
-      if (!memoryChoice) {
-        console.log("  Cancelled.");
-        return;
-      }
+      if (!memoryChoice) return ui.cancelled();
       if (memoryChoice.value === "isolated") {
-        const enteredKey = await promptText("  Enter project API key (memro_sk_...): ");
-        if (!enteredKey) {
-          console.log("  No key entered. Cancelled.");
-          return;
-        }
+        const enteredKey = await promptText(`${ui.bar()}  Project API key (memro_sk_…): `);
+        if (!enteredKey) return ui.cancelled("No key entered. Nothing changed.");
         opts.key = enteredKey;
+        ui.gap();
       }
     }
   }
 
   // Choose first, so cancelling never creates an API key.
   const targets = await chooseTargets(opts, cwd);
-  if (!targets) {
-    console.log("  Nothing changed.");
-    return;
-  }
-  if (targets.length === 0 && !opts.yes) {
-    console.log("  No tools selected. Nothing changed.");
-    return;
-  }
+  if (!targets) return ui.cancelled();
+  if (targets.length === 0 && !opts.yes) return ui.cancelled("No tools selected. Nothing changed.");
 
   let creds = null;
   const providedKey = opts.key || process.env.MEMRO_API_KEY;
@@ -401,7 +395,7 @@ async function connect(opts) {
     const agentId = who.data?.agent_id || who.data?.id || "unknown";
     const mcpUrl = opts.api === ENVIRONMENTS.prod ? "https://mcp.memro.co/mcp" : `${opts.api}/mcp`;
     creds = { api_url: opts.api, mcp_url: mcpUrl, agent_id: agentId, api_key: providedKey };
-    console.log(`  Using provided API key for agent ${agentId.slice(0, 12)}…`);
+    ui.info(`Using the project key ${ui.c.dim(`(agent ${agentId.slice(0, 12)}…)`)}`);
   } else {
     creds = loadCredentials();
     if (creds?.api_url === opts.api) {
@@ -410,7 +404,7 @@ async function connect(opts) {
       // Anything else (an outage, a rate limit) says nothing about the key;
       // signing in again would mint a second one.
       else if (!who.ok) throw new Error(`Memro API returned ${who.status}. Try again in a moment.`);
-      else console.log(`  Already signed in as agent ${creds.agent_id.slice(0, 12)}…`);
+      else ui.info(`Signed in ${ui.c.dim(`(agent ${creds.agent_id.slice(0, 12)}…)`)}`);
     } else {
       creds = null;
     }
@@ -420,48 +414,51 @@ async function connect(opts) {
       saveCredentials(creds);
     }
   }
+  ui.gap();
 
   if (targets.length === 0) {
-    console.log("\n  No supported tools found for this configuration.");
+    ui.warn("No supported tools found for this setup.");
     printManual(creds);
-    return;
+    return ui.outro("Nothing else changed.");
   }
-  console.log(`\n  Adding Memro to: ${targets.map((c) => c.name).join(", ")}`);
 
+  ui.info(scope === "project" ? `Adding Memro to this project` : "Adding Memro to your tools");
   const conn = { mcpUrl: creds.mcp_url, apiKey: creds.api_key };
+  const width = Math.max(...targets.map((c) => c.name.length)) + 2;
+  const gitTracked = scope === "project" && isGitTracked(cwd);
   let ok = 0;
   for (const c of targets) {
     try {
       c.add(conn, { scope, cwd });
       ok++;
       const configFile = c.file(scope, cwd);
-      console.log(`  \x1b[32m✔\x1b[0m ${c.name.padEnd(15)} ${formatPath(configFile, scope, cwd)}`);
-      if (scope === "project" && isGitTracked(cwd)) {
-        const gitStatus = ensureGitIgnored(configFile, cwd);
-        if (gitStatus.added) {
-          console.log(`  \x1b[32m✔\x1b[0m ${"".padEnd(15)} Added ${path.relative(cwd, configFile)} to .gitignore (protected API key)`);
-        }
-      }
+      let note = "";
+      if (gitTracked && ensureGitIgnored(configFile, cwd).added) note = "added to .gitignore (holds your key)";
+      ui.ok(c.name.padEnd(width), `${formatPath(configFile, scope, cwd)}${note ? "  " + note : ""}`);
       if (opts.instructions && c.rules) {
         const rulesFile = c.rules(scope, cwd);
         if (rulesFile) {
           const result = installInstructions(rulesFile, { scope });
-          const note = result === "kept-own" ? "already tells it to use Memro; left as is" : "use Memro automatically";
-          console.log(`  \x1b[32m✔\x1b[0m ${"".padEnd(15)} ${formatPath(rulesFile, scope, cwd)} (${note})`);
+          const what = result === "kept-own" ? "already mentions Memro" : "use Memro automatically";
+          ui.ok("".padEnd(width), `${formatPath(rulesFile, scope, cwd)}  ${what}`);
         }
       }
     } catch (err) {
-      console.log(`  \x1b[33m!\x1b[0m ${c.name.padEnd(15)} ${err.message}`);
+      ui.fail(c.name.padEnd(width), err.message);
     }
   }
-  console.log(`\n  Done. Restart ${ok === 1 ? "the tool" : "your tools"} to load Memro's memory tools.`);
-  console.log("  Manage or revoke the key anytime in the dashboard → API keys.\n");
+  ui.gap();
+  ui.outro(
+    ok ? `Done. Restart ${ok === 1 ? "the tool" : "your tools"} to load Memro.` : "Nothing was configured.",
+    "Manage or revoke the key in the dashboard → API keys.",
+  );
 }
 
 function printManual(creds) {
-  console.log("\n  Add this MCP server to your tool manually:");
-  console.log(`    URL:     ${creds.mcp_url}`);
-  console.log("    Header:  Authorization: Bearer <the key in ~/.memro/credentials.json>\n");
+  ui.line("Add this MCP server to your tool by hand:");
+  ui.line(`URL     ${creds.mcp_url}`);
+  ui.line("Header  Authorization: Bearer <the key in ~/.memro/credentials.json>");
+  ui.gap();
 }
 
 async function status(opts) {
@@ -522,7 +519,7 @@ const tilde = (p) => (p.startsWith(os.homedir()) ? "~" + p.slice(os.homedir().le
 function formatPath(filePath, scope, cwd) {
   if (scope === "project") {
     const rel = path.relative(cwd, filePath);
-    return rel.startsWith(".") ? rel : `./${rel}`;
+    return rel.startsWith("..") || path.isAbsolute(rel) ? tilde(filePath) : `./${rel}`;
   }
   return tilde(filePath);
 }

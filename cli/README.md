@@ -21,14 +21,14 @@ npx memro-cli connect --project
 
 | Tool | Global (`--scope user`) | Project (`--project`) |
 |---|---|---|
-| Claude Code | `claude mcp add --scope user` (or `~/.claude.json`) | `claude mcp add --scope project` (or `./.claude.json`) |
+| Claude Code | `claude mcp add --scope user` (or `~/.claude.json`) | `claude mcp add --scope project` (or `./.mcp.json`) |
 | Cursor | `~/.cursor/mcp.json` | `./.cursor/mcp.json` |
 | Codex | `~/.codex/config.toml` | `./.codex/config.toml` |
 | VS Code | User `mcp.json` | `./.vscode/mcp.json` |
 | Antigravity | `~/.gemini/config/mcp_config.json` | `./.gemini/config/mcp_config.json` |
 | OpenCode | `~/.config/opencode/opencode.json` | `./opencode.json` |
 | Gemini CLI | `~/.gemini/settings.json` | `./.gemini/settings.json` |
-| Windsurf | `~/.codeium/windsurf/mcp_config.json` | `./.codeium/windsurf/mcp_config.json` |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | — (Windsurf has no per-project MCP config) |
 | Claude Desktop | `claude_desktop_config.json` (via `mcp-remote`) | *(Global only)* |
 
 5. Teaches each tool to use Memro without being asked: recall at the start of
@@ -43,7 +43,7 @@ npx memro-cli connect --project
    | OpenCode | `~/.config/opencode/AGENTS.md` | `./AGENTS.md` |
    | Gemini CLI | `~/.gemini/GEMINI.md` | `./GEMINI.md` |
    | Antigravity | `~/.gemini/config/rules/memro.md` | `./.agents/rules/memro.md` |
-   | Windsurf | `~/.codeium/windsurf/memories/global_rules.md` | `./.codeium/windsurf/memories/global_rules.md` |
+   | Windsurf | `~/.codeium/windsurf/memories/global_rules.md` | — |
 
    Untick "Teach these tools…" in the list, or pass `--no-instructions`, to
    skip it. `disconnect` removes the note and leaves the rest of the file.

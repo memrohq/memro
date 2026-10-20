@@ -1,5 +1,6 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,7 +17,7 @@ process.env.XDG_CONFIG_HOME = path.join(HOME, ".config");
 process.env.CODEX_HOME = path.join(HOME, ".codex");
 process.env.MEMRO_NO_CLAUDE_CLI = "1";
 
-const { parseArgs, isGitTracked, resolveProjectRoot, ensureGitIgnored } = await import("../src/cli.js");
+const { parseArgs, isGitTracked, resolveProjectRoot, ensureGitIgnored, isHomeOrRoot } = await import("../src/cli.js");
 const { CLIENTS, findClient } = await import("../src/clients.js");
 const { PROJECT_BLOCK, BLOCK, START, END, upsertBlock, removeBlock, installInstructions, uninstallInstructions } = await import("../src/instructions.js");
 
@@ -65,13 +66,14 @@ test("findClient resolves aliases such as 'claude' and 'code'", () => {
   assert.equal(findClient("cursor")?.id, "cursor");
 });
 
-test("Claude Code in project mode writes to cwd and uses PROJECT_BLOCK", () => {
+test("Claude Code in project mode writes ./.mcp.json and uses PROJECT_BLOCK", () => {
   const c = findClient("claude-code");
   assert.equal(c.supportsScope("project"), true);
 
   const projFile = c.file("project", PROJECT_DIR);
   const projRules = c.rules("project", PROJECT_DIR);
-  assert.equal(projFile, path.join(PROJECT_DIR, ".claude.json"));
+  // .mcp.json is Claude Code's project-scoped server file (`claude mcp add --scope project`).
+  assert.equal(projFile, path.join(PROJECT_DIR, ".mcp.json"));
   assert.equal(projRules, path.join(PROJECT_DIR, "CLAUDE.md"));
 
   // Pre-populate with existing server
@@ -265,4 +267,17 @@ test("custom --key is used for project without overwriting global credentials", 
   const globalCreds = JSON.parse(fs.readFileSync(globalCredsFile, "utf8"));
   assert.equal(globalCreds.api_key, "memro_sk_global_user");
   assert.equal(globalCreds.agent_id, "agent_global");
+});
+
+// Regression (memro-cli 0.1.3): a home folder that is itself a git repo (or
+// holds .claude/.cursor) became the "project", and project files landed in ~.
+test("a git repository at the home folder is never the project root", () => {
+  execFileSync("git", ["init", "-q", HOME]);
+  const sub = path.join(HOME, "Documents", "work", "app");
+  fs.mkdirSync(sub, { recursive: true });
+  assert.equal(resolveProjectRoot(sub), sub);
+  assert.equal(isHomeOrRoot(HOME), true);
+  assert.equal(isHomeOrRoot(path.parse(HOME).root), true);
+  assert.equal(isHomeOrRoot(sub), false);
+  fs.rmSync(path.join(HOME, ".git"), { recursive: true, force: true });
 });

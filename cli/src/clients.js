@@ -102,6 +102,22 @@ function jsonClient({
 
 const exists = (...p) => fs.existsSync(path.join(...p));
 
+/** An executable called `cmd` on PATH (checked on disk, nothing is run). */
+export function onPath(cmd) {
+  const exts = process.platform === "win32" ? (process.env.PATHEXT || ".EXE;.CMD;.BAT").split(";") : [""];
+  return (process.env.PATH || "").split(path.delimiter).filter(Boolean)
+    .some((dir) => exts.some((ext) => fs.existsSync(path.join(dir, cmd + ext))));
+}
+
+/** A desktop app is installed: its app bundle or program folder exists, or
+ * its command is on PATH. A leftover settings folder does not count. */
+function appInstalled({ mac, win, linux = [], cmd }) {
+  if (cmd && onPath(cmd)) return true;
+  if (process.platform === "darwin") return ["/Applications", path.join(home(), "Applications")].some((d) => exists(d, `${mac}.app`));
+  if (process.platform === "win32") return exists(process.env.LOCALAPPDATA || path.join(home(), "AppData", "Local"), "Programs", win);
+  return linux.some((p) => fs.existsSync(p));
+}
+
 // --- Codex (TOML) ------------------------------------------------------------------
 
 const CODEX_HEADER = `[mcp_servers.${SERVER_NAME}]`;
@@ -184,14 +200,16 @@ const claudeCode = {
   name: "Claude Code",
   aliases: ["claude", "claudecode"],
   supportsScope: (scope) => scope === "user" || scope === "project",
+  // Project-scoped servers live in the project's .mcp.json (what
+  // `claude mcp add --scope project` writes); user scope in ~/.claude.json.
   file: (scope = "user", cwd = process.cwd()) => {
-    return scope === "project" ? path.join(cwd, ".claude.json") : path.join(home(), ".claude.json");
+    return scope === "project" ? path.join(cwd, ".mcp.json") : path.join(home(), ".claude.json");
   },
   detect: (opts = {}) => {
     const scope = typeof opts === "string" ? opts : (opts?.scope || "user");
     const cwd = opts?.cwd || process.cwd();
     if (scope === "project") {
-      return exists(cwd, ".claude.json") || exists(cwd, ".claude") || exists(cwd, "CLAUDE.md") || hasClaudeCLI() || exists(home(), ".claude.json") || exists(home(), ".claude");
+      return exists(cwd, ".mcp.json") || exists(cwd, ".claude") || exists(cwd, "CLAUDE.md") || hasClaudeCLI() || exists(home(), ".claude.json") || exists(home(), ".claude");
     }
     return exists(home(), ".claude.json") || exists(home(), ".claude") || hasClaudeCLI();
   },
@@ -280,10 +298,14 @@ export const CLIENTS = [
     id: "windsurf",
     name: "Windsurf",
     aliases: [],
-    file: (scope, cwd) => (scope === "project" ? path.join(cwd, ".codeium", "windsurf", "mcp_config.json") : path.join(home(), ".codeium", "windsurf", "mcp_config.json")),
-    detect: (scope, cwd) => (scope === "project" ? exists(cwd, ".codeium") || exists(home(), ".codeium", "windsurf") : exists(home(), ".codeium", "windsurf")),
+    // Windsurf reads MCP servers from one user-wide file; it has no
+    // per-project MCP config.
+    supportsScope: (scope) => scope === "user",
+    file: () => path.join(home(), ".codeium", "windsurf", "mcp_config.json"),
+    // ~/.codeium/windsurf outlives an uninstall, so it is not proof.
+    detect: () => appInstalled({ mac: "Windsurf", win: "Windsurf", cmd: "windsurf", linux: ["/usr/share/windsurf", "/opt/Windsurf", "/opt/windsurf"] }),
     entry: ({ mcpUrl, apiKey }) => ({ serverUrl: mcpUrl, headers: bearer(apiKey) }),
-    rules: (scope, cwd) => (scope === "project" ? path.join(cwd, ".codeium", "windsurf", "memories", "global_rules.md") : path.join(home(), ".codeium", "windsurf", "memories", "global_rules.md")),
+    rules: () => path.join(home(), ".codeium", "windsurf", "memories", "global_rules.md"),
   }),
   jsonClient({
     id: "claude-desktop",

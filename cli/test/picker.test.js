@@ -74,7 +74,7 @@ test("options sit below the tools and are not counted or toggled by a", () => {
   assert.equal(s.items.at(-1).checked, true, "a leaves options alone");
   const lines = render(initialState(withOption), "Pick").map(strip);
   assert.match(lines.at(-1), /2 selected/);
-  assert.equal(lines[lines.findIndex((l) => l.includes("Teach tools")) - 1], "");
+  assert.equal(lines[lines.findIndex((l) => l.includes("Teach tools")) - 1], "│", "a blank row on the side bar");
 });
 
 test("pickOne handles arrow navigation, selection, and cancellation", async () => {
