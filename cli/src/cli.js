@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -25,31 +25,64 @@ Usage
   npx memro-cli disconnect   Remove Memro from your tools and forget the key
 
 Options
-  --client <ids>             Only these tools, comma-separated, skipping the list (${CLIENTS.map((c) => c.id).join(", ")})
+  --project                  Configure the current project instead of global tools
+  --scope <user|project>     Configuration scope: "user" (default) or "project"
+  --client <ids>             Only these tools, comma-separated (${CLIENTS.map((c) => c.id).join(", ")})
+  --key <key>                Use a specific API key (memro_sk_...) instead of saved credentials
   --yes, -y                  Don't ask: use every detected tool
   --no-instructions          Don't add the "use Memro automatically" note to
-                             the tools' global instructions (CLAUDE.md, AGENTS.md…)
+                             the tools' instructions (CLAUDE.md, AGENTS.md…)
   --staging | --local        Use staging or a local server instead of Memro Cloud
   --api <url>                Use a specific Memro API (self-hosted)
 `;
 
-function parseArgs(argv) {
-  const opts = { command: null, clients: null, yes: false, api: null, instructions: true };
+export function parseArgs(argv) {
+  const opts = { command: null, clients: null, yes: false, api: null, instructions: true, scope: null, key: null };
+  let projectFlag = false;
+  let scopeFlagValue = null;
+
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--client" || a === "--clients") opts.clients = (argv[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
-    else if (a === "--yes" || a === "-y") opts.yes = true;
-    else if (a === "--no-instructions") opts.instructions = false;
-    else if (a === "--staging") opts.api = ENVIRONMENTS.staging;
-    else if (a === "--local") opts.api = ENVIRONMENTS.local;
-    else if (a === "--api") {
+    if (a === "--client" || a === "--clients") {
+      opts.clients = (argv[++i] || "").split(",").map((s) => s.trim()).filter(Boolean);
+    } else if (a === "--yes" || a === "-y") {
+      opts.yes = true;
+    } else if (a === "--no-instructions") {
+      opts.instructions = false;
+    } else if (a === "--project") {
+      projectFlag = true;
+    } else if (a === "--scope") {
+      const val = (argv[++i] || "").toLowerCase().trim();
+      if (!val || val.startsWith("-")) throw new Error("--scope requires a value ('user' or 'project')");
+      if (val !== "user" && val !== "project") throw new Error(`Invalid scope "${val}". Must be "user" or "project".`);
+      if (scopeFlagValue && scopeFlagValue !== val) {
+        throw new Error(`Conflicting scope arguments: specified both "--scope ${scopeFlagValue}" and "--scope ${val}".`);
+      }
+      scopeFlagValue = val;
+    } else if (a === "--key") {
+      opts.key = argv[++i];
+      if (!opts.key || opts.key.startsWith("-")) throw new Error("--key requires an API key (memro_sk_...)");
+    } else if (a === "--staging") {
+      opts.api = ENVIRONMENTS.staging;
+    } else if (a === "--local") {
+      opts.api = ENVIRONMENTS.local;
+    } else if (a === "--api") {
       opts.api = argv[++i];
       if (!opts.api || opts.api.startsWith("-")) throw new Error("--api needs a URL, e.g. --api https://memro.example.com");
+    } else if (a === "--help" || a === "-h") {
+      opts.command = "help";
+    } else if (!opts.command) {
+      opts.command = a;
+    } else {
+      throw new Error(`Unexpected argument: ${a}`);
     }
-    else if (a === "--help" || a === "-h") opts.command = "help";
-    else if (!opts.command) opts.command = a;
-    else throw new Error(`Unexpected argument: ${a}`);
   }
+
+  if (projectFlag && scopeFlagValue === "user") {
+    throw new Error('Conflicting scope arguments: cannot combine "--project" with "--scope user".');
+  }
+
+  opts.scope = projectFlag ? "project" : (scopeFlagValue || "user");
   opts.api = checkURL((opts.api || process.env.MEMRO_API_URL || ENVIRONMENTS.prod).replace(/\/+$/, ""), "API");
   return opts;
 }
@@ -143,11 +176,21 @@ function loadCredentials() {
   try { return JSON.parse(fs.readFileSync(CREDENTIALS(), "utf8")); } catch { return null; }
 }
 
-function selectClients(ids) {
-  if (!ids) return CLIENTS.filter((c) => c.detect());
+export function isGitTracked(dir = process.cwd()) {
+  try {
+    return fs.existsSync(path.join(dir, ".git")) ||
+      execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: dir, stdio: "ignore" }) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function selectClients(ids, scope = "user", cwd = process.cwd()) {
+  if (!ids) return CLIENTS.filter((c) => c.detect({ scope, cwd }) && c.supportsScope(scope));
   return ids.map((id) => {
     const c = findClient(id);
     if (!c) throw new Error(`Unknown client "${id}". Known: ${CLIENTS.map((x) => x.id).join(", ")}`);
+    if (!c.supportsScope(scope)) throw new Error(`${c.name} does not support ${scope} scope.`);
     return c;
   });
 }
@@ -158,8 +201,11 @@ function selectClients(ids) {
  * Returns null when the user cancels or nothing can be asked.
  */
 async function chooseTargets(opts) {
-  if (opts.clients) return selectClients(opts.clients);
-  const detected = new Set(CLIENTS.filter((c) => c.detect()));
+  const scope = opts.scope || "user";
+  const cwd = process.cwd();
+  const supported = CLIENTS.filter((c) => c.supportsScope(scope));
+  if (opts.clients) return selectClients(opts.clients, scope, cwd);
+  const detected = new Set(supported.filter((c) => c.detect({ scope, cwd })));
   if (opts.yes) return [...detected];
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.log("  Not a terminal: pass --yes (every detected tool) or --client <ids>.");
@@ -168,11 +214,15 @@ async function chooseTargets(opts) {
   console.log("");
   const picked = await pick(
     [
-      ...CLIENTS.map((c) => ({ label: c.name, hint: detected.has(c) ? "" : "not detected", checked: detected.has(c), client: c })),
-      { label: "Teach these tools to use Memro automatically", hint: "adds a short note to CLAUDE.md, AGENTS.md…",
-        checked: opts.instructions, option: "instructions" },
+      ...supported.map((c) => ({ label: c.name, hint: detected.has(c) ? "" : "not detected", checked: detected.has(c), client: c })),
+      {
+        label: "Teach these tools to use Memro automatically",
+        hint: scope === "project" ? "adds a note to ./CLAUDE.md, ./AGENTS.md…" : "adds a short note to CLAUDE.md, AGENTS.md…",
+        checked: opts.instructions,
+        option: "instructions",
+      },
     ],
-    { title: "Which tools should use Memro?" },
+    { title: scope === "project" ? "Which tools should use Memro for this project?" : "Which tools should use Memro?" },
   );
   if (!picked) return null;
   opts.instructions = picked.some((p) => p.option === "instructions");
@@ -180,7 +230,21 @@ async function chooseTargets(opts) {
 }
 
 async function connect(opts) {
-  console.log(`\n◆ Memro connect  (${opts.api})`);
+  const scope = opts.scope || "user";
+  const cwd = process.cwd();
+  console.log(`\n◆ Memro connect  (${opts.api})  [scope: ${scope}]`);
+
+  if (scope === "project") {
+    console.log("  ℹ Project scope configures MCP and instructions for this directory only.");
+    console.log("    Memories are tied to your Agent ID / API key, not this folder.");
+    console.log("    To isolate memories between projects, use a separate API key or Agent ID.\n");
+    if (isGitTracked(cwd)) {
+      console.log("  \x1b[33m⚠\x1b[0m Warning: Current directory appears to be tracked by Git.");
+      console.log("    Configuration files containing your API key (such as .cursor/mcp.json, .claude.json)");
+      console.log("    must NOT be committed. Ensure they are added to .gitignore.\n");
+    }
+  }
+
   // Choose first, so cancelling never creates an API key.
   const targets = await chooseTargets(opts);
   if (!targets) {
@@ -192,25 +256,38 @@ async function connect(opts) {
     return;
   }
 
-  let creds = loadCredentials();
-  if (creds?.api_url === opts.api) {
-    const who = await request(opts.api, "/auth/whoami", { key: creds.api_key });
-    if (who.status === 401 || who.status === 403) creds = null;
-    // Anything else (an outage, a rate limit) says nothing about the key;
-    // signing in again would mint a second one.
-    else if (!who.ok) throw new Error(`Memro API returned ${who.status}. Try again in a moment.`);
-    else console.log(`  Already signed in as agent ${creds.agent_id.slice(0, 12)}…`);
+  let creds = null;
+  const providedKey = opts.key || process.env.MEMRO_API_KEY;
+  if (providedKey) {
+    const who = await request(opts.api, "/auth/whoami", { key: providedKey });
+    if (!who.ok) {
+      throw new Error(`The provided API key is not valid (${who.status}) on ${opts.api}`);
+    }
+    const agentId = who.data?.agent_id || who.data?.id || "unknown";
+    const mcpUrl = opts.api === ENVIRONMENTS.prod ? "https://mcp.memro.co/mcp" : `${opts.api}/mcp`;
+    creds = { api_url: opts.api, mcp_url: mcpUrl, agent_id: agentId, api_key: providedKey };
+    console.log(`  Using provided API key for agent ${agentId.slice(0, 12)}…`);
   } else {
-    creds = null;
-  }
-  if (!creds) {
-    const res = await deviceLogin(opts.api);
-    creds = { api_url: opts.api, mcp_url: res.mcp_url, agent_id: res.agent_id, api_key: res.api_key };
-    saveCredentials(creds);
+    creds = loadCredentials();
+    if (creds?.api_url === opts.api) {
+      const who = await request(opts.api, "/auth/whoami", { key: creds.api_key });
+      if (who.status === 401 || who.status === 403) creds = null;
+      // Anything else (an outage, a rate limit) says nothing about the key;
+      // signing in again would mint a second one.
+      else if (!who.ok) throw new Error(`Memro API returned ${who.status}. Try again in a moment.`);
+      else console.log(`  Already signed in as agent ${creds.agent_id.slice(0, 12)}…`);
+    } else {
+      creds = null;
+    }
+    if (!creds) {
+      const res = await deviceLogin(opts.api);
+      creds = { api_url: opts.api, mcp_url: res.mcp_url, agent_id: res.agent_id, api_key: res.api_key };
+      saveCredentials(creds);
+    }
   }
 
   if (targets.length === 0) {
-    console.log("\n  No supported tools found on this machine.");
+    console.log("\n  No supported tools found for this configuration.");
     printManual(creds);
     return;
   }
@@ -220,13 +297,17 @@ async function connect(opts) {
   let ok = 0;
   for (const c of targets) {
     try {
-      c.add(conn);
+      c.add(conn, { scope, cwd });
       ok++;
-      console.log(`  \x1b[32m✔\x1b[0m ${c.name.padEnd(15)} ${tilde(c.file())}`);
+      const configFile = c.file(scope, cwd);
+      console.log(`  \x1b[32m✔\x1b[0m ${c.name.padEnd(15)} ${formatPath(configFile, scope, cwd)}`);
       if (opts.instructions && c.rules) {
-        const result = installInstructions(c.rules());
-        const note = result === "kept-own" ? "already tells it to use Memro; left as is" : "use Memro automatically";
-        console.log(`  \x1b[32m✔\x1b[0m ${"".padEnd(15)} ${tilde(c.rules())} (${note})`);
+        const rulesFile = c.rules(scope, cwd);
+        if (rulesFile) {
+          const result = installInstructions(rulesFile, { scope });
+          const note = result === "kept-own" ? "already tells it to use Memro; left as is" : "use Memro automatically";
+          console.log(`  \x1b[32m✔\x1b[0m ${"".padEnd(15)} ${formatPath(rulesFile, scope, cwd)} (${note})`);
+        }
       }
     } catch (err) {
       console.log(`  \x1b[33m!\x1b[0m ${c.name.padEnd(15)} ${err.message}`);
@@ -243,43 +324,64 @@ function printManual(creds) {
 }
 
 async function status(opts) {
+  const scope = opts.scope || "user";
+  const cwd = process.cwd();
   const creds = loadCredentials();
-  if (!creds) {
+  const activeKey = opts.key || process.env.MEMRO_API_KEY || creds?.api_key;
+  if (!creds && !activeKey) {
     console.log("Not connected. Run `npx memro-cli connect`.");
     return;
   }
-  const who = await request(creds.api_url, "/auth/whoami", { key: creds.api_key });
-  console.log(`API:    ${creds.api_url}`);
-  console.log(`MCP:    ${creds.mcp_url}`);
-  console.log(`Agent:  ${creds.agent_id}`);
+  const apiUrl = creds?.api_url || opts.api;
+  const who = await request(apiUrl, "/auth/whoami", { key: activeKey });
+  console.log(`API:    ${apiUrl}`);
+  console.log(`MCP:    ${creds?.mcp_url || (apiUrl === ENVIRONMENTS.prod ? "https://mcp.memro.co/mcp" : `${apiUrl}/mcp`)}`);
+  console.log(`Agent:  ${who.data?.agent_id || creds?.agent_id || "unknown"}`);
   console.log(`Key:    ${who.ok ? "valid" : `not valid (${who.status}) — run \`npx memro-cli connect\``}`);
-  const configured = CLIENTS.filter((c) => {
+  console.log(`Scope:  ${scope}`);
+  const supported = CLIENTS.filter((c) => c.supportsScope(scope));
+  const configured = supported.filter((c) => {
     try {
-      const text = fs.existsSync(c.file()) ? fs.readFileSync(c.file(), "utf8") : "";
-      return text.includes(creds.mcp_url);
+      const targetFile = c.file(scope, cwd);
+      const text = fs.existsSync(targetFile) ? fs.readFileSync(targetFile, "utf8") : "";
+      return text.includes("memro");
     } catch { return false; }
   });
   console.log(`Tools:  ${configured.map((c) => c.name).join(", ") || "none"}`);
-  void opts;
 }
 
 async function disconnect(opts) {
-  const targets = opts.clients ? selectClients(opts.clients) : CLIENTS;
+  const scope = opts.scope || "user";
+  const cwd = process.cwd();
+  const targets = opts.clients ? selectClients(opts.clients, scope, cwd) : CLIENTS.filter((c) => c.supportsScope(scope));
   for (const c of targets) {
     try {
-      if (c.remove()) console.log(`  ✔ Removed from ${c.name}`);
-      if (c.rules && uninstallInstructions(c.rules())) console.log(`  ✔ Removed the Memro note from ${tilde(c.rules())}`);
+      if (c.remove({ scope, cwd })) console.log(`  ✔ Removed from ${c.name} (${scope})`);
+      if (c.rules) {
+        const rulesFile = c.rules(scope, cwd);
+        if (rulesFile && uninstallInstructions(rulesFile)) {
+          console.log(`  ✔ Removed the Memro note from ${formatPath(rulesFile, scope, cwd)}`);
+        }
+      }
     } catch (err) {
       console.log(`  ! ${c.name}: ${err.message}`);
     }
   }
-  if (!opts.clients && fs.existsSync(CREDENTIALS())) {
+  if (scope === "user" && !opts.clients && fs.existsSync(CREDENTIALS())) {
     fs.rmSync(CREDENTIALS());
     console.log("  ✔ Forgot the local key. Revoke it in the dashboard → API keys.");
   }
 }
 
 const tilde = (p) => (p.startsWith(os.homedir()) ? "~" + p.slice(os.homedir().length) : p);
+
+function formatPath(filePath, scope, cwd) {
+  if (scope === "project") {
+    const rel = path.relative(cwd, filePath);
+    return rel.startsWith(".") ? rel : `./${rel}`;
+  }
+  return tilde(filePath);
+}
 
 export async function main(argv) {
   const opts = parseArgs(argv);

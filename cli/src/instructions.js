@@ -22,13 +22,22 @@ Memro is my long-term memory across tools and sessions (MCP server \`memro\`). U
 Never store secrets (keys, passwords, tokens), one-off chatter, or anything I ask you not to keep. Don't announce routine saves.
 ${END}`;
 
+export const PROJECT_BLOCK = `${START}
+## Memro — long-term memory
+
+- At the start of a task, recall relevant context from Memro.
+- Remember durable decisions, preferences, and architectural changes.
+- Never store secrets, API keys, passwords, or sensitive client data.
+- Follow this repository's privacy and memory-sharing boundaries.
+${END}`;
+
 const blockPattern = new RegExp(`\\n*${START}[\\s\\S]*?${END}\\n*`);
 
 /** Text with the Memro block added, or replaced if it is already there. */
-export function upsertBlock(text) {
-  if (blockPattern.test(text)) return text.replace(blockPattern, `\n\n${BLOCK}\n`).replace(/^\n+/, "");
+export function upsertBlock(text, block = BLOCK) {
+  if (blockPattern.test(text)) return text.replace(blockPattern, `\n\n${block}\n`).replace(/^\n+/, "");
   const body = text.replace(/\s+$/, "");
-  return (body ? body + "\n\n" : "") + BLOCK + "\n";
+  return (body ? body + "\n\n" : "") + block + "\n";
 }
 
 /** Text without the Memro block (unchanged if it has none). */
@@ -66,14 +75,15 @@ export function hasOwnMemroGuidance(text) {
  * older block of ours so the agent never gets the rules twice. Returns
  * "added", "updated", "unchanged" or "kept-own".
  */
-export function installInstructions(file) {
+export function installInstructions(file, { scope = "user", block } = {}) {
+  const targetBlock = block || (scope === "project" ? PROJECT_BLOCK : BLOCK);
   const before = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
   if (hasOwnMemroGuidance(before)) {
     const after = removeBlock(before);
     if (after !== before) writeText(file, after);
     return "kept-own";
   }
-  const after = upsertBlock(before);
+  const after = upsertBlock(before, targetBlock);
   if (after === before) return "unchanged";
   writeText(file, after);
   return before.includes(START) ? "updated" : "added";
