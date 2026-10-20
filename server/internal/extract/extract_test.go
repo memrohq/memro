@@ -52,3 +52,17 @@ func TestFileTypeAndChunk(t *testing.T) {
 }
 
 func ptr(t time.Time) *time.Time { return &t }
+
+func TestEntitiesIdentifiers(t *testing.T) {
+	e := Entities("The memro.co site has SEO and AEO groundwork. Static files live in public: llms.txt and " +
+		"robots.txt. The homepage has FAQPage and JSON-LD markup. Ana prefers tea.")
+	for _, want := range []string{"memro.co", "seo", "aeo", "llms.txt", "robots.txt", "faqpage", "json-ld", "ana"} {
+		if !slices.Contains(e, want) {
+			t.Errorf("missing %q in %v", want, e)
+		}
+	}
+	// Identifiers rank before ordinary capitalized words.
+	if i, j := slices.Index(e, "static"), slices.Index(e, "seo"); i < j {
+		t.Errorf("%q ranked before %q: %v", "static", "seo", e)
+	}
+}

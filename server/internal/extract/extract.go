@@ -105,7 +105,10 @@ var (
 	reProperNoun  = regexp.MustCompile(`\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b`)
 	reTimeWord    = regexp.MustCompile(`\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|monday|tuesday|wednesday|thursday|friday|saturday|sunday|yesterday|today|tomorrow)\b`)
 	reEmailHandle = regexp.MustCompile(`\b[A-Za-z]+@[A-Za-z]+\b`)
-	entityWords   = []string{"project", "work", "meeting", "call", "email", "team", "manager", "colleague",
+	// Identifiers that name things but aren't Title Case: acronyms (SEO,
+	// JSON-LD), CamelCase (FAQPage, OpenAI) and dotted names (memro.co, llms.txt).
+	reIdentifier = regexp.MustCompile(`\b(?:[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)*|[A-Z]{2,}[a-z0-9]+|[A-Z]?[a-z0-9]+(?:[A-Z]+[a-z0-9]*)+|[A-Za-z][\w-]+(?:\.[A-Za-z]\w+)+)\b`)
+	entityWords  = []string{"project", "work", "meeting", "call", "email", "team", "manager", "colleague",
 		"travel", "vacation", "trip", "conference", "event", "presentation", "talk", "python", "rust",
 		"javascript", "react", "typescript", "database", "api", "server", "client"}
 )
@@ -124,11 +127,26 @@ var notEntities = map[string]bool{
 }
 
 // Entities extracts up to 20 lowercase tags used for search pre-filtering:
-// proper nouns first (most frequent first), then topic keywords, people
+// proper nouns and identifiers (acronyms, CamelCase, dotted names), most
+// frequent first with identifiers winning ties, then topic keywords, people
 // from email-style handles and time words.
 func Entities(content string) []string {
 	counts := map[string]int{}
 	first := map[string]int{}
+	ident := map[string]bool{}
+	count := func(key string, pos int) {
+		if _, seen := first[key]; !seen {
+			first[key] = pos
+		}
+		counts[key]++
+	}
+	for _, loc := range reIdentifier.FindAllStringIndex(content, -1) {
+		if m := content[loc[0]:loc[1]]; len(m) >= 2 && len(m) < 50 {
+			key := strings.ToLower(m)
+			ident[key] = true
+			count(key, loc[0])
+		}
+	}
 	for i, m := range reProperNoun.FindAllString(content, -1) {
 		l := len(m)
 		if l <= 2 || l >= 50 {
@@ -142,20 +160,21 @@ func Entities(content string) []string {
 		if w, rest, ok := strings.Cut(key, " "); ok && notEntities[w] {
 			key = rest
 		}
-		if _, seen := first[key]; !seen {
-			first[key] = i
-		}
-		counts[key]++
+		count(key, len(content)+i)
 	}
 	nouns := make([]string, 0, len(counts))
 	for k := range counts {
 		nouns = append(nouns, k)
 	}
 	sort.Slice(nouns, func(i, j int) bool {
-		if counts[nouns[i]] != counts[nouns[j]] {
-			return counts[nouns[i]] > counts[nouns[j]]
+		a, b := nouns[i], nouns[j]
+		if counts[a] != counts[b] {
+			return counts[a] > counts[b]
 		}
-		return first[nouns[i]] < first[nouns[j]]
+		if ident[a] != ident[b] {
+			return ident[a]
+		}
+		return first[a] < first[b]
 	})
 
 	seen := map[string]bool{}
