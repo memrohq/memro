@@ -23,6 +23,12 @@ const LinearMark = ({ className = "size-6" }) => (
   </svg>
 );
 
+const SentryMark = ({ className = "size-6" }) => (
+  <svg viewBox="0 0 24 24" className={`${className} text-[#FF4961]`} aria-hidden="true" fill="currentColor">
+    <path d="M12.986 2.014a1.2 1.2 0 0 0-1.972 0l-9.8 14.7a1.2 1.2 0 0 0 .986 1.857h3.6a.6.6 0 0 0 .5-.267L12 9.47l5.686 8.834a.6.6 0 0 0 .5.267h3.6a1.2 1.2 0 0 0 .986-1.857l-9.8-14.7z" />
+  </svg>
+);
+
 const PROVIDERS = {
   slack: {
     name: "Slack", Mark: SlackMark, unit: "channel",
@@ -38,6 +44,11 @@ const PROVIDERS = {
     name: "Linear", Mark: LinearMark, unit: "team",
     blurb: "Issues, initiatives, priorities, and discussion from the teams you choose.",
     privacy: "Read-only access. Memro only syncs issues and comments from the teams you turn on.",
+  },
+  sentry: {
+    name: "Sentry", Mark: SentryMark, unit: "project",
+    blurb: "Production issues, exceptions, stack traces, and culprit files from the projects you choose.",
+    privacy: "Read-only access. Memro only syncs issues and stack traces from the projects you turn on.",
   },
 };
 

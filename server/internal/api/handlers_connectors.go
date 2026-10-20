@@ -211,6 +211,15 @@ func (s *Server) linearWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(s.connectors.LinearWebhook(r.Context(), r.Header, raw))
 }
 
+// POST /connectors/sentry/webhook — Sentry webhooks (signed with HMAC).
+func (s *Server) sentryWebhook(w http.ResponseWriter, r *http.Request) {
+	raw, ok := readWebhook(w, r)
+	if !ok {
+		return
+	}
+	w.WriteHeader(s.connectors.SentryWebhook(r.Context(), r.Header, raw))
+}
+
 const maxWebhookBytes = 5 << 20
 
 func readWebhook(w http.ResponseWriter, r *http.Request) ([]byte, bool) {

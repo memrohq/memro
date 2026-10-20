@@ -153,6 +153,10 @@ type ConnectorsConfig struct {
 	LinearClientSecret  string
 	LinearWebhookSecret string
 
+	SentryClientID      string
+	SentryClientSecret  string
+	SentryWebhookSecret string
+
 	// API endpoints, overridden in tests.
 	SlackAPIURL    string
 	GitHubAPIURL   string
@@ -160,6 +164,8 @@ type ConnectorsConfig struct {
 	SlackOAuthURL  string
 	LinearAPIURL   string
 	LinearOAuthURL string
+	SentryAPIURL   string
+	SentryOAuthURL string
 }
 
 func (c ConnectorsConfig) SlackEnabled() bool {
@@ -173,6 +179,10 @@ func (c ConnectorsConfig) GitHubEnabled() bool {
 
 func (c ConnectorsConfig) LinearEnabled() bool {
 	return c.EncryptionKey != "" && c.LinearClientID != "" && c.LinearClientSecret != ""
+}
+
+func (c ConnectorsConfig) SentryEnabled() bool {
+	return c.EncryptionKey != "" && c.SentryClientID != "" && c.SentryClientSecret != ""
 }
 
 // pemFromEnv accepts a PEM with real newlines or with literal "\n", as

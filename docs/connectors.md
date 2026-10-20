@@ -1,23 +1,25 @@
-# Connectors: Slack and GitHub
+# Connectors: Slack, GitHub, Linear, and Sentry
 
 Connectors sync content from the tools your team uses into an agent's
 memory, and keep it current. Each connection belongs to the dashboard user
 who made it; their memories are private to their agent, like any other.
 
-| | Slack | GitHub |
-|---|---|---|
-| What becomes memory | Messages in the channels you turn on, one item per channel per day, threads kept together | Issues and pull requests with their comments |
-| Kept current by | Events API (new, edited, deleted messages), plus a sync every 30 minutes | App webhooks, plus a sync every 30 minutes |
-| History on connect | Last `CONNECTOR_BACKFILL_DAYS` (30) | Items updated in the last `CONNECTOR_BACKFILL_DAYS` |
-| You choose | Channels, in the Memro dashboard | Repositories, on GitHub |
-| Left out | Bot messages, joins/leaves and other system messages | Bot comments, template comments (`<!-- -->`) |
-| Memory type | `episodic` | `semantic` |
+| | Slack | GitHub | Linear | Sentry |
+|---|---|---|---|---|
+| What becomes memory | Messages in the channels you turn on, one item per channel per day, threads kept together | Issues and pull requests with their comments | Issues, projects, priorities, and discussion from teams | Production issues, exceptions, stack traces, and culprit files |
+| Kept current by | Events API (new, edited, deleted messages), plus a sync every 30 minutes | App webhooks, plus a sync every 30 minutes | Webhooks, plus reconciliation sync | Webhooks, plus reconciliation sync |
+| History on connect | Last `CONNECTOR_BACKFILL_DAYS` (30) | Items updated in the last `CONNECTOR_BACKFILL_DAYS` | Active issues updated in last 30 days | Unresolved issues in the last 14 days |
+| You choose | Channels, in the Memro dashboard | Repositories, on GitHub | Teams, in the Memro dashboard | Projects, in the Memro dashboard |
+| Left out | Bot messages, joins/leaves and other system messages | Bot comments, template comments (`<!-- -->`) | Automated bot noise | Archive events |
+| Memory type | `episodic` | `semantic` | `semantic` | `episodic` |
 
-Memories made by a connector have `metadata.source` (`slack` or `github`),
+Memories made by a connector have `metadata.source` (`slack`, `github`, `linear`, or `sentry`),
 `metadata.connector: true`, `metadata.url` and source details (channel,
-repo, number). Every memory starts with a header such as
-`[Slack #eng · 2026-10-20 · Acme]` or `[GitHub acme/api#42 · Title]`, so a
-recalled chunk says where it came from.
+repo, team, issue). Every memory starts with a structured header (e.g.
+`[Slack #eng · 2026-10-20 · Acme]`, `[GitHub acme/api#42 · Title]`, `[Linear · ENG · ENG-123 · Title]`, or `[Sentry · backend · Issue #9412 · Error]`).
+
+### Cross-Source Context Mesh
+Memro automatically parses ticket keys (`ENG-123`), PR/Issue shorthand (`#42`), GitHub/Linear URLs, and Sentry references (`Sentry #1234`). When a discussion in Slack or Linear references a GitHub PR or Sentry bug, Memro forms bidirectional semantic relationships (`derives`, `cross_source`) in `memory_relations`, allowing agents to retrieve cross-tool causal chains seamlessly.
 
 **Behaviour you can rely on**
 

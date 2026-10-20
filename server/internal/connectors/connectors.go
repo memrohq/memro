@@ -31,6 +31,7 @@ const (
 	ProviderSlack  = "slack"
 	ProviderGitHub = "github"
 	ProviderLinear = "linear"
+	ProviderSentry = "sentry"
 
 	StatusActive  = "active"
 	StatusPaused  = "paused"
@@ -155,6 +156,7 @@ type Manager struct {
 	slack     *slackProvider
 	github    *githubProvider
 	linear    *linearProvider
+	sentry    *sentryProvider
 	http      *http.Client
 	wake      chan struct{}
 	now       func() time.Time
@@ -185,6 +187,12 @@ func New(d Deps) (*Manager, error) {
 	if cfg.LinearOAuthURL == "" {
 		cfg.LinearOAuthURL = "https://linear.app/oauth/authorize"
 	}
+	if cfg.SentryAPIURL == "" {
+		cfg.SentryAPIURL = "https://sentry.io/api/0"
+	}
+	if cfg.SentryOAuthURL == "" {
+		cfg.SentryOAuthURL = "https://sentry.io/oauth/authorize/"
+	}
 	if cfg.Workers <= 0 {
 		cfg.Workers = 4
 	}
@@ -214,9 +222,11 @@ func New(d Deps) (*Manager, error) {
 	}
 	m.github = gh
 	m.linear = newLinearProvider(m)
+	m.sentry = newSentryProvider(m)
 	m.providers[ProviderSlack] = m.slack
 	m.providers[ProviderGitHub] = m.github
 	m.providers[ProviderLinear] = m.linear
+	m.providers[ProviderSentry] = m.sentry
 	for name, p := range m.providers {
 		slog.Info("connector", "provider", name, "enabled", p.enabled())
 	}
@@ -225,7 +235,7 @@ func New(d Deps) (*Manager, error) {
 
 // Providers lists every connector and whether it is configured.
 func (m *Manager) Providers() []ProviderInfo {
-	return []ProviderInfo{m.slack.info(), m.github.info(), m.linear.info()}
+	return []ProviderInfo{m.slack.info(), m.github.info(), m.linear.info(), m.sentry.info()}
 }
 
 func (m *Manager) provider(name string) (provider, error) {
