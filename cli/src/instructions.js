@@ -33,10 +33,18 @@ ${END}`;
 
 const globalBlockPattern = new RegExp(`\\n*${START}[\\s\\S]*?${END}\\n*`, "g");
 
-/** Text without the Memro block (removes all instances if duplicated). */
+/** Text without the Memro block (removes all instances and cleans up orphan markers). */
 export function removeBlock(text) {
-  if (!text.includes(START)) return text;
-  const out = text.replace(globalBlockPattern, "\n\n").replace(/^\n+/, "").replace(/\n{3,}/g, "\n\n");
+  if (!text.includes(START) && !text.includes(END)) return text;
+  let out = text.replace(globalBlockPattern, "\n\n");
+  // Clean up any orphan markers if one was deleted accidentally
+  if (out.includes(START)) {
+    out = out.replace(new RegExp(`\\n*${START}[^\\n]*\\n*`, "g"), "\n\n");
+  }
+  if (out.includes(END)) {
+    out = out.replace(new RegExp(`\\n*${END}\\n*`, "g"), "\n\n");
+  }
+  out = out.replace(/^\n+/, "").replace(/\n{3,}/g, "\n\n");
   return out.trim() ? out.replace(/\s+$/, "") + "\n" : "";
 }
 

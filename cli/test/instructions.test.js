@@ -66,3 +66,17 @@ test("a file with the user's own Memro guidance is left in charge", async () => 
   assert.equal(installInstructions(file), "kept-own");
   assert.equal(fs.readFileSync(file, "utf8"), own);
 });
+
+test("orphan or broken markers are cleaned up cleanly", () => {
+  const broken1 = "# Rules\n<!-- memro:start -->\nSome text\n# Other rules\n";
+  const cleaned1 = upsertBlock(broken1);
+  assert.equal(cleaned1.split(START).length - 1, 1);
+  assert.ok(cleaned1.includes("# Rules"));
+  assert.ok(cleaned1.includes("# Other rules"));
+
+  const broken2 = "# Rules\n<!-- memro:end -->\n# Other rules\n";
+  const cleaned2 = removeBlock(broken2);
+  assert.equal(cleaned2.includes("<!-- memro:end -->"), false);
+  assert.ok(cleaned2.includes("# Rules"));
+  assert.ok(cleaned2.includes("# Other rules"));
+});
