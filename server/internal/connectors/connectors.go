@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 
 	"github.com/memrohq/memro/server/config"
 	"github.com/memrohq/memro/server/extension"
+	"github.com/memrohq/memro/server/internal/connectors/dce"
 	"github.com/memrohq/memro/server/internal/engine"
 	"github.com/memrohq/memro/server/internal/store"
 )
@@ -163,9 +165,10 @@ type Manager struct {
 	linear    *linearProvider
 	sentry    *sentryProvider
 	notion    *notionProvider
-	jira      *jiraProvider
-	gitlab    *gitlabProvider
-	http      *http.Client
+	jira        *jiraProvider
+	gitlab      *gitlabProvider
+	dceRegistry *dce.Registry
+	http        *http.Client
 	wake      chan struct{}
 	now       func() time.Time
 
@@ -247,15 +250,41 @@ func New(d Deps) (*Manager, error) {
 	m.providers[ProviderNotion] = m.notion
 	m.providers[ProviderJira] = m.jira
 	m.providers[ProviderGitLab] = m.gitlab
+
+	// Initialize Declarative Connector Engine (DCE) registry
+	m.dceRegistry = dce.NewRegistry()
+	_ = m.dceRegistry.LoadFromDir("server/internal/connectors/dce/catalog")
+	for _, manifest := range m.dceRegistry.All() {
+		m.providers[strings.ToLower(manifest.Metadata.Name)] = newDeclarativeProvider(m, manifest)
+	}
+
 	for name, p := range m.providers {
 		slog.Info("connector", "provider", name, "enabled", p.enabled())
 	}
 	return m, nil
 }
 
+// RegisterDeclarativeManifest registers a compiled DCE manifest into the manager.
+func (m *Manager) RegisterDeclarativeManifest(manifest *dce.Manifest) error {
+	if err := m.dceRegistry.Register(manifest); err != nil {
+		return err
+	}
+	m.providers[strings.ToLower(manifest.Metadata.Name)] = newDeclarativeProvider(m, manifest)
+	return nil
+}
+
 // Providers lists every connector and whether it is configured.
 func (m *Manager) Providers() []ProviderInfo {
-	return []ProviderInfo{m.slack.info(), m.github.info(), m.linear.info(), m.sentry.info(), m.notion.info(), m.jira.info(), m.gitlab.info()}
+	list := []ProviderInfo{
+		m.slack.info(), m.github.info(), m.linear.info(), m.sentry.info(),
+		m.notion.info(), m.jira.info(), m.gitlab.info(),
+	}
+	for _, manifest := range m.dceRegistry.All() {
+		if p, ok := m.providers[strings.ToLower(manifest.Metadata.Name)]; ok {
+			list = append(list, p.info())
+		}
+	}
+	return list
 }
 
 func (m *Manager) provider(name string) (provider, error) {
