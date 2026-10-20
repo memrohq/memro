@@ -45,10 +45,11 @@ type Server struct {
 	quota   extension.QuotaPolicy
 	extra   map[string]http.Handler
 
-	ipLimiter    *RateLimiter
-	agentLimiter *RateLimiter
-	otpLimiter   *RateLimiter // sign-in codes requested per email
-	meeLimiters  map[string]*RateLimiter
+	ipLimiter       *RateLimiter
+	agentLimiter    *RateLimiter
+	otpLimiter      *RateLimiter // sign-in codes requested per email
+	identityLimiter *RateLimiter // agents registered per client address
+	meeLimiters     map[string]*RateLimiter
 }
 
 type Deps struct {
@@ -85,9 +86,10 @@ func NewServer(d Deps) *Server {
 		cfg: d.Config, store: d.Store, engine: d.Engine, embed: d.Embed, indexer: d.Indexer,
 		files: d.Files, email: d.Email, replay: auth.NewReplayCache(),
 		meter: usage, quota: quota, extra: d.Routes,
-		ipLimiter:    NewRateLimiter(d.Config.RateLimitMax, d.Config.RateLimitWindow),
-		agentLimiter: NewRateLimiter(d.Config.RateLimitMax, d.Config.RateLimitWindow),
-		otpLimiter:   NewRateLimiter(otpCodesPerHour, time.Hour),
+		ipLimiter:       NewRateLimiter(d.Config.RateLimitMax, d.Config.RateLimitWindow),
+		agentLimiter:    NewRateLimiter(d.Config.RateLimitMax, d.Config.RateLimitWindow),
+		otpLimiter:      NewRateLimiter(otpCodesPerHour, time.Hour),
+		identityLimiter: NewRateLimiter(identitiesPerHour, time.Hour),
 		// Per-agent limits for the expensive cognitive endpoints.
 		meeLimiters: map[string]*RateLimiter{
 			"/mee/reason":  NewRateLimiter(20, time.Minute),
@@ -169,6 +171,8 @@ type Agent struct {
 	// Via records how the request authenticated: "session" (dashboard),
 	// "api_key" (memro_sk_...) or "signature" (ed25519).
 	Via string
+	// KeyID is the API key used, when Via is "api_key".
+	KeyID *uuid.UUID
 }
 
 type ctxKey int
@@ -226,14 +230,14 @@ func (s *Server) authenticate(r *http.Request) (Agent, []byte, int, string) {
 	}
 
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer "+auth.APIKeyPrefix) {
-		id, err := s.store.AgentForAPIKey(ctx, auth.HashToken(strings.TrimPrefix(h, "Bearer ")))
+		id, keyID, err := s.store.AgentForAPIKey(ctx, auth.HashToken(strings.TrimPrefix(h, "Bearer ")))
 		if err != nil {
 			return Agent{}, nil, http.StatusInternalServerError, "Database error"
 		}
 		if id == nil {
 			return Agent{}, nil, http.StatusUnauthorized, "Invalid or revoked API key"
 		}
-		return Agent{ID: id.ID, UserID: id.UserID, TenantID: id.TenantID, Via: "api_key"}, raw, 0, ""
+		return Agent{ID: id.ID, UserID: id.UserID, TenantID: id.TenantID, Via: "api_key", KeyID: &keyID}, raw, 0, ""
 	}
 
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {

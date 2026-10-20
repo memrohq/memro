@@ -295,7 +295,10 @@ class Agent:
         return self.client.list_webhooks(self.agent_id, self._private_key, event_type)
 
     def delete_agent(self) -> None:
-        """Permanently delete this agent and all its memories."""
+        """Permanently delete this agent and all its memories.
+
+        Needs the agent's private key; API keys cannot delete agents (403).
+        """
         self.client.delete_identity(self.agent_id, self._private_key)
 
     def __repr__(self) -> str:

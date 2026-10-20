@@ -244,7 +244,9 @@ access token.
 ### 🔒 `POST /hooks`
 
 Body `{"event_type": "memory_created", "url": "https://…"}` → `201`.
-See [Webhooks](webhooks.md).
+See [Webhooks](webhooks.md). A webhook added with an API key is deleted when
+that key is revoked; add it with a dashboard session or a signed request to
+keep it.
 
 ### 🔒 `GET /hooks/{event_type}`
 
@@ -262,15 +264,21 @@ Body `{"event_type": "memory_created", "url": "https://…"}` → `204`, or `404
 
 Registers a self-owned agent. Body `{"public_key": "<64 hex chars>"}` →
 `{"agent_id": "<same>"}`. Registering an existing key changes nothing.
+No account is needed, so each client address may register 20 agents an hour
+(`429` beyond that).
 
 ### `GET /identity/{agent_id}`
 
-`{"id": "…", "user_id": null, "tenant_id": "…", "created_at": "…"}`
+`{"id": "…", "created_at": "…"}`: whether the agent is registered. Its
+owner and tenant are not public; an agent sees its own with
+`GET /auth/whoami`.
 
 ### 🔒 `DELETE /identity/{agent_id}`
 
 Deletes the agent with all its memories, files, API keys and webhooks.
-`204`. Irreversible.
+`204`. Irreversible. Needs a dashboard session or a request signed with the
+agent's private key; API keys get `403`, so a key leaked from a tool's config
+cannot destroy the agent.
 
 ---
 
@@ -287,6 +295,22 @@ request). API keys can't manage API keys (`403`).
 
 Device login endpoints are described in
 [Authentication](authentication.md#device-login-how-npx-memro-connect-works).
+
+---
+
+## Tenants
+
+Platform administration (ADR 0012). Ordinary accounts live in the shared
+default tenant and get `403` from all of these.
+
+| | |
+|---|---|
+| 🔒 `POST /tenant` | Body `{"name", "domain"}` → `{"id", "name", "domain", "created_at"}`. Platform admins only. |
+| 🔒 `GET /tenant/{id}` | Platform admins, or an agent of that dedicated tenant. |
+| 🔒 `GET /tenant/{id}/usage?hours=24` | Same rule; `hours` is capped at 2160 (90 days). |
+
+Platform admins act only through a dashboard session; their API keys and
+signed requests get `403`.
 
 ---
 

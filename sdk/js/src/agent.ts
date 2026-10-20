@@ -162,7 +162,7 @@ export class Agent {
   }
   webhooks(eventType = 'memory_created'): Promise<string[]> { return this.client.listWebhooks(eventType, this.signer); }
 
-  /** Permanently delete this agent and everything it stored. */
+  /** Permanently delete this agent and everything it stored. Needs the agent's private key: API keys get 403. */
   deleteAgent(): Promise<void> { return this.client.deleteIdentity(this.agentId, this.signer); }
 
   toString(): string { return `Agent(${this.agentId.slice(0, 16)}…)`; }

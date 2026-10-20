@@ -67,7 +67,17 @@ func (s *Server) cacheStats(w http.ResponseWriter, r *http.Request) {
 
 // --- Identity -----------------------------------------------------------------------
 
+// identitiesPerHour limits unauthenticated agent registration per client
+// address. Registering needs no account (SDK self-owned agents, ADR 0009),
+// so this is what stops one address filling the table.
+const identitiesPerHour = 20
+
 func (s *Server) createIdentity(w http.ResponseWriter, r *http.Request) {
+	if !s.identityLimiter.Allow(s.clientIP(r)) {
+		metrics.RateLimitHits.Inc()
+		httpError(w, http.StatusTooManyRequests, "Too many agents registered from this address. Try again later.")
+		return
+	}
 	var req struct {
 		PublicKey string `json:"public_key"`
 	}
@@ -89,6 +99,9 @@ func (s *Server) createIdentity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"agent_id": req.PublicKey})
 }
 
+// GET /identity/{id} is public: it says whether an agent is registered. Who
+// owns it and its tenant are not shown (ADR 0012); an agent sees its own
+// through /auth/whoami.
 func (s *Server) getIdentity(w http.ResponseWriter, r *http.Request) {
 	id, err := s.store.GetIdentity(r.Context(), r.PathValue("id"))
 	switch {
@@ -98,7 +111,7 @@ func (s *Server) getIdentity(w http.ResponseWriter, r *http.Request) {
 	case id == nil:
 		httpError(w, http.StatusNotFound, "Identity not found")
 	default:
-		writeJSON(w, http.StatusOK, id)
+		writeJSON(w, http.StatusOK, map[string]any{"id": id.ID, "created_at": id.CreatedAt})
 	}
 }
 
@@ -106,6 +119,12 @@ func (s *Server) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 	a, id := agentFrom(r), r.PathValue("id")
 	if a.ID != id {
 		httpError(w, http.StatusForbidden, "Agent ID mismatch")
+		return
+	}
+	// A key leaked from a tool's config must not be able to destroy the agent
+	// (ADR 0012): deleting takes a dashboard session or the agent's signature.
+	if a.Via == "api_key" {
+		httpError(w, http.StatusForbidden, "API keys cannot delete an agent. Sign in to the dashboard, or sign the request with the agent's private key.")
 		return
 	}
 	if err := s.store.DeleteIdentity(r.Context(), id); err != nil {
@@ -409,10 +428,41 @@ func toTenantResponse(t *domain.Tenant) tenantResponse {
 	return tenantResponse{ID: t.ID.String(), Name: t.Name, Domain: t.Domain, CreatedAt: t.CreatedAt.UTC().Format(time.RFC3339Nano)}
 }
 
+// maxTenantUsageHours bounds GET /tenant/{id}/usage to 90 days.
+const maxTenantUsageHours = 90 * 24
+
+// requirePlatformAdmin allows Memro staff acting through a dashboard session
+// (ADR 0012). API keys and signatures never carry admin power.
+func (s *Server) requirePlatformAdmin(w http.ResponseWriter, r *http.Request, a Agent) bool {
+	if a.Via != "session" || a.UserID == nil {
+		httpError(w, http.StatusForbidden, "Platform admin access requires a dashboard session")
+		return false
+	}
+	ok, err := s.store.IsPlatformAdmin(r.Context(), *a.UserID)
+	if err != nil {
+		slog.Error("platform admin check", "err", err)
+		httpError(w, http.StatusInternalServerError, "Database error")
+		return false
+	}
+	if !ok {
+		httpError(w, http.StatusForbidden, "Platform admin access required")
+		return false
+	}
+	return true
+}
+
+// canReadTenant allows platform admins, and members of a dedicated tenant
+// reading their own. The shared default tenant holds every self-signup user,
+// so belonging to it grants nothing.
+func (s *Server) canReadTenant(w http.ResponseWriter, r *http.Request, a Agent, tid uuid.UUID) bool {
+	if a.TenantID == tid && tid != domain.DefaultTenantID {
+		return true
+	}
+	return s.requirePlatformAdmin(w, r, a)
+}
+
 func (s *Server) createTenant(w http.ResponseWriter, r *http.Request) {
-	a := agentFrom(r)
-	if a.TenantID != domain.DefaultTenantID {
-		httpError(w, http.StatusForbidden, "Only default tenant can create new tenants")
+	if !s.requirePlatformAdmin(w, r, agentFrom(r)) {
 		return
 	}
 	var req struct {
@@ -441,8 +491,7 @@ func (s *Server) getTenant(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "Invalid tenant ID format")
 		return
 	}
-	if a.TenantID != tid && a.TenantID != domain.DefaultTenantID {
-		httpError(w, http.StatusForbidden, "Cannot access other tenant")
+	if !s.canReadTenant(w, r, a, tid) {
 		return
 	}
 	t, err := s.store.GetTenant(r.Context(), tid)
@@ -463,13 +512,12 @@ func (s *Server) tenantUsage(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "Invalid tenant ID format")
 		return
 	}
-	if a.TenantID != tid {
-		httpError(w, http.StatusForbidden, "Cannot access other tenant usage")
+	if !s.canReadTenant(w, r, a, tid) {
 		return
 	}
 	hours := 24
 	if v, err := strconv.Atoi(r.URL.Query().Get("hours")); err == nil && v > 0 {
-		hours = v
+		hours = min(v, maxTenantUsageHours)
 	}
 	since := time.Now().Add(-time.Duration(hours) * time.Hour)
 	type item struct {
@@ -509,7 +557,7 @@ func (s *Server) registerHook(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.store.RegisterHook(r.Context(), a.TenantID, a.ID, req.EventType, req.URL); err != nil {
+	if err := s.store.RegisterHook(r.Context(), a.TenantID, a.ID, a.KeyID, req.EventType, req.URL); err != nil {
 		slog.Error("register hook", "err", err)
 		httpError(w, http.StatusInternalServerError, "Failed to register hook")
 		return

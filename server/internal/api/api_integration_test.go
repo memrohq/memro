@@ -471,11 +471,10 @@ func TestFilesHooksTenants(t *testing.T) {
 		t.Fatalf("hooks = %s", body)
 	}
 
+	// The shared default tenant's usage spans every user (ADR 0012); see
+	// TestTenantEndpointsRequirePlatformAdmin for who may read it.
 	code, body = e.do(&a, "v1", "GET", "/tenant/00000000-0000-0000-0000-000000000000/usage?hours=1", nil, nil)
-	e.must(200, code, body, "tenant usage")
-	if strings.Contains(string(body), `"metric":"memories_stored","value":0`) {
-		t.Fatalf("usage not recorded: %s", body)
-	}
+	e.must(403, code, body, "default tenant usage")
 
 	code, body = e.do(nil, "", "POST", "/auth/login", j(map[string]string{"email": "dev@memro.co"}), nil)
 	e.must(503, code, body, "login without SMTP")
@@ -568,7 +567,6 @@ func (e *env) dashboardSession(email string) (agent, string) {
 func TestDeviceLoginAndAPIKeys(t *testing.T) {
 	e := setup(t)
 	a, session := e.dashboardSession(fmt.Sprintf("dev-%d@example.com", time.Now().UnixNano()))
-	bearer := func(tok string) map[string]string { return map[string]string{"Authorization": "Bearer " + tok} }
 
 	code, body := e.do(nil, "", "POST", "/auth/device/code", j(map[string]string{"client_name": "memro connect (test)"}), nil)
 	e.must(200, code, body, "device code")

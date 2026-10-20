@@ -139,7 +139,7 @@ func (s *Store) CreateAPIKey(ctx context.Context, id, tenantID uuid.UUID, agentI
 
 // AgentForAPIKey returns the identity behind an active key and records use
 // (at most once a minute, to avoid a write per request).
-func (s *Store) AgentForAPIKey(ctx context.Context, hash string) (*domain.AgentIdentity, error) {
+func (s *Store) AgentForAPIKey(ctx context.Context, hash string) (*domain.AgentIdentity, uuid.UUID, error) {
 	var a domain.AgentIdentity
 	var keyID uuid.UUID
 	err := s.Pool.QueryRow(ctx, `SELECT k.id, i.id, i.user_id, i.tenant_id, i.created_at
@@ -147,11 +147,12 @@ func (s *Store) AgentForAPIKey(ctx context.Context, hash string) (*domain.AgentI
 		WHERE k.key_hash = $1 AND k.revoked_at IS NULL`, hash).
 		Scan(&keyID, &a.ID, &a.UserID, &a.TenantID, &a.CreatedAt)
 	if err != nil {
-		return nilIfNoRows(&a, err)
+		id, err := nilIfNoRows(&a, err)
+		return id, uuid.Nil, err
 	}
 	_, _ = s.Pool.Exec(ctx, `UPDATE api_keys SET last_used_at = NOW()
 		WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '1 minute')`, keyID)
-	return &a, nil
+	return &a, keyID, nil
 }
 
 func (s *Store) ListAPIKeys(ctx context.Context, agentID string) ([]APIKey, error) {
@@ -172,10 +173,18 @@ func (s *Store) ListAPIKeys(ctx context.Context, agentID string) ([]APIKey, erro
 	return keys, rows.Err()
 }
 
+// RevokeAPIKey revokes a key and, in the same statement, deletes the
+// webhooks it registered.
 func (s *Store) RevokeAPIKey(ctx context.Context, id uuid.UUID, agentID string) (bool, error) {
-	tag, err := s.Pool.Exec(ctx, `UPDATE api_keys SET revoked_at = NOW()
-		WHERE id = $1 AND agent_id = $2 AND revoked_at IS NULL`, id, agentID)
-	return tag.RowsAffected() > 0, err
+	var n int
+	err := s.Pool.QueryRow(ctx, `WITH revoked AS (
+			UPDATE api_keys SET revoked_at = NOW()
+			WHERE id = $1 AND agent_id = $2 AND revoked_at IS NULL RETURNING id
+		), hooks_gone AS (
+			DELETE FROM hooks WHERE api_key_id IN (SELECT id FROM revoked)
+		)
+		SELECT count(*) FROM revoked`, id, agentID).Scan(&n)
+	return n > 0, err
 }
 
 // --- Device-code login ---------------------------------------------------------------
@@ -442,6 +451,13 @@ func (s *Store) GetFile(ctx context.Context, id uuid.UUID) (*File, error) {
 
 // --- Tenants ----------------------------------------------------------------------
 
+// IsPlatformAdmin reports whether a user is Memro staff (platform_admins).
+func (s *Store) IsPlatformAdmin(ctx context.Context, userID uuid.UUID) (bool, error) {
+	var ok bool
+	err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM platform_admins WHERE user_id = $1)`, userID).Scan(&ok)
+	return ok, err
+}
+
 func (s *Store) CreateTenant(ctx context.Context, t *domain.Tenant) error {
 	_, err := s.Pool.Exec(ctx, `INSERT INTO tenants (id, name, domain, created_at, updated_at) VALUES ($1,$2,$3,$4,$5)`,
 		t.ID, t.Name, t.Domain, t.CreatedAt, t.UpdatedAt)
@@ -472,9 +488,13 @@ func (s *Store) RecordTenantUsage(ctx context.Context, tenantID uuid.UUID, metri
 
 // Hooks belong to the agent that registered them and only fire for its own
 // memories.
-func (s *Store) RegisterHook(ctx context.Context, tenantID uuid.UUID, agentID, eventType, url string) error {
-	_, err := s.Pool.Exec(ctx, `INSERT INTO hooks (tenant_id, agent_id, event_type, url) VALUES ($1, $2, $3, $4)
-		ON CONFLICT DO NOTHING`, tenantID, agentID, eventType, url)
+// RegisterHook adds a webhook. apiKeyID is the key that registered it (nil
+// for a session or signature); revoking that key deletes the hook. Registering
+// an existing hook with a session or signature makes it outlive the key.
+func (s *Store) RegisterHook(ctx context.Context, tenantID uuid.UUID, agentID string, apiKeyID *uuid.UUID, eventType, url string) error {
+	_, err := s.Pool.Exec(ctx, `INSERT INTO hooks (tenant_id, agent_id, event_type, url, api_key_id) VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (agent_id, event_type, url) DO UPDATE SET api_key_id = NULL WHERE EXCLUDED.api_key_id IS NULL`,
+		tenantID, agentID, eventType, url, apiKeyID)
 	return err
 }
 

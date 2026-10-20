@@ -158,7 +158,7 @@ export class MemroClient {
     return { agent_id: kp.publicKey, private_key: kp.privateKey };
   }
   getIdentity(agentId: string) {
-    return this.request<{ id: string; user_id: string | null; tenant_id: string; created_at: string }>('GET', `/identity/${agentId}`, { auth: false });
+    return this.request<{ id: string; created_at: string }>('GET', `/identity/${agentId}`, { auth: false });
   }
   /** Deletes the agent with all of its memories, files, keys and webhooks. */
   deleteIdentity(agentId: string, signer?: Signer) { return this.request<void>('DELETE', `/identity/${agentId}`, { signer }); }
