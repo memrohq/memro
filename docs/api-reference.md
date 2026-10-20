@@ -280,6 +280,20 @@ Deletes the agent with all its memories, files, API keys and webhooks.
 agent's private key; API keys get `403`, so a key leaked from a tool's config
 cannot destroy the agent.
 
+### Agent keys (ADR 0013)
+
+An agent's ID never changes; these are the keys allowed to sign for it.
+`signing` keys act for the agent; `recovery` keys may only use the three
+routes below. Name the signing key in `X-Key-Id`; without it the key is the
+agent ID (the original key). Managed by the agent itself (signed request) or
+its owner (dashboard session); API keys get `403`.
+
+| | |
+|---|---|
+| 🔒 `GET /identity/{agent_id}/keys` | `[{"public_key", "role", "created_at", "revoked_at"}]` |
+| 🔒 `POST /identity/{agent_id}/keys` | Body `{"public_key", "role", "proof", "proof_timestamp"}` → `201`. `proof` is the new key's hex signature over `"memro-agent-key\n{agent_id}\n{public_key}\n{proof_timestamp}"` (Unix seconds, within 5 minutes). `409` if the key belongs to an agent already; keys are never reused. |
+| 🔒 `DELETE /identity/{agent_id}/keys/{public_key}` | `204`. `409` for the last signing key of an unowned agent with no recovery key. |
+
 ---
 
 ## API keys

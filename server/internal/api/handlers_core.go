@@ -90,6 +90,15 @@ func (s *Server) createIdentity(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "public_key must be a hex-encoded 32-byte ed25519 key (64 hex chars)")
 		return
 	}
+	// A public key belongs to at most one agent (ADR 0013): it cannot become
+	// a new agent while it is (or was) another agent's key.
+	if owner, err := s.store.KeyAgent(r.Context(), req.PublicKey); err != nil {
+		httpError(w, http.StatusInternalServerError, "Database error")
+		return
+	} else if owner != "" && owner != req.PublicKey {
+		httpError(w, http.StatusConflict, "This key belongs to another agent")
+		return
+	}
 	if err := s.store.CreateIdentity(r.Context(), req.PublicKey, nil, domain.DefaultTenantID); err != nil {
 		slog.Error("create identity", "err", err)
 		httpError(w, http.StatusInternalServerError, "Failed to create identity")

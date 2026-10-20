@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 
@@ -57,6 +58,124 @@ func (s *Store) GetIdentityByUser(ctx context.Context, userID uuid.UUID) (*domai
 		WHERE user_id = $1 ORDER BY created_at LIMIT 1`, userID).
 		Scan(&a.ID, &a.UserID, &a.TenantID, &a.CreatedAt)
 	return nilIfNoRows(&a, err)
+}
+
+// --- Agent keys (ADR 0013) ---------------------------------------------------
+
+// Key roles: a signing key acts for the agent; a recovery key may only manage
+// keys.
+const (
+	KeySigning  = "signing"
+	KeyRecovery = "recovery"
+)
+
+// ErrKeyInUse means the public key already belongs to an agent (possibly
+// revoked); keys are never reused.
+var ErrKeyInUse = errors.New("key already in use")
+
+type AgentKey struct {
+	PublicKey string     `json:"public_key"`
+	Role      string     `json:"role"`
+	CreatedAt time.Time  `json:"created_at"`
+	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+}
+
+// ActiveKeyRole returns the role of an active key of the agent, or "" when
+// the key is not an active key of that agent.
+func (s *Store) ActiveKeyRole(ctx context.Context, agentID, publicKey string) (string, error) {
+	var role string
+	err := s.Pool.QueryRow(ctx, `SELECT role FROM agent_keys
+		WHERE agent_id = $1 AND public_key = $2 AND revoked_at IS NULL`, agentID, publicKey).Scan(&role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return role, err
+}
+
+// KeyAgent returns the agent a public key belongs to (active or revoked), or "".
+func (s *Store) KeyAgent(ctx context.Context, publicKey string) (string, error) {
+	var id string
+	err := s.Pool.QueryRow(ctx, `SELECT agent_id FROM agent_keys WHERE public_key = $1`, publicKey).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}
+
+func (s *Store) ListAgentKeys(ctx context.Context, agentID string) ([]AgentKey, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT public_key, role, created_at, revoked_at FROM agent_keys
+		WHERE agent_id = $1 ORDER BY created_at, public_key`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	keys := []AgentKey{}
+	for rows.Next() {
+		var k AgentKey
+		if err := rows.Scan(&k.PublicKey, &k.Role, &k.CreatedAt, &k.RevokedAt); err != nil {
+			return nil, err
+		}
+		keys = append(keys, k)
+	}
+	return keys, rows.Err()
+}
+
+func (s *Store) AddAgentKey(ctx context.Context, agentID, publicKey, role string) error {
+	_, err := s.Pool.Exec(ctx, `INSERT INTO agent_keys (public_key, agent_id, role) VALUES ($1, $2, $3)`,
+		publicKey, agentID, role)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return ErrKeyInUse
+	}
+	return err
+}
+
+// Results of RevokeAgentKey.
+var (
+	ErrKeyNotFound = errors.New("key not found")
+	ErrLastKey     = errors.New("last signing key")
+)
+
+// RevokeAgentKey revokes an active key. The agent's last active signing key
+// may go only while an active recovery key remains or the agent has an owner,
+// so nobody is locked out by accident. The check and the revocation run in
+// one transaction with the agent's keys locked.
+func (s *Store) RevokeAgentKey(ctx context.Context, agentID, publicKey string) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var owned bool
+	if err := tx.QueryRow(ctx, `SELECT user_id IS NOT NULL FROM agent_identities WHERE id = $1 FOR UPDATE`, agentID).Scan(&owned); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrKeyNotFound
+		}
+		return err
+	}
+	var role string
+	err = tx.QueryRow(ctx, `SELECT role FROM agent_keys WHERE agent_id = $1 AND public_key = $2 AND revoked_at IS NULL`,
+		agentID, publicKey).Scan(&role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrKeyNotFound
+	} else if err != nil {
+		return err
+	}
+	if role == KeySigning && !owned {
+		var otherSigning, recovery int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE role = 'signing' AND public_key <> $2),
+				count(*) FILTER (WHERE role = 'recovery')
+			FROM agent_keys WHERE agent_id = $1 AND revoked_at IS NULL`, agentID, publicKey).Scan(&otherSigning, &recovery); err != nil {
+			return err
+		}
+		if otherSigning == 0 && recovery == 0 {
+			return ErrLastKey
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE agent_keys SET revoked_at = NOW() WHERE public_key = $1`, publicKey); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Store) DeleteIdentity(ctx context.Context, id string) error {
