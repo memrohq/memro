@@ -1,6 +1,6 @@
 {
   "name": "memro-cli",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Connect Claude Code, Codex, Cursor, Antigravity, OpenCode and other AI tools to Memro memory with one command.",
   "license": "SEE LICENSE IN LICENSE",
   "homepage": "https://memro.co",

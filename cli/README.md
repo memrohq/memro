@@ -25,7 +25,7 @@ npx memro-cli connect --project
 | Cursor | `~/.cursor/mcp.json` | `./.cursor/mcp.json` |
 | Codex | `~/.codex/config.toml` | `./.codex/config.toml` |
 | VS Code | User `mcp.json` | `./.vscode/mcp.json` |
-| Antigravity | `~/.gemini/config/mcp_config.json` | `./.gemini/config/mcp_config.json` |
+| Antigravity | `~/.gemini/config/mcp_config.json` | `./.agents/mcp_config.json` |
 | OpenCode | `~/.config/opencode/opencode.json` | `./opencode.json` |
 | Gemini CLI | `~/.gemini/settings.json` | `./.gemini/settings.json` |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | — (Windsurf has no per-project MCP config) |
@@ -42,7 +42,7 @@ npx memro-cli connect --project
    | Codex | `~/.codex/AGENTS.md` | `./AGENTS.md` |
    | OpenCode | `~/.config/opencode/AGENTS.md` | `./AGENTS.md` |
    | Gemini CLI | `~/.gemini/GEMINI.md` | `./GEMINI.md` |
-   | Antigravity | `~/.gemini/config/rules/memro.md` | `./.agents/rules/memro.md` |
+   | Antigravity | `~/.gemini/config/rules/memro.md` (always on) | `./.agents/rules/memro.md` (always on) |
    | Windsurf | `~/.codeium/windsurf/memories/global_rules.md` | — |
 
    Untick "Teach these tools…" in the list, or pass `--no-instructions`, to
