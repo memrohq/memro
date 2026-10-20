@@ -93,8 +93,10 @@ test("Claude Code in project mode writes ./.mcp.json and uses PROJECT_BLOCK", ()
   // Add project instructions
   installInstructions(projRules, { scope: "project" });
   const rulesContent = fs.readFileSync(projRules, "utf8");
-  assert.ok(rulesContent.includes("## Memro — long-term memory"));
-  assert.ok(rulesContent.includes("Follow this repository's privacy and memory-sharing boundaries."));
+  assert.ok(rulesContent.includes("## Memro (long-term memory)"));
+  // Agents act on the note only if it names the tools and says to use them unprompted.
+  assert.ok(rulesContent.includes("without being asked"));
+  assert.ok(rulesContent.includes("call `recall`") && rulesContent.includes("call `remember`"));
 
   // Idempotency: repeated add and install don't duplicate
   c.add(conn, { scope: "project", cwd: PROJECT_DIR });
@@ -230,7 +232,7 @@ test("instruction files handle existing content, missing markers, and duplicate 
   const initial = "# Project Overview\n\nExisting guidelines here.\n";
   const withOneBlock = upsertBlock(initial, PROJECT_BLOCK);
   assert.ok(withOneBlock.startsWith(initial));
-  assert.ok(withOneBlock.includes("## Memro — long-term memory"));
+  assert.ok(withOneBlock.includes("## Memro (long-term memory)"));
 
   // Duplicate blocks accidentally injected
   const corrupted = `${initial}\n${PROJECT_BLOCK}\n\n# More Rules\n\n${PROJECT_BLOCK}\n`;
@@ -280,4 +282,36 @@ test("a git repository at the home folder is never the project root", () => {
   assert.equal(isHomeOrRoot(path.parse(HOME).root), true);
   assert.equal(isHomeOrRoot(sub), false);
   fs.rmSync(path.join(HOME, ".git"), { recursive: true, force: true });
+});
+
+// Antigravity reads workspace MCP servers from .agents/mcp_config.json and
+// silently drops rules/*.md files without a `trigger` frontmatter.
+test("Antigravity project setup: .agents/mcp_config.json, always-on rule, old path cleaned up", () => {
+  const c = findClient("antigravity");
+  const file = c.file("project", PROJECT_DIR);
+  assert.equal(file, path.join(PROJECT_DIR, ".agents", "mcp_config.json"));
+
+  // What memro-cli <= 0.1.5 wrote: the wrong path, with another server beside ours.
+  const legacy = path.join(PROJECT_DIR, ".gemini", "config", "mcp_config.json");
+  fs.mkdirSync(path.dirname(legacy), { recursive: true });
+  fs.writeFileSync(legacy, JSON.stringify({ mcpServers: { memro: { serverUrl: "x" }, other: { serverUrl: "y" } } }));
+  c.add(conn, { scope: "project", cwd: PROJECT_DIR });
+  assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).mcpServers.memro.serverUrl, conn.mcpUrl);
+  assert.deepEqual(JSON.parse(fs.readFileSync(legacy, "utf8")), { mcpServers: { other: { serverUrl: "y" } } }, "only our entry leaves the old file");
+  fs.writeFileSync(legacy, JSON.stringify({ mcpServers: { memro: { serverUrl: "x" } } }));
+  c.add(conn, { scope: "project", cwd: PROJECT_DIR });
+  assert.equal(fs.existsSync(legacy), false, "an old file holding only our entry is removed");
+
+  const rules = c.rules("project", PROJECT_DIR);
+  // A rule file from an older version (no frontmatter) gets one on the next run.
+  fs.mkdirSync(path.dirname(rules), { recursive: true });
+  fs.writeFileSync(rules, PROJECT_BLOCK + "\n");
+  installInstructions(rules, { scope: "project", frontmatter: c.rulesFrontmatter });
+  const text = fs.readFileSync(rules, "utf8");
+  assert.ok(text.startsWith("---\ntrigger: always_on\n---\n\n<!-- memro:start -->"), text);
+  assert.equal(text.split(START).length - 1, 1);
+  installInstructions(rules, { scope: "project", frontmatter: c.rulesFrontmatter });
+  assert.equal(fs.readFileSync(rules, "utf8"), text, "idempotent");
+  assert.equal(uninstallInstructions(rules, { frontmatter: c.rulesFrontmatter }), true);
+  assert.equal(fs.existsSync(rules), false, "a file holding only frontmatter and our block is removed");
 });

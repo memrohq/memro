@@ -444,7 +444,7 @@ async function connect(opts) {
       if (opts.instructions && c.rules) {
         const rulesFile = c.rules(scope, cwd);
         if (rulesFile) {
-          const result = installInstructions(rulesFile, { scope });
+          const result = installInstructions(rulesFile, { scope, frontmatter: c.rulesFrontmatter });
           const what = result === "kept-own" ? "already mentions Memro" : "use Memro automatically";
           ui.ok("".padEnd(width), `${formatPath(rulesFile, scope, cwd)}  ${what}`);
         }
@@ -506,7 +506,7 @@ async function disconnect(opts) {
       if (c.remove({ scope, cwd })) console.log(`  ✔ Removed from ${c.name} (${scope})`);
       if (c.rules) {
         const rulesFile = c.rules(scope, cwd);
-        if (rulesFile && uninstallInstructions(rulesFile)) {
+        if (rulesFile && uninstallInstructions(rulesFile, { frontmatter: c.rulesFrontmatter })) {
           console.log(`  ✔ Removed the Memro note from ${formatPath(rulesFile, scope, cwd)}`);
         }
       }

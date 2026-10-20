@@ -68,13 +68,28 @@ function jsonClient({
   key = "mcpServers",
   entry,
   rules,
+  rulesFrontmatter,
+  legacyFiles = () => [],
   supportsScope = () => true,
 }) {
+  /** Drop our server from a file an older memro-cli wrote to by mistake;
+   * delete the file if nothing else is left in it. */
+  const removeFrom = (target) => {
+    if (!fs.existsSync(target)) return;
+    let cfg;
+    try { cfg = readJSON(target); } catch { return; }
+    if (!cfg[key]?.[SERVER_NAME]) return;
+    delete cfg[key][SERVER_NAME];
+    if (!Object.keys(cfg[key]).length) delete cfg[key];
+    if (Object.keys(cfg).length) writeJSON(target, cfg);
+    else fs.rmSync(target);
+  };
   return {
     id,
     name,
     aliases,
     supportsScope,
+    rulesFrontmatter,
     file: (scope = "user", cwd = process.cwd()) => file(scope, cwd),
     detect: (opts = {}) => {
       const scope = typeof opts === "string" ? opts : (opts?.scope || "user");
@@ -87,6 +102,7 @@ function jsonClient({
       const cfg = readJSON(target);
       cfg[key] = { ...(cfg[key] || {}), [SERVER_NAME]: entry(conn) };
       writeJSON(target, cfg);
+      for (const old of legacyFiles(scope, cwd)) if (old !== target) removeFrom(old);
     },
     remove({ scope = "user", cwd = process.cwd() } = {}) {
       const target = file(scope, cwd);
@@ -259,12 +275,18 @@ export const CLIENTS = [
     id: "antigravity",
     name: "Antigravity",
     aliases: ["agy"],
-    file: (scope, cwd) => (scope === "project" ? path.join(cwd, ".gemini", "config", "mcp_config.json") : path.join(home(), ".gemini", "config", "mcp_config.json")),
+    // Workspace servers: <project>/.agents/mcp_config.json; user-wide:
+    // ~/.gemini/config/mcp_config.json.
+    file: (scope, cwd) => (scope === "project" ? path.join(cwd, ".agents", "mcp_config.json") : path.join(home(), ".gemini", "config", "mcp_config.json")),
+    // memro-cli ≤ 0.1.5 wrote the project config here, where Antigravity never looks.
+    legacyFiles: (scope, cwd) => (scope === "project" ? [path.join(cwd, ".gemini", "config", "mcp_config.json")] : []),
     detect: (scope, cwd) => (scope === "project"
       ? exists(cwd, ".gemini") || exists(cwd, ".agents") || exists(home(), ".gemini", "config") || exists(home(), ".gemini", "antigravity-ide") || exists(home(), ".gemini", "antigravity")
       : exists(home(), ".gemini", "config") || exists(home(), ".gemini", "antigravity-ide") || exists(home(), ".gemini", "antigravity")),
     entry: ({ mcpUrl, apiKey }) => ({ serverUrl: mcpUrl, headers: bearer(apiKey) }),
     rules: (scope, cwd) => (scope === "project" ? path.join(cwd, ".agents", "rules", "memro.md") : path.join(home(), ".gemini", "config", "rules", "memro.md")),
+    // A rules/*.md file without a valid `trigger` is silently discarded.
+    rulesFrontmatter: "---\ntrigger: always_on\n---",
   }),
   jsonClient({
     id: "opencode",

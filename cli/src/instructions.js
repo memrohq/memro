@@ -22,13 +22,18 @@ Memro is my long-term memory across tools and sessions (MCP server \`memro\`). U
 Never store secrets (keys, passwords, tokens), one-off chatter, or anything I ask you not to keep. Don't announce routine saves.
 ${END}`;
 
+// Same guidance as BLOCK, for a project's own instructions file. It names the
+// tools and says "without being asked": a vaguer note ("recall relevant
+// context") left agents saving only when told to.
 export const PROJECT_BLOCK = `${START}
-## Memro — long-term memory
+## Memro (long-term memory)
 
-- At the start of a task, recall relevant context from Memro.
-- Remember durable decisions, preferences, and architectural changes.
-- Never store secrets, API keys, passwords, or sensitive client data.
-- Follow this repository's privacy and memory-sharing boundaries.
+Memro is the long-term memory for this project (MCP server \`memro\`). Use it without being asked:
+- At the start of a task, call \`recall\` with a short query about it and use what comes back.
+- When a decision is made, a preference is stated, you are corrected, or you learn a lasting fact about this project, call \`remember\` with one short, self-contained sentence that names the project.
+- Before answering about earlier work ("what did we decide about X?"), \`recall\` first.
+
+Never store secrets (keys, passwords, tokens), one-off chatter, or anything this project's rules keep private. Don't announce routine saves.
 ${END}`;
 
 const globalBlockPattern = new RegExp(`\\n*${START}[\\s\\S]*?${END}\\n*`, "g");
@@ -82,7 +87,7 @@ export function hasOwnMemroGuidance(text) {
  * older block of ours so the agent never gets the rules twice. Returns
  * "added", "updated", "unchanged" or "kept-own".
  */
-export function installInstructions(file, { scope = "user", block } = {}) {
+export function installInstructions(file, { scope = "user", block, frontmatter } = {}) {
   const targetBlock = block || (scope === "project" ? PROJECT_BLOCK : BLOCK);
   const before = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
   if (hasOwnMemroGuidance(before)) {
@@ -90,7 +95,10 @@ export function installInstructions(file, { scope = "user", block } = {}) {
     if (after !== before) writeText(file, after);
     return "kept-own";
   }
-  const after = upsertBlock(before, targetBlock);
+  let after = upsertBlock(before, targetBlock);
+  // Some tools ignore a rules file without frontmatter (Antigravity drops
+  // .agents/rules/*.md that lack a `trigger`); add it when the file has none.
+  if (frontmatter && !after.startsWith("---")) after = frontmatter + "\n\n" + after;
   if (after === before) return "unchanged";
   writeText(file, after);
   return before.includes(START) ? "updated" : "added";
@@ -98,12 +106,12 @@ export function installInstructions(file, { scope = "user", block } = {}) {
 
 /** Remove the block; returns whether there was one. Deletes the file if
  * Memro's block was all it contained. */
-export function uninstallInstructions(file) {
+export function uninstallInstructions(file, { frontmatter } = {}) {
   if (!fs.existsSync(file)) return false;
   const before = fs.readFileSync(file, "utf8");
   const after = removeBlock(before);
   if (after === before) return false;
-  if (after === "") fs.rmSync(file);
+  if (after === "" || (frontmatter && after.trim() === frontmatter.trim())) fs.rmSync(file);
   else writeText(file, after);
   return true;
 }
