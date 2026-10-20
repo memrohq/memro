@@ -118,6 +118,9 @@ func (s *Server) Handler() http.Handler {
 	public("POST /auth/device/token", s.deviceToken)
 
 	protected("DELETE /identity/{id}", s.deleteIdentity)
+	protected("GET /identity/{id}/keys", s.listAgentKeys)
+	protected("POST /identity/{id}/keys", s.addAgentKey)
+	protected("DELETE /identity/{id}/keys/{key}", s.revokeAgentKey)
 	protected("POST /memory", s.createMemory)
 	protected("GET /memory/agent/{agent_id}", s.listMemories)
 	protected("DELETE /memory/{id}", s.deleteMemory)
@@ -173,6 +176,10 @@ type Agent struct {
 	Via string
 	// KeyID is the API key used, when Via is "api_key".
 	KeyID *uuid.UUID
+	// SigningKey and KeyRole are the agent key that signed the request and its
+	// role ("signing" or "recovery"), when Via is "signature" (ADR 0013).
+	SigningKey string
+	KeyRole    string
 }
 
 type ctxKey int
@@ -199,6 +206,11 @@ func (s *Server) requireAgent(next http.HandlerFunc) http.Handler {
 		agent, raw, status, msg := s.authenticate(r)
 		if status != 0 {
 			httpError(w, status, msg)
+			return
+		}
+		// A recovery key may only manage keys (ADR 0013).
+		if agent.KeyRole == store.KeyRecovery && !keyManagementRoutes[r.Pattern] {
+			httpError(w, http.StatusForbidden, "A recovery key can only manage the agent's keys")
 			return
 		}
 		key := agent.ID + ":" + r.URL.Path
@@ -277,9 +289,18 @@ func (s *Server) authenticate(r *http.Request) (Agent, []byte, int, string) {
 		}
 		return Agent{}, nil, http.StatusUnauthorized, "Invalid X-Timestamp"
 	}
-	pub, err := auth.ParsePublicKey(agentID)
-	if err != nil {
+	if _, err := auth.ParsePublicKey(agentID); err != nil {
 		return Agent{}, nil, http.StatusUnauthorized, "Invalid X-Agent-Id"
+	}
+	// The key that signed: X-Key-Id, or the agent ID itself (its original
+	// key), which is how every request was signed before ADR 0013.
+	keyHex := r.Header.Get("X-Key-Id")
+	if keyHex == "" {
+		keyHex = agentID
+	}
+	pub, err := auth.ParsePublicKey(keyHex)
+	if err != nil {
+		return Agent{}, nil, http.StatusUnauthorized, "Invalid X-Key-Id"
 	}
 	identity, err := s.store.GetIdentity(ctx, agentID)
 	if err != nil {
@@ -287,6 +308,13 @@ func (s *Server) authenticate(r *http.Request) (Agent, []byte, int, string) {
 	}
 	if identity == nil {
 		return Agent{}, nil, http.StatusUnauthorized, "Agent identity not registered"
+	}
+	role, err := s.store.ActiveKeyRole(ctx, agentID, keyHex)
+	if err != nil {
+		return Agent{}, nil, http.StatusInternalServerError, "Database error"
+	}
+	if role == "" {
+		return Agent{}, nil, http.StatusUnauthorized, "This key is not an active key of the agent"
 	}
 
 	switch r.Header.Get("X-Signature-Version") {
@@ -308,7 +336,8 @@ func (s *Server) authenticate(r *http.Request) (Agent, []byte, int, string) {
 	default:
 		return Agent{}, nil, http.StatusUnauthorized, "Unsupported X-Signature-Version"
 	}
-	return Agent{ID: identity.ID, UserID: identity.UserID, TenantID: identity.TenantID, Via: "signature"}, raw, 0, ""
+	return Agent{ID: identity.ID, UserID: identity.UserID, TenantID: identity.TenantID, Via: "signature",
+		SigningKey: keyHex, KeyRole: role}, raw, 0, ""
 }
 
 func (s *Server) rateLimitIP(next http.Handler) http.Handler {
@@ -341,7 +370,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			h.Add("Vary", "Origin")
 		}
 		h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Agent-Id, X-Signature, X-Timestamp, X-Signature-Version")
+		h.Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Agent-Id, X-Key-Id, X-Signature, X-Timestamp, X-Signature-Version")
 		h.Set("Access-Control-Max-Age", "600")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
