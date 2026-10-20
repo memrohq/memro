@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -162,6 +163,15 @@ type createMemoryRequest struct {
 	Metadata   json.RawMessage `json:"metadata"`
 }
 
+// isAutoType reports a memory_type that asks the server to choose.
+func isAutoType(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "auto", "unknown":
+		return true
+	}
+	return false
+}
+
 func (s *Server) createMemory(w http.ResponseWriter, r *http.Request) {
 	a := agentFrom(r)
 	var req createMemoryRequest
@@ -173,7 +183,7 @@ func (s *Server) createMemory(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusForbidden, "agent_id does not match authenticated identity")
 		return
 	}
-	if req.Content == "" {
+	if strings.TrimSpace(req.Content) == "" {
 		httpError(w, http.StatusBadRequest, "content cannot be empty")
 		return
 	}
@@ -182,8 +192,10 @@ func (s *Server) createMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A valid type from the caller always wins; the classifier only fills in
+	// when none was given.
 	memType := domain.MemoryType("")
-	if req.MemoryType == nil || *req.MemoryType == "" || *req.MemoryType == "auto" || *req.MemoryType == "unknown" {
+	if req.MemoryType == nil || isAutoType(*req.MemoryType) {
 		memType = engine.Classify(req.Content)[0].Type
 	} else if t, ok := domain.ParseMemoryType(*req.MemoryType); ok {
 		memType = t

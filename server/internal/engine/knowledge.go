@@ -14,11 +14,27 @@ import (
 )
 
 // --- Classification -----------------------------------------------------------
+//
+// Classify is a fallback for memories saved without a type; callers that name
+// a type are never overridden. It is a few cheap wording rules, not a model:
+// ambiguous text falls through to semantic, which is the safe default.
 
 var (
-	reProfile      = regexp.MustCompile(`(?i)^(i am (my name is|a|the|my|an)|i (prefer|like|wish|want|set my))`)
-	reEpisodicTime = regexp.MustCompile(`(?i)(today|yesterday|last week|last month|ago|just now|recently)`)
-	reEpisodicVerb = regexp.MustCompile(`(?i)(went|did|saw|said|heard|felt|thought|bought|made|worked)`)
+	// profile: who someone is, or how they like to work.
+	reProfileIdentity = regexp.MustCompile(`^(i am|i'm|my name is|call me)\b`)
+	reProfileSubject  = regexp.MustCompile(`^(i|i'm|my|the user|user|users|they|he|she)\b`)
+	reProfileVerb     = regexp.MustCompile(`\b(prefers?|preference|likes?|loves?|dislikes?|hates?|wants?|would rather|always|never|usually)\b`)
+
+	// procedural: how to do something.
+	reProceduralLead = regexp.MustCompile(`^(to [a-z][^,:]*[,:]|in order to\b|how to\b|steps?\b|(run|install|start|stop|restart|deploy|build|execute|set up|configure|create|open|call|use)\s)`)
+	reProceduralStep = regexp.MustCompile(`\b(step \d+|then run|first run|before running|make sure to)\b`)
+
+	// episodic: something that happened.
+	reFirstPerson  = regexp.MustCompile(`\b(i|we)\b`)
+	reEpisodicTime = regexp.MustCompile(`\b(today|yesterday|last (week|month|night)|ago|just now|recently)\b`)
+	reEpisodicVerb = regexp.MustCompile(`\b(went|did|saw|said|heard|felt|thought|bought|made|worked|met|decided)\b`)
+	reEventVerb    = regexp.MustCompile(`\b(passed|failed|merged|shipped|launched|released|published|deployed|completed|finished|fixed|migrated)\b`)
+	reStateVerb    = regexp.MustCompile(`\b(is|are|be|been|being|gets?|stays?)\s+(passed|failed|merged|shipped|launched|released|published|deployed|completed|finished|fixed|migrated)\b`)
 )
 
 type Classification struct {
@@ -28,13 +44,17 @@ type Classification struct {
 
 // Classify guesses a memory type from its wording, most likely first.
 func Classify(content string) []Classification {
-	lower := strings.ToLower(content)
+	lower := strings.ToLower(strings.TrimSpace(content))
 	var out []Classification
-	if reProfile.MatchString(lower) {
+	if reProfileIdentity.MatchString(lower) || (reProfileSubject.MatchString(lower) && reProfileVerb.MatchString(lower)) {
 		out = append(out, Classification{domain.Profile, 0.9})
 	}
-	firstPerson := strings.Contains(lower, "i ") || strings.Contains(lower, "we ")
-	if firstPerson && (reEpisodicTime.MatchString(lower) || reEpisodicVerb.MatchString(lower)) {
+	if reProceduralLead.MatchString(lower) || reProceduralStep.MatchString(lower) {
+		out = append(out, Classification{domain.Procedural, 0.85})
+	}
+	happened := reFirstPerson.MatchString(lower) && (reEpisodicTime.MatchString(lower) || reEpisodicVerb.MatchString(lower))
+	completed := reEventVerb.MatchString(lower) && !reStateVerb.MatchString(lower)
+	if happened || completed {
 		out = append(out, Classification{domain.Episodic, 0.8})
 	}
 	if len(out) == 0 {
