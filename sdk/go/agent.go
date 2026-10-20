@@ -293,7 +293,8 @@ func (a *Agent) Webhooks(ctx context.Context) ([]string, error) {
 	return a.Client.ListWebhooks(ctx, "memory_created", a.signer)
 }
 
-// DeleteAgent permanently deletes this agent and everything it stored.
+// DeleteAgent permanently deletes this agent and everything it stored. It
+// needs the agent's private key; API keys cannot delete agents (403).
 func (a *Agent) DeleteAgent(ctx context.Context) error {
 	return a.Client.DeleteIdentity(ctx, a.AgentID, a.signer)
 }

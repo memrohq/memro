@@ -11,6 +11,10 @@ curl -s https://api.memro.co/hooks -H "Authorization: Bearer $MEMRO_API_KEY" \
 A webhook belongs to the agent that registered it and fires only for that
 agent's memories. List them with `GET /hooks/memory_created`.
 
+A webhook registered with an API key lasts as long as that key: revoking the
+key deletes it, so a leaked key cannot leave one behind. Register it with a
+dashboard session or a signed request to make it independent of any key.
+
 ## Delivery
 
 ```http
