@@ -17,6 +17,12 @@ const GitHubMark = ({ className = "size-6" }) => (
   </svg>
 );
 
+const LinearMark = ({ className = "size-6" }) => (
+  <svg viewBox="0 0 24 24" className={`${className} text-[#5E6AD2]`} aria-hidden="true" fill="currentColor">
+    <path d="M2.5 12c0-5.247 4.253-9.5 9.5-9.5 1.528 0 2.97.36 4.25 1.002L4.002 15.75A9.458 9.458 0 0 1 2.5 12zm1.25 5.25L17.25 3.75A9.458 9.458 0 0 1 21.5 12c0 5.247-4.253 9.5-9.5 9.5a9.458 9.458 0 0 1-8.25-4.25z" />
+  </svg>
+);
+
 const PROVIDERS = {
   slack: {
     name: "Slack", Mark: SlackMark, unit: "channel",
@@ -27,6 +33,11 @@ const PROVIDERS = {
     name: "GitHub", Mark: GitHubMark, unit: "repository",
     blurb: "Issues and pull requests with their discussion, from the repositories you share with the Memro app.",
     privacy: "Read-only access. You choose the repositories on GitHub, and Memro only syncs those your account can read.",
+  },
+  linear: {
+    name: "Linear", Mark: LinearMark, unit: "team",
+    blurb: "Issues, initiatives, priorities, and discussion from the teams you choose.",
+    privacy: "Read-only access. Memro only syncs issues and comments from the teams you turn on.",
   },
 };
 

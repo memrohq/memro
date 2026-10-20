@@ -202,6 +202,15 @@ func (s *Server) githubWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(s.connectors.GitHubWebhook(r.Context(), r.Header, raw))
 }
 
+// POST /connectors/linear/webhook — Linear webhooks (signed by Linear).
+func (s *Server) linearWebhook(w http.ResponseWriter, r *http.Request) {
+	raw, ok := readWebhook(w, r)
+	if !ok {
+		return
+	}
+	w.WriteHeader(s.connectors.LinearWebhook(r.Context(), r.Header, raw))
+}
+
 const maxWebhookBytes = 5 << 20
 
 func readWebhook(w http.ResponseWriter, r *http.Request) ([]byte, bool) {

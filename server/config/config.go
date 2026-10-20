@@ -101,6 +101,9 @@ func Load() Config {
 			GitHubClientID:        strings.TrimSpace(os.Getenv("GITHUB_CLIENT_ID")),
 			GitHubClientSecret:    strings.TrimSpace(os.Getenv("GITHUB_CLIENT_SECRET")),
 			GitHubWebhookSecret:   strings.TrimSpace(os.Getenv("GITHUB_WEBHOOK_SECRET")),
+			LinearClientID:        strings.TrimSpace(os.Getenv("LINEAR_CLIENT_ID")),
+			LinearClientSecret:    strings.TrimSpace(os.Getenv("LINEAR_CLIENT_SECRET")),
+			LinearWebhookSecret:   strings.TrimSpace(os.Getenv("LINEAR_WEBHOOK_SECRET")),
 		},
 	}
 	c.BaseURL = env("BASE_URL", "http://localhost:"+strconv.Itoa(c.Port))
@@ -146,11 +149,17 @@ type ConnectorsConfig struct {
 	GitHubClientSecret  string
 	GitHubWebhookSecret string
 
+	LinearClientID      string
+	LinearClientSecret  string
+	LinearWebhookSecret string
+
 	// API endpoints, overridden in tests.
-	SlackAPIURL   string
-	GitHubAPIURL  string
-	GitHubWebURL  string
-	SlackOAuthURL string
+	SlackAPIURL    string
+	GitHubAPIURL   string
+	GitHubWebURL   string
+	SlackOAuthURL  string
+	LinearAPIURL   string
+	LinearOAuthURL string
 }
 
 func (c ConnectorsConfig) SlackEnabled() bool {
@@ -160,6 +169,10 @@ func (c ConnectorsConfig) SlackEnabled() bool {
 func (c ConnectorsConfig) GitHubEnabled() bool {
 	return c.EncryptionKey != "" && c.GitHubAppID != "" && c.GitHubAppSlug != "" && c.GitHubAppPrivateKey != "" &&
 		c.GitHubClientID != "" && c.GitHubClientSecret != "" && c.GitHubWebhookSecret != ""
+}
+
+func (c ConnectorsConfig) LinearEnabled() bool {
+	return c.EncryptionKey != "" && c.LinearClientID != "" && c.LinearClientSecret != ""
 }
 
 // pemFromEnv accepts a PEM with real newlines or with literal "\n", as

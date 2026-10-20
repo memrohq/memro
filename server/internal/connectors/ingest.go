@@ -153,9 +153,10 @@ func (m *Manager) storeItem(ctx context.Context, c *conn, it item) error {
 	now := m.now().UTC()
 	created := make([]domain.Memory, 0, len(insert))
 	for _, ch := range insert {
+		tags := append(extract.Entities(ch.content), ReferenceTags(ch.content)...)
 		mem := domain.Memory{ID: uuid.New(), AgentID: c.AgentID, TenantID: c.TenantID, Content: ch.content,
 			MemoryType: it.Type, Visibility: domain.Private, CreatedAt: now, DocumentDate: now, EventDate: it.EventDate,
-			LastAccessedAt: now, Confidence: 1, EntityTags: extract.Entities(ch.content), RelationshipTypes: []string{},
+			LastAccessedAt: now, Confidence: 1, EntityTags: tags, RelationshipTypes: []string{},
 			Metadata: metaJSON}
 		if _, err := tx.Exec(ctx, `INSERT INTO memories (id, agent_id, tenant_id, content, memory_type, visibility,
 				created_at, document_date, event_date, is_atomic, entity_tags, relationship_types, access_count,
@@ -167,6 +168,9 @@ func (m *Manager) storeItem(ctx context.Context, c *conn, it item) error {
 			return err
 		}
 		created = append(created, mem)
+	}
+	if len(created) > 0 {
+		_ = m.linkCrossReferences(ctx, tx, c, created)
 	}
 	if _, err := tx.Exec(ctx, `UPDATE connector_items SET content_hash = $3, chunk_hashes = $4, updated_at = NOW()
 		WHERE connection_id = $1 AND item_key = $2`, c.ID, it.Key, contentHash, hashes); err != nil {

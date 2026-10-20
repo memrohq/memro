@@ -135,6 +135,7 @@ func (s *Server) Handler() http.Handler {
 	public("GET /connectors/{provider}/callback", s.connectorCallback)
 	public("POST /connectors/slack/events", s.slackEvents)
 	public("POST /connectors/github/webhook", s.githubWebhook)
+	public("POST /connectors/linear/webhook", s.linearWebhook)
 
 	protected("DELETE /identity/{id}", s.deleteIdentity)
 	protected("GET /identity/{id}/keys", s.listAgentKeys)

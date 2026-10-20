@@ -30,6 +30,7 @@ import (
 const (
 	ProviderSlack  = "slack"
 	ProviderGitHub = "github"
+	ProviderLinear = "linear"
 
 	StatusActive  = "active"
 	StatusPaused  = "paused"
@@ -153,6 +154,7 @@ type Manager struct {
 	providers map[string]provider
 	slack     *slackProvider
 	github    *githubProvider
+	linear    *linearProvider
 	http      *http.Client
 	wake      chan struct{}
 	now       func() time.Time
@@ -176,6 +178,12 @@ func New(d Deps) (*Manager, error) {
 	}
 	if cfg.GitHubWebURL == "" {
 		cfg.GitHubWebURL = "https://github.com"
+	}
+	if cfg.LinearAPIURL == "" {
+		cfg.LinearAPIURL = "https://api.linear.app/graphql"
+	}
+	if cfg.LinearOAuthURL == "" {
+		cfg.LinearOAuthURL = "https://linear.app/oauth/authorize"
 	}
 	if cfg.Workers <= 0 {
 		cfg.Workers = 4
@@ -205,8 +213,10 @@ func New(d Deps) (*Manager, error) {
 		return nil, err
 	}
 	m.github = gh
+	m.linear = newLinearProvider(m)
 	m.providers[ProviderSlack] = m.slack
 	m.providers[ProviderGitHub] = m.github
+	m.providers[ProviderLinear] = m.linear
 	for name, p := range m.providers {
 		slog.Info("connector", "provider", name, "enabled", p.enabled())
 	}
@@ -215,7 +225,7 @@ func New(d Deps) (*Manager, error) {
 
 // Providers lists every connector and whether it is configured.
 func (m *Manager) Providers() []ProviderInfo {
-	return []ProviderInfo{m.slack.info(), m.github.info()}
+	return []ProviderInfo{m.slack.info(), m.github.info(), m.linear.info()}
 }
 
 func (m *Manager) provider(name string) (provider, error) {
