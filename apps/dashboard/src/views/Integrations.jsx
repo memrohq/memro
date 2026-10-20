@@ -29,6 +29,12 @@ const SentryMark = ({ className = "size-6" }) => (
   </svg>
 );
 
+const NotionMark = ({ className = "size-6" }) => (
+  <svg viewBox="0 0 24 24" className={`${className} text-ink`} aria-hidden="true" fill="currentColor">
+    <path d="M4.459 4.208c.746.606 1.026.56 2.428.466l11.458-.84c1.12-.093 1.213-.42 1.4-.84l.653-1.4c.094-.187.28-.28.467-.28h1.68c.28 0 .466.186.466.466v17.432c0 .373-.186.653-.56.746l-4.106 1.867c-.28.093-.56 0-.746-.28l-8.587-12.787v11.201c0 1.213.653 1.587 2.053 1.68l.467.093c.28 0 .467.187.467.467v1.12c0 .28-.187.467-.467.467H4.46c-.28 0-.467-.187-.467-.467v-1.12c0-.28.187-.467.467-.467l.56-.093c1.4-.093 1.867-.653 1.867-1.773V7.288c0-1.027-.373-1.493-1.68-1.587l-.746-.093c-.28 0-.467-.187-.467-.467v-1.12c0-.28.187-.467.467-.467h1.493l-.467.653zm11.2 12.321V6.635L9.693 15.688l5.966.841z" />
+  </svg>
+);
+
 const PROVIDERS = {
   slack: {
     name: "Slack", Mark: SlackMark, unit: "channel",
@@ -49,6 +55,11 @@ const PROVIDERS = {
     name: "Sentry", Mark: SentryMark, unit: "project",
     blurb: "Production issues, exceptions, stack traces, and culprit files from the projects you choose.",
     privacy: "Read-only access. Memro only syncs issues and stack traces from the projects you turn on.",
+  },
+  notion: {
+    name: "Notion", Mark: NotionMark, unit: "database",
+    blurb: "Product specs, architectural decisions, RFCs, and engineering knowledge bases.",
+    privacy: "Read-only access. Memro only syncs databases and pages you explicitly share with the integration.",
   },
 };
 

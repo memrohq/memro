@@ -220,6 +220,15 @@ func (s *Server) sentryWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(s.connectors.SentryWebhook(r.Context(), r.Header, raw))
 }
 
+// POST /connectors/notion/webhook — Notion webhooks.
+func (s *Server) notionWebhook(w http.ResponseWriter, r *http.Request) {
+	raw, ok := readWebhook(w, r)
+	if !ok {
+		return
+	}
+	w.WriteHeader(s.connectors.NotionWebhook(r.Context(), r.Header, raw))
+}
+
 const maxWebhookBytes = 5 << 20
 
 func readWebhook(w http.ResponseWriter, r *http.Request) ([]byte, bool) {

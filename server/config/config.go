@@ -104,6 +104,12 @@ func Load() Config {
 			LinearClientID:        strings.TrimSpace(os.Getenv("LINEAR_CLIENT_ID")),
 			LinearClientSecret:    strings.TrimSpace(os.Getenv("LINEAR_CLIENT_SECRET")),
 			LinearWebhookSecret:   strings.TrimSpace(os.Getenv("LINEAR_WEBHOOK_SECRET")),
+			SentryClientID:        strings.TrimSpace(os.Getenv("SENTRY_CLIENT_ID")),
+			SentryClientSecret:    strings.TrimSpace(os.Getenv("SENTRY_CLIENT_SECRET")),
+			SentryWebhookSecret:   strings.TrimSpace(os.Getenv("SENTRY_WEBHOOK_SECRET")),
+			NotionClientID:        strings.TrimSpace(os.Getenv("NOTION_CLIENT_ID")),
+			NotionClientSecret:    strings.TrimSpace(os.Getenv("NOTION_CLIENT_SECRET")),
+			NotionWebhookSecret:   strings.TrimSpace(os.Getenv("NOTION_WEBHOOK_SECRET")),
 		},
 	}
 	c.BaseURL = env("BASE_URL", "http://localhost:"+strconv.Itoa(c.Port))
@@ -157,6 +163,10 @@ type ConnectorsConfig struct {
 	SentryClientSecret  string
 	SentryWebhookSecret string
 
+	NotionClientID      string
+	NotionClientSecret  string
+	NotionWebhookSecret string
+
 	// API endpoints, overridden in tests.
 	SlackAPIURL    string
 	GitHubAPIURL   string
@@ -166,6 +176,8 @@ type ConnectorsConfig struct {
 	LinearOAuthURL string
 	SentryAPIURL   string
 	SentryOAuthURL string
+	NotionAPIURL   string
+	NotionOAuthURL string
 }
 
 func (c ConnectorsConfig) SlackEnabled() bool {
@@ -183,6 +195,10 @@ func (c ConnectorsConfig) LinearEnabled() bool {
 
 func (c ConnectorsConfig) SentryEnabled() bool {
 	return c.EncryptionKey != "" && c.SentryClientID != "" && c.SentryClientSecret != ""
+}
+
+func (c ConnectorsConfig) NotionEnabled() bool {
+	return c.EncryptionKey != "" && c.NotionClientID != "" && c.NotionClientSecret != ""
 }
 
 // pemFromEnv accepts a PEM with real newlines or with literal "\n", as

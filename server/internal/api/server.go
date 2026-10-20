@@ -137,6 +137,7 @@ func (s *Server) Handler() http.Handler {
 	public("POST /connectors/github/webhook", s.githubWebhook)
 	public("POST /connectors/linear/webhook", s.linearWebhook)
 	public("POST /connectors/sentry/webhook", s.sentryWebhook)
+	public("POST /connectors/notion/webhook", s.notionWebhook)
 
 	protected("DELETE /identity/{id}", s.deleteIdentity)
 	protected("GET /identity/{id}/keys", s.listAgentKeys)
