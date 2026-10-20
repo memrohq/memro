@@ -32,7 +32,7 @@ func (p *linearProvider) enabled() bool {
 
 func (p *linearProvider) info() ProviderInfo {
 	return ProviderInfo{
-		Name:             "Linear",
+		Name:             ProviderLinear,
 		Enabled:          p.enabled(),
 		SourcesManagedBy: "memro", // user selects teams in dashboard
 	}

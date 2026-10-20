@@ -31,7 +31,7 @@ func (p *sentryProvider) enabled() bool {
 
 func (p *sentryProvider) info() ProviderInfo {
 	return ProviderInfo{
-		Name:             "Sentry",
+		Name:             ProviderSentry,
 		Enabled:          p.enabled(),
 		SourcesManagedBy: "memro", // user selects projects in dashboard
 	}

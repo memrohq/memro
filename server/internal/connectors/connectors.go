@@ -30,9 +30,13 @@ import (
 const (
 	ProviderSlack  = "slack"
 	ProviderGitHub = "github"
-	ProviderLinear = "linear"
-	ProviderSentry = "sentry"
-	ProviderNotion = "notion"
+	ProviderLinear  = "linear"
+	ProviderSentry  = "sentry"
+	ProviderNotion  = "notion"
+	ProviderJira    = "jira"
+	ProviderGitLab  = "gitlab"
+	ProviderGoogle  = "google"
+	ProviderDiscord = "discord"
 
 	StatusActive  = "active"
 	StatusPaused  = "paused"
@@ -159,6 +163,8 @@ type Manager struct {
 	linear    *linearProvider
 	sentry    *sentryProvider
 	notion    *notionProvider
+	jira      *jiraProvider
+	gitlab    *gitlabProvider
 	http      *http.Client
 	wake      chan struct{}
 	now       func() time.Time
@@ -232,11 +238,15 @@ func New(d Deps) (*Manager, error) {
 	m.linear = newLinearProvider(m)
 	m.sentry = newSentryProvider(m)
 	m.notion = newNotionProvider(m)
+	m.jira = newJiraProvider(m)
+	m.gitlab = newGitLabProvider(m)
 	m.providers[ProviderSlack] = m.slack
 	m.providers[ProviderGitHub] = m.github
 	m.providers[ProviderLinear] = m.linear
 	m.providers[ProviderSentry] = m.sentry
 	m.providers[ProviderNotion] = m.notion
+	m.providers[ProviderJira] = m.jira
+	m.providers[ProviderGitLab] = m.gitlab
 	for name, p := range m.providers {
 		slog.Info("connector", "provider", name, "enabled", p.enabled())
 	}
@@ -245,7 +255,7 @@ func New(d Deps) (*Manager, error) {
 
 // Providers lists every connector and whether it is configured.
 func (m *Manager) Providers() []ProviderInfo {
-	return []ProviderInfo{m.slack.info(), m.github.info(), m.linear.info(), m.sentry.info(), m.notion.info()}
+	return []ProviderInfo{m.slack.info(), m.github.info(), m.linear.info(), m.sentry.info(), m.notion.info(), m.jira.info(), m.gitlab.info()}
 }
 
 func (m *Manager) provider(name string) (provider, error) {

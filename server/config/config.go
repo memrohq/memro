@@ -110,6 +110,18 @@ func Load() Config {
 			NotionClientID:        strings.TrimSpace(os.Getenv("NOTION_CLIENT_ID")),
 			NotionClientSecret:    strings.TrimSpace(os.Getenv("NOTION_CLIENT_SECRET")),
 			NotionWebhookSecret:   strings.TrimSpace(os.Getenv("NOTION_WEBHOOK_SECRET")),
+			JiraClientID:          strings.TrimSpace(os.Getenv("JIRA_CLIENT_ID")),
+			JiraClientSecret:      strings.TrimSpace(os.Getenv("JIRA_CLIENT_SECRET")),
+			JiraWebhookSecret:     strings.TrimSpace(os.Getenv("JIRA_WEBHOOK_SECRET")),
+			GitLabClientID:        strings.TrimSpace(os.Getenv("GITLAB_CLIENT_ID")),
+			GitLabClientSecret:    strings.TrimSpace(os.Getenv("GITLAB_CLIENT_SECRET")),
+			GitLabWebhookSecret:   strings.TrimSpace(os.Getenv("GITLAB_WEBHOOK_SECRET")),
+			GoogleClientID:        strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
+			GoogleClientSecret:    strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_SECRET")),
+			GoogleWebhookSecret:   strings.TrimSpace(os.Getenv("GOOGLE_WEBHOOK_SECRET")),
+			DiscordClientID:       strings.TrimSpace(os.Getenv("DISCORD_CLIENT_ID")),
+			DiscordClientSecret:   strings.TrimSpace(os.Getenv("DISCORD_CLIENT_SECRET")),
+			DiscordPublicKey:      strings.TrimSpace(os.Getenv("DISCORD_PUBLIC_KEY")),
 		},
 	}
 	c.BaseURL = env("BASE_URL", "http://localhost:"+strconv.Itoa(c.Port))
@@ -167,6 +179,22 @@ type ConnectorsConfig struct {
 	NotionClientSecret  string
 	NotionWebhookSecret string
 
+	JiraClientID      string
+	JiraClientSecret  string
+	JiraWebhookSecret string
+
+	GitLabClientID      string
+	GitLabClientSecret  string
+	GitLabWebhookSecret string
+
+	GoogleClientID      string
+	GoogleClientSecret  string
+	GoogleWebhookSecret string
+
+	DiscordClientID     string
+	DiscordClientSecret string
+	DiscordPublicKey    string
+
 	// API endpoints, overridden in tests.
 	SlackAPIURL    string
 	GitHubAPIURL   string
@@ -178,6 +206,14 @@ type ConnectorsConfig struct {
 	SentryOAuthURL string
 	NotionAPIURL   string
 	NotionOAuthURL string
+	JiraAPIURL     string
+	JiraOAuthURL   string
+	GitLabAPIURL   string
+	GitLabOAuthURL string
+	GoogleAPIURL   string
+	GoogleOAuthURL string
+	DiscordAPIURL  string
+	DiscordOAuthURL string
 }
 
 func (c ConnectorsConfig) SlackEnabled() bool {
@@ -199,6 +235,22 @@ func (c ConnectorsConfig) SentryEnabled() bool {
 
 func (c ConnectorsConfig) NotionEnabled() bool {
 	return c.EncryptionKey != "" && c.NotionClientID != "" && c.NotionClientSecret != ""
+}
+
+func (c ConnectorsConfig) JiraEnabled() bool {
+	return c.EncryptionKey != "" && c.JiraClientID != "" && c.JiraClientSecret != ""
+}
+
+func (c ConnectorsConfig) GitLabEnabled() bool {
+	return c.EncryptionKey != "" && c.GitLabClientID != "" && c.GitLabClientSecret != ""
+}
+
+func (c ConnectorsConfig) GoogleEnabled() bool {
+	return c.EncryptionKey != "" && c.GoogleClientID != "" && c.GoogleClientSecret != ""
+}
+
+func (c ConnectorsConfig) DiscordEnabled() bool {
+	return c.EncryptionKey != "" && c.DiscordClientID != "" && c.DiscordClientSecret != ""
 }
 
 // pemFromEnv accepts a PEM with real newlines or with literal "\n", as

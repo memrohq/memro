@@ -32,7 +32,7 @@ func (p *notionProvider) enabled() bool {
 
 func (p *notionProvider) info() ProviderInfo {
 	return ProviderInfo{
-		Name:             "Notion",
+		Name:             ProviderNotion,
 		Enabled:          p.enabled(),
 		SourcesManagedBy: "memro", // user selects databases and pages in dashboard
 	}

@@ -176,6 +176,48 @@ can see the installation, and syncs only repositories they can read. It
 revokes that token on disconnect; uninstalling the app from GitHub stops all
 syncing for that account.
 
+### Linear
+
+1. Linear → **Settings → API → My applications → Create new application**:
+   - Callback URL: `APP/api/connectors/linear/callback`
+   - Webhook URL: `API/connectors/linear/webhook`
+2. Set:
+
+   | Variable | From |
+   |---|---|
+   | `LINEAR_CLIENT_ID` | Application Client ID |
+   | `LINEAR_CLIENT_SECRET` | Application Client Secret |
+   | `LINEAR_WEBHOOK_SECRET` | Webhook Secret for signature verification |
+
+### Sentry
+
+1. Sentry → **Settings → Developer Settings → Custom Integrations → Create New Integration**:
+   - Authorize URL: `APP/api/connectors/sentry/callback`
+   - Webhook URL: `API/connectors/sentry/webhook`
+   - Permissions: Project: Read, Issue & Event: Read, Organization: Read
+   - Alert Rule Action: Enable issue webhooks
+2. Set:
+
+   | Variable | From |
+   |---|---|
+   | `SENTRY_CLIENT_ID` | Client ID |
+   | `SENTRY_CLIENT_SECRET` | Client Secret |
+   | `SENTRY_WEBHOOK_SECRET` | Webhook verification secret |
+
+### Notion
+
+1. Notion → **[notion.so/my-integrations](https://www.notion.so/my-integrations) → New Integration**:
+   - Type: Public Integration
+   - Redirect URI: `APP/api/connectors/notion/callback`
+   - Capabilities: Read content, Read user information including email
+2. Set:
+
+   | Variable | From |
+   |---|---|
+   | `NOTION_CLIENT_ID` | OAuth Client ID |
+   | `NOTION_CLIENT_SECRET` | OAuth Client Secret |
+   | `NOTION_WEBHOOK_SECRET` | Webhook verification secret |
+
 ### Other settings
 
 | Variable | Default | |

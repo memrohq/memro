@@ -138,6 +138,8 @@ func (s *Server) Handler() http.Handler {
 	public("POST /connectors/linear/webhook", s.linearWebhook)
 	public("POST /connectors/sentry/webhook", s.sentryWebhook)
 	public("POST /connectors/notion/webhook", s.notionWebhook)
+	public("POST /connectors/jira/webhook", s.jiraWebhook)
+	public("POST /connectors/gitlab/webhook", s.gitlabWebhook)
 
 	protected("DELETE /identity/{id}", s.deleteIdentity)
 	protected("GET /identity/{id}/keys", s.listAgentKeys)
@@ -371,7 +373,15 @@ func (s *Server) authenticate(r *http.Request) (Agent, []byte, int, string) {
 // signedWebhooks are authenticated by the sender's HMAC signature and
 // arrive from a few provider addresses shared by every customer, so the
 // per-IP limit would drop legitimate deliveries.
-var signedWebhooks = map[string]bool{"/connectors/slack/events": true, "/connectors/github/webhook": true}
+var signedWebhooks = map[string]bool{
+	"/connectors/slack/events":   true,
+	"/connectors/github/webhook": true,
+	"/connectors/linear/webhook": true,
+	"/connectors/sentry/webhook": true,
+	"/connectors/notion/webhook": true,
+	"/connectors/jira/webhook":   true,
+	"/connectors/gitlab/webhook": true,
+}
 
 func (s *Server) rateLimitIP(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

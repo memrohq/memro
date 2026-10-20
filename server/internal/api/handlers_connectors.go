@@ -229,6 +229,24 @@ func (s *Server) notionWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(s.connectors.NotionWebhook(r.Context(), r.Header, raw))
 }
 
+// POST /connectors/jira/webhook — Jira webhooks (signed with HMAC).
+func (s *Server) jiraWebhook(w http.ResponseWriter, r *http.Request) {
+	raw, ok := readWebhook(w, r)
+	if !ok {
+		return
+	}
+	w.WriteHeader(s.connectors.JiraWebhook(r.Context(), r.Header, r.URL.Query(), raw))
+}
+
+// POST /connectors/gitlab/webhook — GitLab webhooks (token verified).
+func (s *Server) gitlabWebhook(w http.ResponseWriter, r *http.Request) {
+	raw, ok := readWebhook(w, r)
+	if !ok {
+		return
+	}
+	w.WriteHeader(s.connectors.GitLabWebhook(r.Context(), r.Header, raw))
+}
+
 const maxWebhookBytes = 5 << 20
 
 func readWebhook(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
