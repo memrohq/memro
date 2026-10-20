@@ -197,6 +197,16 @@ test("resolveProjectRoot finds project boundary when called from nested subdirec
   assert.equal(resolveProjectRoot(nested), PROJECT_DIR);
 });
 
+test("resolveProjectRoot never treats user home directory as a project root", () => {
+  // Even if HOME has .cursor or .claude global dirs, starting from a subfolder without a project marker stops before home
+  fs.mkdirSync(path.join(HOME, ".claude"), { recursive: true });
+  fs.mkdirSync(path.join(HOME, ".cursor"), { recursive: true });
+  const sub = path.join(HOME, "Documents", "work", "unmarked");
+  fs.mkdirSync(sub, { recursive: true });
+
+  assert.equal(resolveProjectRoot(sub), sub);
+});
+
 test("ensureGitIgnored adds config path to .gitignore and prevents duplicates", () => {
   const cursorConfig = path.join(PROJECT_DIR, ".cursor", "mcp.json");
   const gitignore = path.join(PROJECT_DIR, ".gitignore");

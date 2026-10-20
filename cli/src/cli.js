@@ -202,11 +202,13 @@ export function resolveProjectRoot(startDir = process.cwd()) {
 
   // Walk up checking for project boundary markers
   let curr = path.resolve(startDir);
+  const homeDir = path.resolve(os.homedir());
   while (true) {
+    // Stop if we reach user's home directory: home folder is never a project root
+    if (curr === homeDir) break;
+
     if (
       fs.existsSync(path.join(curr, ".git")) ||
-      fs.existsSync(path.join(curr, ".claude")) ||
-      fs.existsSync(path.join(curr, ".cursor")) ||
       fs.existsSync(path.join(curr, "CLAUDE.md")) ||
       fs.existsSync(path.join(curr, "package.json")) ||
       fs.existsSync(path.join(curr, "go.mod")) ||
