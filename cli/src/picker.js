@@ -91,3 +91,90 @@ export function pick(items, { title, input = process.stdin, output = process.std
     draw();
   });
 }
+
+/** Initial state for single-select: items are { label, hint?, value }. */
+export function initialSingleState(items, defaultIndex = 0) {
+  return { items: items.map((i) => ({ ...i })), cursor: defaultIndex, done: false, cancelled: false };
+}
+
+/** Apply key to single-select state. */
+export function reduceSingle(state, key) {
+  const s = { ...state, items: state.items.map((i) => ({ ...i })) };
+  const n = s.items.length;
+  const name = key.name || key.sequence;
+  if ((key.ctrl && name === "c") || name === "escape" || name === "q") {
+    s.cancelled = true;
+  } else if (name === "return" || name === "enter") {
+    s.done = true;
+  } else if (name === "up" || name === "k") {
+    s.cursor = (s.cursor - 1 + n) % n;
+  } else if (name === "down" || name === "j" || name === "tab") {
+    s.cursor = (s.cursor + 1) % n;
+  }
+  return s;
+}
+
+/** Render lines for single-select. */
+export function renderSingle(state, title) {
+  const lines = [`  ${c.bold(title)}`, c.dim("  ↑/↓ move · enter select · esc cancel"), ""];
+  state.items.forEach((item, i) => {
+    const here = i === state.cursor;
+    const dot = here ? c.green("●") : c.dim("○");
+    const label = here ? c.accent(item.label) : item.label;
+    lines.push(`  ${here ? c.accent("›") : " "} ${dot} ${label}`);
+    if (item.hint) {
+      lines.push(`      ${c.dim(item.hint)}`);
+    }
+  });
+  lines.push("");
+  return lines;
+}
+
+/**
+ * Show a single-select picker and resolve with the chosen item, or null if cancelled.
+ */
+export function pickOne(items, { title, defaultIndex = 0, input = process.stdin, output = process.stdout } = {}) {
+  return new Promise((resolve) => {
+    let state = initialSingleState(items, defaultIndex);
+    let drawn = 0;
+    const draw = () => {
+      const lines = renderSingle(state, title);
+      if (drawn) output.write(`${ESC}${drawn}A`);
+      output.write(lines.map((l) => `${ESC}2K${l}`).join("\n") + "\n");
+      drawn = lines.length;
+    };
+    const finish = (value) => {
+      input.off("keypress", onKey);
+      if (input.isTTY) input.setRawMode(false);
+      input.pause();
+      output.write(`${ESC}?25h`); // show cursor
+      resolve(value);
+    };
+    const onKey = (_str, key = {}) => {
+      state = reduceSingle(state, key);
+      if (state.cancelled) return finish(null);
+      if (state.done) return finish(state.items[state.cursor]);
+      draw();
+    };
+    readline.emitKeypressEvents(input);
+    if (input.isTTY) input.setRawMode(true);
+    input.resume();
+    output.write(`${ESC}?25l`);
+    input.on("keypress", onKey);
+    draw();
+  });
+}
+
+/**
+ * Ask a simple text prompt.
+ */
+export function promptText(query, { input = process.stdin, output = process.stdout } = {}) {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input, output });
+    rl.question(query, (ans) => {
+      rl.close();
+      resolve(ans.trim());
+    });
+  });
+}
+

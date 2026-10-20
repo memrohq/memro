@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { CLIENTS, findClient } from "./clients.js";
-import { pick } from "./picker.js";
+import { pick, pickOne, promptText } from "./picker.js";
 import { installInstructions, uninstallInstructions } from "./instructions.js";
 
 const ENVIRONMENTS = {
@@ -82,6 +82,7 @@ export function parseArgs(argv) {
     throw new Error('Conflicting scope arguments: cannot combine "--project" with "--scope user".');
   }
 
+  opts.scopeExplicit = projectFlag || Boolean(scopeFlagValue);
   opts.scope = projectFlag ? "project" : (scopeFlagValue || "user");
   opts.api = checkURL((opts.api || process.env.MEMRO_API_URL || ENVIRONMENTS.prod).replace(/\/+$/, ""), "API");
   return opts;
@@ -300,9 +301,37 @@ async function chooseTargets(opts, cwd = process.cwd()) {
 }
 
 async function connect(opts) {
+  // If scope was not explicitly provided on CLI, ask interactively in a TTY terminal
+  if (!opts.scopeExplicit && process.stdin.isTTY && process.stdout.isTTY && !opts.yes && !opts.clients) {
+    console.log(`\n◆ Memro connect  (${opts.api})`);
+    const scopeChoice = await pickOne(
+      [
+        {
+          label: "Global (user-wide across all projects)",
+          hint: "Connect tools everywhere on this machine (recommended for personal dev)",
+          value: "user",
+        },
+        {
+          label: "Current project (this repository only)",
+          hint: "Configure ./.cursor, ./.claude.json, and ./CLAUDE.md in current directory",
+          value: "project",
+        },
+      ],
+      { title: "Where would you like to configure Memro?" },
+    );
+    if (!scopeChoice) {
+      console.log("  Cancelled.");
+      return;
+    }
+    opts.scope = scopeChoice.value;
+  }
+
   const scope = opts.scope || "user";
   const cwd = scope === "project" ? resolveProjectRoot(process.cwd()) : process.cwd();
-  console.log(`\n◆ Memro connect  (${opts.api})  [scope: ${scope}]`);
+
+  if (opts.scopeExplicit || !process.stdin.isTTY) {
+    console.log(`\n◆ Memro connect  (${opts.api})  [scope: ${scope}]`);
+  }
 
   if (scope === "project") {
     if (cwd !== process.cwd()) {
@@ -315,6 +344,37 @@ async function connect(opts) {
       console.log("  \x1b[33m⚠\x1b[0m Note: Current directory appears to be tracked by Git.");
       console.log("    Configuration files containing your API key (such as .cursor/mcp.json, .claude.json)");
       console.log("    will be protected or added to .gitignore.\n");
+    }
+
+    // Ask about memory isolation if no key was passed and terminal is interactive
+    if (!opts.key && !process.env.MEMRO_API_KEY && process.stdin.isTTY && process.stdout.isTTY && !opts.yes) {
+      const memoryChoice = await pickOne(
+        [
+          {
+            label: "Shared account memory (re-use your default credentials)",
+            hint: "Claude Code, Cursor, and other tools share the same memory pool",
+            value: "shared",
+          },
+          {
+            label: "Isolated project memory (enter a dedicated API key)",
+            hint: "Strict memory boundary: only tools in this project access this memory",
+            value: "isolated",
+          },
+        ],
+        { title: "Memory space for this project:" },
+      );
+      if (!memoryChoice) {
+        console.log("  Cancelled.");
+        return;
+      }
+      if (memoryChoice.value === "isolated") {
+        const enteredKey = await promptText("  Enter project API key (memro_sk_...): ");
+        if (!enteredKey) {
+          console.log("  No key entered. Cancelled.");
+          return;
+        }
+        opts.key = enteredKey;
+      }
     }
   }
 

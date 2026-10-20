@@ -76,3 +76,43 @@ test("options sit below the tools and are not counted or toggled by a", () => {
   assert.match(lines.at(-1), /2 selected/);
   assert.equal(lines[lines.findIndex((l) => l.includes("Teach tools")) - 1], "");
 });
+
+test("pickOne handles arrow navigation, selection, and cancellation", async () => {
+  const { pickOne, initialSingleState, reduceSingle, renderSingle } = await import("../src/picker.js");
+  const singleItems = [
+    { label: "Global", value: "user" },
+    { label: "Project", value: "project" },
+  ];
+
+  let s = initialSingleState(singleItems, 0);
+  assert.equal(s.cursor, 0);
+  s = reduceSingle(s, key("down"));
+  assert.equal(s.cursor, 1);
+  s = reduceSingle(s, key("return"));
+  assert.equal(s.done, true);
+
+  const lines = renderSingle(initialSingleState(singleItems), "Choose").map(strip);
+  assert.match(lines[0], /Choose/);
+  assert.ok(lines.some((l) => l.includes("Global")));
+
+  const { input, output } = fakeTTY();
+  const done = pickOne(singleItems, { title: "Choose", input, output });
+  input.write("j");  // down to Project
+  input.write("\r"); // select it
+  const chosen = await done;
+  assert.equal(chosen?.value, "project");
+
+  const { input: in2, output: out2 } = fakeTTY();
+  const cancelled = pickOne(singleItems, { title: "Choose", input: in2, output: out2 });
+  in2.write("q");
+  assert.equal(await cancelled, null);
+});
+
+test("promptText asks a question and returns trimmed text", async () => {
+  const { promptText } = await import("../src/picker.js");
+  const { input, output } = fakeTTY();
+  const prom = promptText("Enter key: ", { input, output });
+  input.write("  memro_sk_prompt_test  \r");
+  assert.equal(await prom, "memro_sk_prompt_test");
+});
+
