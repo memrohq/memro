@@ -190,10 +190,16 @@ export function isGitTracked(dir = process.cwd()) {
 
 /** The home folder or the filesystem root: never a project. */
 export function isHomeOrRoot(dir) {
-  // Compare real paths: git reports /private/var/… where HOME says /var/….
-  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  // Compare real paths: git reports /private/var/… where HOME says /var/…,
+  // and C:/Users/name where Windows may give the 8.3 C:\Users\NAME~1. The
+  // native realpath expands short names; Windows paths ignore case.
+  const real = (p) => {
+    let r;
+    try { r = fs.realpathSync.native(path.resolve(p)); } catch { r = path.resolve(p); }
+    return process.platform === "win32" ? r.toLowerCase() : r;
+  };
   const d = real(dir);
-  return d === real(os.homedir()) || d === path.parse(d).root;
+  return d === real(os.homedir()) || d === real(path.parse(d).root);
 }
 
 export function resolveProjectRoot(startDir = process.cwd()) {
