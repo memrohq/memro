@@ -121,7 +121,7 @@ class Agent:
     def remember(
         self,
         content: str,
-        type: Optional[str] = "episodic",
+        type: Optional[str] = None,
         visibility: str = "private",
         event_date: Optional[str] = None,
         session_id: Optional[str] = None,

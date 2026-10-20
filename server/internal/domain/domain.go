@@ -5,6 +5,7 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,10 +24,11 @@ const (
 	Profile    MemoryType = "profile"
 )
 
+// ParseMemoryType accepts a type name in any case, with surrounding spaces.
 func ParseMemoryType(s string) (MemoryType, bool) {
-	switch MemoryType(s) {
+	switch t := MemoryType(strings.ToLower(strings.TrimSpace(s))); t {
 	case Episodic, Semantic, Procedural, Profile:
-		return MemoryType(s), true
+		return t, true
 	}
 	return "", false
 }

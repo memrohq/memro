@@ -51,16 +51,23 @@ Memro is the user's long-term memory, shared across their AI tools and sessions.
 Use it without being asked:
 - At the start of a task or conversation, call `recall` with a short query about \
 the task (project, topic, people involved) and use what comes back.
-- When the user states a preference, makes a decision, corrects you, or you learn \
-a lasting fact about them or their project, call `remember` with one short, \
-self-contained sentence. Use type "semantic" for facts, "profile" for \
-preferences, "procedural" for how-tos, "episodic" for what happened.
 - Before answering questions about earlier work ("what did we decide about X?"), \
 `recall` first.
+- Call `remember` with one short, self-contained sentence when something will \
+matter in a later session: a decision and why, a fix or workflow worth reusing, \
+a preference or correction from the user, or an important project constraint.
 
-Do not store secrets (API keys, passwords, tokens, private keys), one-off \
-chatter, or anything the user asks you not to keep. Do not announce routine \
-saves; mention a memory only when it changes your answer."""
+Types: "semantic" for facts ("Memro uses PostgreSQL"), "profile" for the user's \
+preferences and working style ("User prefers reviewing migrations before \
+deploys"), "procedural" for how-tos ("To run integration tests, start PostgreSQL \
+first"), "episodic" for significant events ("The billing isolation tests \
+passed"). If unsure, leave the type out and Memro chooses.
+
+Don't save routine events (connecting a tool, starting a session), passing \
+status, facts Memro already has (recall first), or summaries of a whole \
+conversation. Never store secrets (API keys, passwords, tokens, private keys) or \
+anything the user asks you not to keep. Don't announce routine saves; mention a \
+memory only when it changes your answer."""
 
 server = Server("memro-memory", version=SERVER_VERSION, instructions=INSTRUCTIONS)
 # Use a path that will be appended to our mount point
@@ -268,6 +275,25 @@ async def list_tools() -> list[Tool]:
     return list(unique.values())
 
 
+# A memory's type, for the remember tools. No default: an omitted type lets the
+# server classify the memory instead of filing everything as episodic.
+MEMORY_TYPE = {
+    "type": "string",
+    "enum": ["semantic", "profile", "procedural", "episodic"],
+    "description": (
+        "semantic: a fact. profile: the user's preferences or working style. "
+        "procedural: how to do something. episodic: a significant event. "
+        "Omit if unsure and Memro chooses."
+    ),
+}
+
+
+def _memory_type(args: dict):
+    """The caller's type, or None so the server classifies the memory."""
+    value = args.get("type")
+    return value.strip().lower() if isinstance(value, str) and value.strip() else None
+
+
 def _all_tools() -> list[Tool]:
     logger.info("Listing tools for client")
     return [
@@ -282,7 +308,7 @@ def _all_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "content": {"type": "string"},
-                    "type": {"type": "string", "enum": ["episodic", "semantic", "procedural", "profile"], "default": "episodic"},
+                    "type": MEMORY_TYPE,
                     "visibility": {"type": "string", "enum": ["private", "shared", "public"], "default": "private"},
                     "event_date": {"type": "string"},
                     "session_id": {"type": "string"},
@@ -403,7 +429,7 @@ def _all_tools() -> list[Tool]:
                 "properties": {
                     "content": {"type": "string"},
                     "context_metadata": {"type": "object"},
-                    "type": {"type": "string", "enum": ["episodic", "semantic", "procedural", "profile"], "default": "episodic"},
+                    "type": MEMORY_TYPE,
                     "event_date": {"type": "string"},
                     "session_id": {"type": "string"},
                 },
@@ -458,7 +484,7 @@ def _limit(args: dict, default: int) -> int:
 def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolResult:
     """Executes one tool. Runs in a worker thread: the SDK is synchronous."""
     if name == "remember":
-        memory = agent.remember(content=args.get("content"), type=args.get("type", "episodic"),
+        memory = agent.remember(content=args.get("content"), type=_memory_type(args),
                                 visibility=args.get("visibility", "private"),
                                 event_date=args.get("event_date"), session_id=args.get("session_id"),
                                 is_atomic=bool(args.get("is_atomic", False)))
@@ -466,7 +492,7 @@ def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolR
 
     if name == "remember_with_context":
         metadata = args.get("context_metadata")
-        memory = agent.remember(content=args.get("content"), type=args.get("type", "episodic"),
+        memory = agent.remember(content=args.get("content"), type=_memory_type(args),
                                 event_date=args.get("event_date"), session_id=args.get("session_id"),
                                 metadata=metadata if isinstance(metadata, dict) else None)
         return _text(f"Remembered with context: {memory.content[:100]} (ID: {memory.id})")

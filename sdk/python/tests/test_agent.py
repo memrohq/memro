@@ -218,3 +218,32 @@ def test_post_is_not_retried_after_a_gateway_error():
     with pytest.raises(MemroError):
         client.create_memory("a", None, "x")
     assert len(rec.calls) == 1
+
+
+# ── Memory types ──────────────────────────────────────────────────────────────
+# Leaving the type out must reach the server as "no type", so the server
+# classifies the memory instead of every save being filed as episodic.
+
+def _wire_agent(response_type="semantic"):
+    agent_id, private_key = generate_keypair()
+    client = MemroClient(base_url="http://example.test")
+    client._session.request = rec = _Recorder(
+        body=json.dumps({**FAKE_MEMORY, "agent_id": agent_id, "memory_type": response_type}).encode())
+    return Agent(agent_id=agent_id, private_key=private_key, client=client), rec
+
+
+def test_remember_without_a_type_sends_none():
+    agent, rec = _wire_agent()
+    agent.remember("To run integration tests, start PostgreSQL first.")
+    assert "memory_type" not in json.loads(rec.calls[0]["data"])
+
+
+def test_remember_keeps_an_explicit_type():
+    agent, rec = _wire_agent("episodic")
+    agent.remember("Deploys happen on Tuesdays", type="episodic")
+    assert json.loads(rec.calls[0]["data"])["memory_type"] == "episodic"
+
+
+def test_remember_default_is_not_episodic(mock_agent):
+    mock_agent.remember("User prefers TypeScript")
+    assert mock_agent.client.create_memory.call_args.kwargs["memory_type"] is None

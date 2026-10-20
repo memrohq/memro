@@ -17,6 +17,22 @@ func TestClassify(t *testing.T) {
 		"Yesterday I went to the market":  domain.Episodic,
 		"Paris is the capital of France":  domain.Semantic,
 		"We worked on the launch all day": domain.Episodic,
+		// The four kinds of memory worth keeping (ADR 0012 follow-up).
+		"Memro uses PostgreSQL for persistent storage.":                               domain.Semantic,
+		"User prefers reviewing migrations before deployment.":                        domain.Profile,
+		"User prefers TypeScript":                                                     domain.Profile,
+		"The user always wants concise answers.":                                      domain.Profile,
+		"I'm a backend engineer on the billing team":                                  domain.Profile,
+		"To run integration tests, start PostgreSQL before executing the test suite.": domain.Procedural,
+		"How to deploy: push to main, then promote the tested SHA.":                   domain.Procedural,
+		"Run `make release` to publish the CLI.":                                      domain.Procedural,
+		"Step 1: dump the billing tables.":                                            domain.Procedural,
+		"The P0 billing isolation tests passed on the feature branch.":                domain.Episodic,
+		"PR #6 was merged and 0.1.5 published to npm.":                                domain.Episodic,
+		// States, not events, stay semantic.
+		"Memro is deployed on one GCP VM in asia-south1.":        domain.Semantic,
+		"The API went through Cloudflare before reaching Caddy.": domain.Semantic,
+		"Billing lives only in memro-cloud.":                     domain.Semantic,
 	}
 	for in, want := range cases {
 		if got := Classify(in)[0].Type; got != want {

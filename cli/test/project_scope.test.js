@@ -96,7 +96,11 @@ test("Claude Code in project mode writes ./.mcp.json and uses PROJECT_BLOCK", ()
   assert.ok(rulesContent.includes("## Memro (long-term memory)"));
   // Agents act on the note only if it names the tools and says to use them unprompted.
   assert.ok(rulesContent.includes("without being asked"));
-  assert.ok(rulesContent.includes("call `recall`") && rulesContent.includes("call `remember`"));
+  assert.match(rulesContent, /call `recall`/i);
+  assert.match(rulesContent, /call `remember`/i);
+  // ...and what is worth keeping, by type.
+  for (const t of ["semantic", "profile", "procedural", "episodic"]) assert.ok(rulesContent.includes(`\`${t}\``), t);
+  assert.ok(rulesContent.includes("Don't save routine events"));
 
   // Idempotency: repeated add and install don't duplicate
   c.add(conn, { scope: "project", cwd: PROJECT_DIR });

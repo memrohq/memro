@@ -16,10 +16,12 @@ export const BLOCK = `${START}
 
 Memro is my long-term memory across tools and sessions (MCP server \`memro\`). Use it without being asked:
 - At the start of a task, call \`recall\` with a short query about it and use what comes back.
-- When I state a preference, make a decision, correct you, or you learn a lasting fact about me or a project, call \`remember\` with one short, self-contained sentence.
-- Before answering about earlier work ("what did we decide about X?"), \`recall\` first.
+- Before answering about earlier work ("what did we decide about X?"), call \`recall\` first.
+- Call \`remember\` with one short, self-contained sentence when something will matter in a later session: a decision and why, a fix or workflow worth reusing, a preference or correction from me, or an important project constraint.
 
-Never store secrets (keys, passwords, tokens), one-off chatter, or anything I ask you not to keep. Don't announce routine saves.
+Types: \`semantic\` for facts ("Memro uses PostgreSQL"), \`profile\` for my preferences and working style ("User prefers reviewing migrations before deploys"), \`procedural\` for how-tos ("To run integration tests, start PostgreSQL first"), \`episodic\` for significant events ("The billing isolation tests passed"). If unsure, leave the type out and Memro chooses.
+
+Don't save routine events (connecting a tool, starting a session), passing status, facts Memro already has (recall first), or summaries of a whole conversation. Never store secrets (keys, passwords, tokens) or anything I ask you not to keep. Don't announce routine saves.
 ${END}`;
 
 // Same guidance as BLOCK, for a project's own instructions file. It names the
@@ -30,10 +32,12 @@ export const PROJECT_BLOCK = `${START}
 
 Memro is the long-term memory for this project (MCP server \`memro\`). Use it without being asked:
 - At the start of a task, call \`recall\` with a short query about it and use what comes back.
-- When a decision is made, a preference is stated, you are corrected, or you learn a lasting fact about this project, call \`remember\` with one short, self-contained sentence that names the project.
-- Before answering about earlier work ("what did we decide about X?"), \`recall\` first.
+- Before answering about earlier work ("what did we decide about X?"), call \`recall\` first.
+- Call \`remember\` with one short, self-contained sentence when something will matter in a later session: a decision and why, a fix or workflow worth reusing, a preference or correction from the user, or an important constraint of this project. Name the project in the sentence.
 
-Never store secrets (keys, passwords, tokens), one-off chatter, or anything this project's rules keep private. Don't announce routine saves.
+Types: \`semantic\` for facts ("Memro uses PostgreSQL"), \`profile\` for the user's preferences and working style ("User prefers reviewing migrations before deploys"), \`procedural\` for how-tos ("To run integration tests, start PostgreSQL first"), \`episodic\` for significant events ("The billing isolation tests passed"). If unsure, leave the type out and Memro chooses.
+
+Don't save routine events (connecting a tool, starting a session), passing status, facts Memro already has (recall first), or summaries of a whole conversation. Never store secrets (keys, passwords, tokens) or anything this project's rules keep private. Don't announce routine saves.
 ${END}`;
 
 const globalBlockPattern = new RegExp(`\\n*${START}[\\s\\S]*?${END}\\n*`, "g");
