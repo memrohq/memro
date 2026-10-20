@@ -53,5 +53,6 @@ All settings are environment variables. The common ones:
 | `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_FROM` | | SMTP for dashboard sign-in codes |
 | `DEV_LOG_OTP` | `false` | Also log sign-in codes; development only |
 | `MIGRATE_ON_STARTUP` | `true` | Apply database migrations at start |
+| `CONNECTOR_ENCRYPTION_KEY`, `SLACK_*`, `GITHUB_*` | | Slack and GitHub connectors; see [Connectors](connectors.md#setting-up-the-connectors-self-hosting) |
 
 The full list with comments is in [.env.example](../.env.example).

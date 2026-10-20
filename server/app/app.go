@@ -16,6 +16,7 @@ import (
 	"github.com/memrohq/memro/server/config"
 	"github.com/memrohq/memro/server/extension"
 	"github.com/memrohq/memro/server/internal/api"
+	"github.com/memrohq/memro/server/internal/connectors"
 	"github.com/memrohq/memro/server/internal/db"
 	"github.com/memrohq/memro/server/internal/email"
 	"github.com/memrohq/memro/server/internal/embed"
@@ -107,13 +108,27 @@ func Run(ctx context.Context, cfg config.Config, opts ...Option) error {
 		return err
 	}
 
+	usage, quota := o.usage, o.quota
+	if usage == nil {
+		usage = api.StoreUsageMeter(st)
+	}
+	if quota == nil {
+		quota = extension.PerAgentCap{Max: cfg.MemorySoftCap}
+	}
+	conns, err := connectors.New(connectors.Deps{Config: cfg, Pool: pool, Store: st, Indexer: ix,
+		Invalidate: eng.Cache().InvalidateAgent, Quota: quota, Usage: usage})
+	if err != nil {
+		return err
+	}
+
 	go ix.Run(ctx)
 	go indexer.RunGraphMaintenance(ctx, st)
+	go conns.Run(ctx)
 
 	srv := api.NewServer(api.Deps{
 		Config: cfg, Store: st, Engine: eng, Embed: provider, Indexer: ix, Files: files,
 		Email: email.New(cfg.EmailHost, cfg.EmailPort, cfg.EmailUser, cfg.EmailPass, cfg.EmailFrom),
-		Usage: o.usage, Quota: o.quota, Routes: o.routes,
+		Usage: usage, Quota: quota, Routes: o.routes, Connectors: conns,
 	})
 	httpServer := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),

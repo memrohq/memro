@@ -49,6 +49,9 @@ type Config struct {
 	AppURL string // dashboard, e.g. https://app.memro.co
 	MCPURL string // hosted MCP endpoint, e.g. https://mcp.memro.co/mcp
 
+	// Connectors (ADR 0011). Each is enabled only when its credentials are set.
+	Connectors ConnectorsConfig
+
 	// DevLogOTP writes dashboard sign-in codes to the server log (and still
 	// emails them when SMTP is configured), so local development and staging
 	// smoke tests can sign in. Never enable it in production.
@@ -82,9 +85,32 @@ func Load() Config {
 		DevLogOTP:             envBool("DEV_LOG_OTP", false),
 		AppURL:                strings.TrimRight(env("APP_URL", "http://localhost:5173"), "/"),
 		MCPURL:                env("MCP_URL", "http://localhost:8080/mcp"),
+		Connectors: ConnectorsConfig{
+			EncryptionKey:         strings.TrimSpace(os.Getenv("CONNECTOR_ENCRYPTION_KEY")),
+			PreviousEncryptionKey: strings.TrimSpace(os.Getenv("CONNECTOR_ENCRYPTION_KEY_PREVIOUS")),
+			CallbackBaseURL:       strings.TrimRight(os.Getenv("CONNECTOR_CALLBACK_BASE_URL"), "/"),
+			BackfillDays:          envInt("CONNECTOR_BACKFILL_DAYS", 30),
+			SyncInterval:          time.Duration(envInt("CONNECTOR_SYNC_INTERVAL_MINUTES", 30)) * time.Minute,
+			Workers:               envInt("CONNECTOR_WORKERS", 4),
+			SlackClientID:         strings.TrimSpace(os.Getenv("SLACK_CLIENT_ID")),
+			SlackClientSecret:     strings.TrimSpace(os.Getenv("SLACK_CLIENT_SECRET")),
+			SlackSigningSecret:    strings.TrimSpace(os.Getenv("SLACK_SIGNING_SECRET")),
+			GitHubAppID:           strings.TrimSpace(os.Getenv("GITHUB_APP_ID")),
+			GitHubAppSlug:         strings.TrimSpace(os.Getenv("GITHUB_APP_SLUG")),
+			GitHubAppPrivateKey:   pemFromEnv(os.Getenv("GITHUB_APP_PRIVATE_KEY")),
+			GitHubClientID:        strings.TrimSpace(os.Getenv("GITHUB_CLIENT_ID")),
+			GitHubClientSecret:    strings.TrimSpace(os.Getenv("GITHUB_CLIENT_SECRET")),
+			GitHubWebhookSecret:   strings.TrimSpace(os.Getenv("GITHUB_WEBHOOK_SECRET")),
+		},
 	}
 	c.BaseURL = env("BASE_URL", "http://localhost:"+strconv.Itoa(c.Port))
 	c.EmailFrom = env("EMAIL_FROM", c.EmailUser)
+	// OAuth providers redirect the browser here. It must be on the dashboard's
+	// origin (which proxies /api to this server) so the browser-binding cookie
+	// set when the flow started is sent back.
+	if c.Connectors.CallbackBaseURL == "" {
+		c.Connectors.CallbackBaseURL = c.AppURL + "/api"
+	}
 	if v := os.Getenv("ALLOWED_ORIGINS"); v != "" {
 		for _, o := range strings.Split(v, ",") {
 			if o = strings.TrimSpace(o); o != "" {
@@ -93,6 +119,57 @@ func Load() Config {
 		}
 	}
 	return c
+}
+
+// ConnectorsConfig configures the Slack and GitHub connectors.
+type ConnectorsConfig struct {
+	// EncryptionKey (base64, 32 bytes) seals provider tokens at rest. No
+	// connector is enabled without it. PreviousEncryptionKey still decrypts
+	// during a rotation.
+	EncryptionKey         string
+	PreviousEncryptionKey string
+	// CallbackBaseURL is the public base of the OAuth callbacks, e.g.
+	// https://app.memro.co/api (default: APP_URL + "/api").
+	CallbackBaseURL string
+	BackfillDays    int           // history synced when a channel or repository is added
+	SyncInterval    time.Duration // reconciliation sync, in addition to webhooks
+	Workers         int
+
+	SlackClientID      string
+	SlackClientSecret  string
+	SlackSigningSecret string
+
+	GitHubAppID         string
+	GitHubAppSlug       string // github.com/apps/<slug>
+	GitHubAppPrivateKey string // PEM
+	GitHubClientID      string
+	GitHubClientSecret  string
+	GitHubWebhookSecret string
+
+	// API endpoints, overridden in tests.
+	SlackAPIURL   string
+	GitHubAPIURL  string
+	GitHubWebURL  string
+	SlackOAuthURL string
+}
+
+func (c ConnectorsConfig) SlackEnabled() bool {
+	return c.EncryptionKey != "" && c.SlackClientID != "" && c.SlackClientSecret != "" && c.SlackSigningSecret != ""
+}
+
+func (c ConnectorsConfig) GitHubEnabled() bool {
+	return c.EncryptionKey != "" && c.GitHubAppID != "" && c.GitHubAppSlug != "" && c.GitHubAppPrivateKey != "" &&
+		c.GitHubClientID != "" && c.GitHubClientSecret != "" && c.GitHubWebhookSecret != ""
+}
+
+// pemFromEnv accepts a PEM with real newlines or with literal "\n", as
+// secret stores and .env files often flatten them.
+func pemFromEnv(v string) string {
+	v = strings.TrimSpace(v)
+	if strings.Contains(v, "\n") {
+		return v
+	}
+	return strings.ReplaceAll(v, `\n`, "\n")
 }
 
 func env(key, def string) string {

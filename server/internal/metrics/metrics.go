@@ -19,6 +19,10 @@ var (
 	HTTPErrors         = promauto.NewCounterVec(prometheus.CounterOpts{Name: "memro_http_errors_total", Help: "HTTP error responses"}, []string{"status"})
 	EmbeddingQueue     = promauto.NewGauge(prometheus.GaugeOpts{Name: "memro_embedding_queue_depth", Help: "Memories waiting to be embedded"})
 	EmbeddingFailures  = counter("memro_embedding_failures_total", "Embedding batches that failed")
+	ConnectorJobs      = promauto.NewCounterVec(prometheus.CounterOpts{Name: "memro_connector_jobs_total", Help: "Connector jobs run, by kind and result"}, []string{"kind", "result"})
+	ConnectorWebhooks  = promauto.NewCounterVec(prometheus.CounterOpts{Name: "memro_connector_webhooks_total", Help: "Connector webhooks received, by provider and result"}, []string{"provider", "result"})
+	ConnectorMemories  = promauto.NewCounterVec(prometheus.CounterOpts{Name: "memro_connector_memories_total", Help: "Memories created or deleted by connectors"}, []string{"provider", "action"})
+	ConnectorQueue     = promauto.NewGauge(prometheus.GaugeOpts{Name: "memro_connector_jobs_due", Help: "Connector jobs due to run"})
 	HTTPRequestSeconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "memro_http_request_duration_seconds", Help: "HTTP request latency", Buckets: prometheus.DefBuckets,
 	}, []string{"route", "status"})
