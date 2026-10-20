@@ -178,6 +178,7 @@ class MemroClient:
         return data
 
     def get_identity(self, agent_id: str) -> dict:
+        """Whether an agent is registered: {id, created_at}. The owner is not public."""
         return self._json("GET", f"/identity/{agent_id}", auth=False)
 
     def delete_identity(self, agent_id: str, private_key: Optional[str] = None) -> None:
