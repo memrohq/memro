@@ -86,7 +86,7 @@ test("JSONC configs are refused rather than overwritten", () => {
 test("detection only reports installed tools", () => {
   assert.deepEqual(CLIENTS.filter((c) => c.detect()).map((c) => c.id), []);
   fs.mkdirSync(path.join(HOME, ".cursor"));
-  fs.mkdirSync(path.join(HOME, ".gemini", "antigravity"), { recursive: true });
+  fs.mkdirSync(path.join(HOME, ".gemini", "config"), { recursive: true });
   assert.deepEqual(CLIENTS.filter((c) => c.detect()).map((c) => c.id).sort(), ["antigravity", "cursor"]);
 });
 

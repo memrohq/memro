@@ -186,9 +186,10 @@ export const CLIENTS = [
   jsonClient({
     id: "antigravity",
     name: "Antigravity",
-    file: () => path.join(home(), ".gemini", "antigravity", "mcp_config.json"),
-    detect: () => exists(home(), ".gemini", "antigravity"),
+    file: () => path.join(home(), ".gemini", "config", "mcp_config.json"),
+    detect: () => exists(home(), ".gemini", "config") || exists(home(), ".gemini", "antigravity-ide") || exists(home(), ".gemini", "antigravity"),
     entry: ({ mcpUrl, apiKey }) => ({ serverUrl: mcpUrl, headers: bearer(apiKey) }),
+    rules: () => path.join(home(), ".gemini", "config", "rules", "memro.md"),
   }),
   jsonClient({
     id: "opencode",

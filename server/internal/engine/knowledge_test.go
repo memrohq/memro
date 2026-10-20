@@ -30,8 +30,16 @@ func TestDetectContradiction(t *testing.T) {
 		t.Error("sentiment flip not detected")
 	}
 	if DetectContradiction("The sky is blue", "Coffee is hot") > 0.5 {
-		// "is" + "is" without "not" is not a contradiction
-		t.Error("false positive")
+		t.Error("false positive on unrelated statements")
+	}
+	if DetectContradiction("Billing contact is Marco", "Billing contact is Ana") <= 0.5 {
+		t.Error("slot-based entity conflict not detected")
+	}
+	if DetectContradiction("User prefers TypeScript", "User prefers Python") <= 0.5 {
+		t.Error("preference slot conflict not detected")
+	}
+	if DetectContradiction("Use TypeScript for backend", "Don't use TypeScript for backend") <= 0.5 {
+		t.Error("direct negation conflict not detected")
 	}
 }
 
