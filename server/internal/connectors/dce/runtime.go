@@ -55,9 +55,11 @@ type Sink interface {
 
 // SyncResult captures the outcome of a declarative sync execution.
 type SyncResult struct {
-	ItemsSynced   int
-	NewCheckpoint string
-	HasMore       bool
+	ItemsSynced    int           `json:"itemsSynced"`
+	PagesProcessed int           `json:"pagesProcessed"`
+	NewCheckpoint  string        `json:"newCheckpoint"`
+	HasMore        bool          `json:"hasMore"`
+	Duration       time.Duration `json:"duration"`
 }
 
 // Options configures security boundaries and resource limits for the runtime.
@@ -186,6 +188,7 @@ func sanitizeError(err error, secret string) error {
 
 // Execute runs the declared sync operation on a connector manifest.
 func (r *Runtime) Execute(ctx context.Context, m *Manifest, sink Sink, checkpoint string) (*SyncResult, error) {
+	startTime := time.Now()
 	if err := m.Validate(); err != nil {
 		return nil, fmt.Errorf("validate manifest: %w", err)
 	}
@@ -209,13 +212,25 @@ func (r *Runtime) Execute(ctx context.Context, m *Manifest, sink Sink, checkpoin
 		secret = s
 	}
 
-	result := &SyncResult{}
+	result := &SyncResult{
+		NewCheckpoint: checkpoint,
+	}
 	cursor := checkpoint
 
 	// Primary sync operation (first operation in spec)
 	op := m.Spec.Operations[0]
 
 	for page := 0; page < r.opts.MaxPages; page++ {
+		// Respect proactive rate limiting
+		if page > 0 && m.Spec.Policies.RateLimitPerMin > 0 {
+			paceInterval := time.Minute / time.Duration(m.Spec.Policies.RateLimitPerMin)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(paceInterval):
+			}
+		}
+
 		reqURL, err := r.buildURL(m.Spec.BaseURL, op, cursor, page)
 		if err != nil {
 			return nil, err
@@ -241,6 +256,8 @@ func (r *Runtime) Execute(ctx context.Context, m *Manifest, sink Sink, checkpoin
 		if err != nil {
 			return nil, sanitizeError(fmt.Errorf("http execute %s %s: %w", op.Method, reqURL, err), secret)
 		}
+
+		result.PagesProcessed++
 
 		// Read response body with safe size ceiling
 		lr := io.LimitReader(resp.Body, r.opts.MaxResponseBytes+1)
@@ -268,6 +285,7 @@ func (r *Runtime) Execute(ctx context.Context, m *Manifest, sink Sink, checkpoin
 
 		items, ok := ExtractSlice(respData, op.Response.ItemsPath)
 		if !ok || len(items) == 0 {
+			result.HasMore = false
 			break
 		}
 
@@ -282,28 +300,51 @@ func (r *Runtime) Execute(ctx context.Context, m *Manifest, sink Sink, checkpoin
 			}
 			result.ItemsSynced++
 
-			// Track latest checkpoint if configured
+			// Track latest monotonic checkpoint
 			if m.Spec.Sync.Checkpoint != "" {
 				cpVal := ExtractString(itemMap, m.Spec.Sync.Checkpoint)
 				if cpVal != "" {
-					result.NewCheckpoint = cpVal
+					result.NewCheckpoint = updateCheckpoint(result.NewCheckpoint, cpVal)
 				}
 			}
 		}
 
-		// Handle pagination next cursor
-		if op.Pagination.Type == "cursor" && op.Pagination.CursorPath != "" {
-			nextCursor := ExtractString(respData, op.Pagination.CursorPath)
-			if nextCursor == "" || nextCursor == cursor {
-				break
+		// Determine pagination continuation
+		hasMorePages := false
+		switch op.Pagination.Type {
+		case "cursor":
+			if op.Pagination.CursorPath != "" {
+				nextCursor := ExtractString(respData, op.Pagination.CursorPath)
+				if nextCursor != "" && nextCursor != cursor {
+					cursor = nextCursor
+					hasMorePages = true
+				}
 			}
-			cursor = nextCursor
-			result.HasMore = true
-		} else {
+		case "page":
+			limit := op.Pagination.Limit
+			if limit <= 0 || len(items) >= limit {
+				hasMorePages = true
+			}
+		case "offset":
+			limit := op.Pagination.Limit
+			if limit <= 0 {
+				limit = 50
+			}
+			if len(items) >= limit {
+				hasMorePages = true
+			}
+		default: // "none"
+			hasMorePages = false
+		}
+
+		if !hasMorePages {
+			result.HasMore = false
 			break
 		}
+		result.HasMore = true
 	}
 
+	result.Duration = time.Since(startTime)
 	return result, nil
 }
 
@@ -377,23 +418,64 @@ func (r *Runtime) executeWithRetry(ctx context.Context, req *http.Request, maxRe
 
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		resp, err := r.client.Do(req)
 		if err != nil {
 			lastErr = err
-			time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			backoff := time.Duration(attempt+1) * 100 * time.Millisecond
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
 			continue
 		}
 
+		// Fast fail on permanent client errors (400, 401, 403, 404, 422) - do not retry
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden ||
+			resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusNotFound ||
+			resp.StatusCode == http.StatusUnprocessableEntity {
+			return resp, nil
+		}
+
+		// 429 Too Many Requests -> respect Retry-After header
 		if resp.StatusCode == http.StatusTooManyRequests {
 			resp.Body.Close()
-			retryAfter := 1 * time.Second
-			if ra := resp.Header.Get("Retry-After"); ra != "" {
-				if seconds, err := strconv.Atoi(ra); err == nil {
-					retryAfter = time.Duration(seconds) * time.Second
-				}
+			if attempt == maxRetries {
+				return nil, fmt.Errorf("rate limit exceeded (HTTP 429) after %d retries", maxRetries)
 			}
-			time.Sleep(retryAfter)
+			retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(retryAfter):
+			}
 			continue
+		}
+
+		// Transient server errors (500, 502, 503, 504) -> retry with backoff
+		if resp.StatusCode == http.StatusInternalServerError ||
+			resp.StatusCode == http.StatusBadGateway ||
+			resp.StatusCode == http.StatusServiceUnavailable ||
+			resp.StatusCode == http.StatusGatewayTimeout {
+			if attempt < maxRetries {
+				resp.Body.Close()
+				backoff := time.Duration(attempt+1) * 150 * time.Millisecond
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(backoff):
+				}
+				continue
+			}
 		}
 
 		return resp, nil
@@ -405,14 +487,114 @@ func (r *Runtime) executeWithRetry(ctx context.Context, req *http.Request, maxRe
 	return nil, errors.New("request failed after retries")
 }
 
+func parseRetryAfter(header string) time.Duration {
+	if header == "" {
+		return 500 * time.Millisecond
+	}
+	if sec, err := strconv.Atoi(strings.TrimSpace(header)); err == nil && sec >= 0 {
+		if sec > 60 {
+			sec = 60
+		}
+		return time.Duration(sec) * time.Second
+	}
+	if t, err := http.ParseTime(header); err == nil {
+		d := time.Until(t)
+		if d > 60*time.Second {
+			return 60 * time.Second
+		}
+		if d > 0 {
+			return d
+		}
+	}
+	return 500 * time.Millisecond
+}
+
+func updateCheckpoint(current, candidate string) string {
+	if current == "" {
+		return candidate
+	}
+	if candidate == "" {
+		return current
+	}
+	t1 := parseTimestamp(current)
+	t2 := parseTimestamp(candidate)
+	if !t1.IsZero() && !t2.IsZero() {
+		if t2.After(t1) {
+			return candidate
+		}
+		return current
+	}
+	if n1, err1 := strconv.ParseInt(current, 10, 64); err1 == nil {
+		if n2, err2 := strconv.ParseInt(candidate, 10, 64); err2 == nil {
+			if n2 > n1 {
+				return candidate
+			}
+			return current
+		}
+	}
+	if candidate > current {
+		return candidate
+	}
+	return current
+}
+
+func parseTimestamp(val any) time.Time {
+	if val == nil {
+		return time.Time{}
+	}
+	switch v := val.(type) {
+	case time.Time:
+		return v.UTC()
+	case float64:
+		if v > 1e11 {
+			return time.UnixMilli(int64(v)).UTC()
+		}
+		sec := int64(v)
+		nsec := int64((v - float64(sec)) * 1e9)
+		return time.Unix(sec, nsec).UTC()
+	case int64:
+		if v > 1e11 {
+			return time.UnixMilli(v).UTC()
+		}
+		return time.Unix(v, 0).UTC()
+	case int:
+		iv := int64(v)
+		if iv > 1e11 {
+			return time.UnixMilli(iv).UTC()
+		}
+		return time.Unix(iv, 0).UTC()
+	case string:
+		str := strings.TrimSpace(v)
+		if str == "" {
+			return time.Time{}
+		}
+		if num, err := strconv.ParseFloat(str, 64); err == nil {
+			return parseTimestamp(num)
+		}
+		formats := []string{
+			time.RFC3339Nano,
+			time.RFC3339,
+			"2006-01-02T15:04:05Z",
+			"2006-01-02T15:04:05",
+			"2006-01-02 15:04:05",
+			"2006-01-02",
+			time.RFC1123,
+			time.RFC1123Z,
+		}
+		for _, f := range formats {
+			if t, err := time.Parse(f, str); err == nil {
+				return t.UTC()
+			}
+		}
+	}
+	return time.Time{}
+}
+
 func (r *Runtime) normalize(mapping MappingSpec, raw map[string]any) *NormalizedItem {
-	dateStr := ExtractString(raw, mapping.EventDate)
 	var evDate time.Time
-	if dateStr != "" {
-		if t, err := time.Parse(time.RFC3339, dateStr); err == nil {
-			evDate = t.UTC()
-		} else if t, err := time.Parse("2006-01-02", dateStr); err == nil {
-			evDate = t.UTC()
+	if mapping.EventDate != "" {
+		if val, ok := ExtractValue(raw, mapping.EventDate); ok {
+			evDate = parseTimestamp(val)
 		}
 	}
 
