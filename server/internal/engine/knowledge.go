@@ -49,25 +49,96 @@ func Classify(content string) []Classification {
 // --- Contradictions & conflict resolution ------------------------------------
 
 var (
-	positiveWords = []string{"love", "like", "enjoy", "great", "good", "best"}
-	negativeWords = []string{"hate", "dislike", "bad", "worst", "terrible"}
+	positiveWords = []string{"love", "like", "enjoy", "great", "good", "best", "prefer"}
+	negativeWords = []string{"hate", "dislike", "bad", "worst", "terrible", "avoid"}
+	negationWords = []string{"not ", "never ", "don't ", "do not ", "doesn't ", "cannot ", "can't ", "avoid ", "stop "}
+
+	reSlotPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)^(.+?)\s+(?:is|was|are|were|be|has been)\s+(?:a|an|the\s+)?(.+)$`),
+		regexp.MustCompile(`(?i)^(.+?)\s+(?:prefers?|likes?|wants?|uses?|chose|switched to)\s+(.+)$`),
+		regexp.MustCompile(`(?i)^(?:(.+?)\s+)?(?:lives in|moved to|based in|located in)\s+(.+)$`),
+		regexp.MustCompile(`(?i)^(.+?)\s*:\s*(.+)$`),
+	}
 )
+
+func cleanText(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	s = strings.TrimRight(s, ".!?,;")
+	return s
+}
 
 // DetectContradiction returns a 0..1 likelihood that a and b contradict.
 func DetectContradiction(a, b string) float32 {
-	al, bl := strings.ToLower(a), strings.ToLower(b)
-	if (strings.Contains(al, "not ") && strings.Contains(bl, "is ")) ||
-		(strings.Contains(al, "is ") && strings.Contains(bl, "not ")) {
-		return 0.7
+	al, bl := cleanText(a), cleanText(b)
+	if al == bl || al == "" || bl == "" {
+		return 0
 	}
+
+	// 1. Slot-based conflict: same subject & relation, conflicting values
+	// e.g. "billing contact is Marco" vs "billing contact is Ana"
+	// e.g. "user prefers TypeScript" vs "user prefers Python"
+	for _, re := range reSlotPatterns {
+		mA := re.FindStringSubmatch(al)
+		mB := re.FindStringSubmatch(bl)
+		if len(mA) >= 3 && len(mB) >= 3 {
+			subjA, valA := strings.TrimSpace(mA[1]), strings.TrimSpace(mA[2])
+			subjB, valB := strings.TrimSpace(mB[1]), strings.TrimSpace(mB[2])
+			if subjA == subjB && valA != valB {
+				if !strings.Contains(valA, valB) && !strings.Contains(valB, valA) {
+					return 0.75
+				}
+			}
+		}
+	}
+
+	// 2. Direct Negation with common root topic
+	hasNeg := func(s string) bool {
+		for _, w := range negationWords {
+			if strings.Contains(s, w) {
+				return true
+			}
+		}
+		return false
+	}
+	negA, negB := hasNeg(al), hasNeg(bl)
+	if negA != negB {
+		stripNeg := func(s string) string {
+			for _, w := range negationWords {
+				s = strings.ReplaceAll(s, w, " ")
+			}
+			return strings.Join(strings.Fields(s), " ")
+		}
+		cleanA, cleanB := stripNeg(al), stripNeg(bl)
+		wordsA := strings.Fields(cleanA)
+		wordsB := strings.Fields(cleanB)
+		overlap := 0
+		for _, wa := range wordsA {
+			if len(wa) > 3 && slices.Contains(wordsB, wa) {
+				overlap++
+			}
+		}
+		if overlap >= 1 {
+			return 0.8
+		}
+	}
+
+	// 3. Sentiment / polarity flip
 	has := func(s string, words []string) bool {
 		return slices.ContainsFunc(words, func(w string) bool { return strings.Contains(s, w) })
 	}
 	aPos, aNeg := has(al, positiveWords), has(al, negativeWords)
 	bPos, bNeg := has(bl, positiveWords), has(bl, negativeWords)
 	if (aPos && bNeg) || (aNeg && bPos) {
+		wordsA := strings.Fields(al)
+		wordsB := strings.Fields(bl)
+		for _, wa := range wordsA {
+			if len(wa) > 3 && slices.Contains(wordsB, wa) {
+				return 0.7
+			}
+		}
 		return 0.6
 	}
+
 	return 0
 }
 

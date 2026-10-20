@@ -60,8 +60,8 @@ func (e *Engine) queryEmbedding(ctx context.Context, q string) []float32 {
 // --- Search -----------------------------------------------------------------
 
 // Search runs hybrid semantic + keyword search over an agent's memories from
-// the last 90 days. Semantic hits are scored by rank (1 - i/limit); keyword
-// hits by ts_rank_cd; memories found by both average the two.
+// the last 90 days. Uses Reciprocal Rank Fusion (RRF, k=60) to combine dense
+// embedding ranks and sparse keyword ranks without score calibration skew.
 func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid.UUID) (*domain.SearchResponse, error) {
 	start := e.now()
 	mode := q.Mode
@@ -75,7 +75,14 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 	metrics.SearchCacheMisses.Inc()
 
 	scores := map[uuid.UUID]float32{}
+	seen := map[uuid.UUID]bool{}
 	var order []uuid.UUID
+
+	const (
+		rrfK      = 60.0
+		weightSem = 1.0
+		weightKw  = 0.8
+	)
 
 	var vec []float32
 	if mode != "keyword" {
@@ -87,8 +94,12 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 			return nil, err
 		}
 		for i, id := range ids {
-			scores[id] = 1 - float32(i)/float32(q.Limit)
-			order = append(order, id)
+			rrf := float32(weightSem / (rrfK + float64(i+1)))
+			scores[id] += rrf
+			if !seen[id] {
+				seen[id] = true
+				order = append(order, id)
+			}
 		}
 	}
 	if mode != "semantic" || vec == nil {
@@ -96,13 +107,20 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 		if err != nil {
 			return nil, err
 		}
-		for _, h := range kw {
-			if s, ok := scores[h.id]; ok {
-				scores[h.id] = (s + h.rank) / 2
-			} else {
-				scores[h.id] = h.rank
+		for j, h := range kw {
+			rrf := float32(weightKw / (rrfK + float64(j+1)))
+			scores[h.id] += rrf
+			if !seen[h.id] {
+				seen[h.id] = true
 				order = append(order, h.id)
 			}
+		}
+	}
+
+	maxPossibleRRF := float32(weightSem/(rrfK+1.0) + weightKw/(rrfK+1.0))
+	if maxPossibleRRF > 0 {
+		for id := range scores {
+			scores[id] = min(1.0, scores[id]/maxPossibleRRF)
 		}
 	}
 
