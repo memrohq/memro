@@ -185,6 +185,77 @@ export function isGitTracked(dir = process.cwd()) {
   }
 }
 
+export function resolveProjectRoot(startDir = process.cwd()) {
+  try {
+    const toplevel = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: startDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (toplevel && fs.existsSync(toplevel)) {
+      return toplevel;
+    }
+  } catch {
+    // Git not available or not inside a work tree
+  }
+
+  // Walk up checking for project boundary markers
+  let curr = path.resolve(startDir);
+  while (true) {
+    if (
+      fs.existsSync(path.join(curr, ".git")) ||
+      fs.existsSync(path.join(curr, ".claude")) ||
+      fs.existsSync(path.join(curr, ".cursor")) ||
+      fs.existsSync(path.join(curr, "CLAUDE.md")) ||
+      fs.existsSync(path.join(curr, "package.json")) ||
+      fs.existsSync(path.join(curr, "go.mod")) ||
+      fs.existsSync(path.join(curr, "Cargo.toml")) ||
+      fs.existsSync(path.join(curr, "pyproject.toml"))
+    ) {
+      return curr;
+    }
+    const parent = path.dirname(curr);
+    if (parent === curr) break;
+    curr = parent;
+  }
+
+  return path.resolve(startDir);
+}
+
+export function ensureGitIgnored(filePath, projectRoot) {
+  const rel = path.relative(projectRoot, filePath);
+  const pattern = "/" + rel.split(path.sep).join("/");
+
+  // Check if git considers it ignored already
+  try {
+    execFileSync("git", ["check-ignore", "-q", rel], { cwd: projectRoot, stdio: "ignore" });
+    return { ignored: true, added: false };
+  } catch {
+    // Not ignored or git not found
+  }
+
+  // Check if .gitignore already has this pattern
+  const gitignorePath = path.join(projectRoot, ".gitignore");
+  try {
+    const text = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, "utf8") : "";
+    const lines = text.split("\n").map((l) => l.trim());
+    if (lines.includes(pattern) || lines.includes(pattern.slice(1)) || lines.includes(pattern + "/") || lines.includes(pattern.slice(1) + "/")) {
+      return { ignored: true, added: false };
+    }
+    const dirPart = rel.split(path.sep)[0];
+    if (lines.includes(`/${dirPart}/`) || lines.includes(`/${dirPart}`) || lines.includes(`${dirPart}/`) || lines.includes(dirPart)) {
+      return { ignored: true, added: false };
+    }
+
+    const addition = (text && !text.endsWith("\n") ? "\n" : "") +
+      `# Memro MCP configuration (contains API key)\n${pattern}\n`;
+    fs.writeFileSync(gitignorePath, text + addition);
+    return { ignored: true, added: true };
+  } catch {
+    return { ignored: false, added: false };
+  }
+}
+
 function selectClients(ids, scope = "user", cwd = process.cwd()) {
   if (!ids) return CLIENTS.filter((c) => c.detect({ scope, cwd }) && c.supportsScope(scope));
   return ids.map((id) => {
@@ -200,9 +271,8 @@ function selectClients(ids, scope = "user", cwd = process.cwd()) {
  * otherwise the user picks in a list with detected tools pre-selected.
  * Returns null when the user cancels or nothing can be asked.
  */
-async function chooseTargets(opts) {
+async function chooseTargets(opts, cwd = process.cwd()) {
   const scope = opts.scope || "user";
-  const cwd = process.cwd();
   const supported = CLIENTS.filter((c) => c.supportsScope(scope));
   if (opts.clients) return selectClients(opts.clients, scope, cwd);
   const detected = new Set(supported.filter((c) => c.detect({ scope, cwd })));
@@ -231,22 +301,25 @@ async function chooseTargets(opts) {
 
 async function connect(opts) {
   const scope = opts.scope || "user";
-  const cwd = process.cwd();
+  const cwd = scope === "project" ? resolveProjectRoot(process.cwd()) : process.cwd();
   console.log(`\n◆ Memro connect  (${opts.api})  [scope: ${scope}]`);
 
   if (scope === "project") {
+    if (cwd !== process.cwd()) {
+      console.log(`  Project root: ${cwd}`);
+    }
     console.log("  ℹ Project scope configures MCP and instructions for this directory only.");
     console.log("    Memories are tied to your Agent ID / API key, not this folder.");
     console.log("    To isolate memories between projects, use a separate API key or Agent ID.\n");
     if (isGitTracked(cwd)) {
-      console.log("  \x1b[33m⚠\x1b[0m Warning: Current directory appears to be tracked by Git.");
+      console.log("  \x1b[33m⚠\x1b[0m Note: Current directory appears to be tracked by Git.");
       console.log("    Configuration files containing your API key (such as .cursor/mcp.json, .claude.json)");
-      console.log("    must NOT be committed. Ensure they are added to .gitignore.\n");
+      console.log("    will be protected or added to .gitignore.\n");
     }
   }
 
   // Choose first, so cancelling never creates an API key.
-  const targets = await chooseTargets(opts);
+  const targets = await chooseTargets(opts, cwd);
   if (!targets) {
     console.log("  Nothing changed.");
     return;
@@ -301,6 +374,12 @@ async function connect(opts) {
       ok++;
       const configFile = c.file(scope, cwd);
       console.log(`  \x1b[32m✔\x1b[0m ${c.name.padEnd(15)} ${formatPath(configFile, scope, cwd)}`);
+      if (scope === "project" && isGitTracked(cwd)) {
+        const gitStatus = ensureGitIgnored(configFile, cwd);
+        if (gitStatus.added) {
+          console.log(`  \x1b[32m✔\x1b[0m ${"".padEnd(15)} Added ${path.relative(cwd, configFile)} to .gitignore (protected API key)`);
+        }
+      }
       if (opts.instructions && c.rules) {
         const rulesFile = c.rules(scope, cwd);
         if (rulesFile) {
@@ -325,7 +404,7 @@ function printManual(creds) {
 
 async function status(opts) {
   const scope = opts.scope || "user";
-  const cwd = process.cwd();
+  const cwd = scope === "project" ? resolveProjectRoot(process.cwd()) : process.cwd();
   const creds = loadCredentials();
   const activeKey = opts.key || process.env.MEMRO_API_KEY || creds?.api_key;
   if (!creds && !activeKey) {
@@ -339,6 +418,9 @@ async function status(opts) {
   console.log(`Agent:  ${who.data?.agent_id || creds?.agent_id || "unknown"}`);
   console.log(`Key:    ${who.ok ? "valid" : `not valid (${who.status}) — run \`npx memro-cli connect\``}`);
   console.log(`Scope:  ${scope}`);
+  if (scope === "project") {
+    console.log(`Root:   ${cwd}`);
+  }
   const supported = CLIENTS.filter((c) => c.supportsScope(scope));
   const configured = supported.filter((c) => {
     try {
@@ -352,7 +434,7 @@ async function status(opts) {
 
 async function disconnect(opts) {
   const scope = opts.scope || "user";
-  const cwd = process.cwd();
+  const cwd = scope === "project" ? resolveProjectRoot(process.cwd()) : process.cwd();
   const targets = opts.clients ? selectClients(opts.clients, scope, cwd) : CLIENTS.filter((c) => c.supportsScope(scope));
   for (const c of targets) {
     try {

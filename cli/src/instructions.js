@@ -31,20 +31,19 @@ export const PROJECT_BLOCK = `${START}
 - Follow this repository's privacy and memory-sharing boundaries.
 ${END}`;
 
-const blockPattern = new RegExp(`\\n*${START}[\\s\\S]*?${END}\\n*`);
+const globalBlockPattern = new RegExp(`\\n*${START}[\\s\\S]*?${END}\\n*`, "g");
+
+/** Text without the Memro block (removes all instances if duplicated). */
+export function removeBlock(text) {
+  if (!text.includes(START)) return text;
+  const out = text.replace(globalBlockPattern, "\n\n").replace(/^\n+/, "").replace(/\n{3,}/g, "\n\n");
+  return out.trim() ? out.replace(/\s+$/, "") + "\n" : "";
+}
 
 /** Text with the Memro block added, or replaced if it is already there. */
 export function upsertBlock(text, block = BLOCK) {
-  if (blockPattern.test(text)) return text.replace(blockPattern, `\n\n${block}\n`).replace(/^\n+/, "");
-  const body = text.replace(/\s+$/, "");
-  return (body ? body + "\n\n" : "") + block + "\n";
-}
-
-/** Text without the Memro block (unchanged if it has none). */
-export function removeBlock(text) {
-  if (!blockPattern.test(text)) return text;
-  const out = text.replace(blockPattern, "\n\n").replace(/^\n+/, "").replace(/\n{3,}/g, "\n\n");
-  return out.trim() ? out.replace(/\s+$/, "") + "\n" : "";
+  const cleaned = removeBlock(text).replace(/\s+$/, "");
+  return (cleaned ? cleaned + "\n\n" : "") + block + "\n";
 }
 
 /** Atomically replace a text file, keeping a one-time backup of the original

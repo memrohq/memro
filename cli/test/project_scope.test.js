@@ -16,9 +16,9 @@ process.env.XDG_CONFIG_HOME = path.join(HOME, ".config");
 process.env.CODEX_HOME = path.join(HOME, ".codex");
 process.env.MEMRO_NO_CLAUDE_CLI = "1";
 
-const { parseArgs, isGitTracked } = await import("../src/cli.js");
+const { parseArgs, isGitTracked, resolveProjectRoot, ensureGitIgnored } = await import("../src/cli.js");
 const { CLIENTS, findClient } = await import("../src/clients.js");
-const { PROJECT_BLOCK, BLOCK, START, installInstructions, uninstallInstructions } = await import("../src/instructions.js");
+const { PROJECT_BLOCK, BLOCK, START, END, upsertBlock, removeBlock, installInstructions, uninstallInstructions } = await import("../src/instructions.js");
 
 const conn = { mcpUrl: "https://mcp.memro.co/mcp", apiKey: "memro_sk_proj_test" };
 
@@ -183,4 +183,76 @@ test("Global mode continues to work identically as default without arguments", (
   assert.ok(fs.existsSync(path.join(HOME, ".claude.json")));
   assert.equal(fs.existsSync(path.join(PROJECT_DIR, ".claude.json")), false);
   assert.equal(c.remove(), true);
+});
+
+test("resolveProjectRoot finds project boundary when called from nested subdirectories", () => {
+  const nested = path.join(PROJECT_DIR, "src", "nested", "deep");
+  fs.mkdirSync(nested, { recursive: true });
+
+  // Before marker, resolves to start dir
+  assert.equal(resolveProjectRoot(nested), nested);
+
+  // With package.json at PROJECT_DIR
+  fs.writeFileSync(path.join(PROJECT_DIR, "package.json"), "{}");
+  assert.equal(resolveProjectRoot(nested), PROJECT_DIR);
+});
+
+test("ensureGitIgnored adds config path to .gitignore and prevents duplicates", () => {
+  const cursorConfig = path.join(PROJECT_DIR, ".cursor", "mcp.json");
+  const gitignore = path.join(PROJECT_DIR, ".gitignore");
+
+  const res1 = ensureGitIgnored(cursorConfig, PROJECT_DIR);
+  assert.equal(res1.added, true);
+  const text1 = fs.readFileSync(gitignore, "utf8");
+  assert.ok(text1.includes("/.cursor/mcp.json"));
+
+  // Second run: already present, not re-added
+  const res2 = ensureGitIgnored(cursorConfig, PROJECT_DIR);
+  assert.equal(res2.added, false);
+  assert.equal(res2.ignored, true);
+  const text2 = fs.readFileSync(gitignore, "utf8");
+  assert.equal(text2, text1, "no duplicate lines added");
+});
+
+test("instruction files handle existing content, missing markers, and duplicate markers", () => {
+  const initial = "# Project Overview\n\nExisting guidelines here.\n";
+  const withOneBlock = upsertBlock(initial, PROJECT_BLOCK);
+  assert.ok(withOneBlock.startsWith(initial));
+  assert.ok(withOneBlock.includes("## Memro — long-term memory"));
+
+  // Duplicate blocks accidentally injected
+  const corrupted = `${initial}\n${PROJECT_BLOCK}\n\n# More Rules\n\n${PROJECT_BLOCK}\n`;
+  assert.equal(corrupted.split(START).length - 1, 2, "two start markers present");
+
+  // upsertBlock cleans all duplicate blocks and leaves exactly one
+  const cleaned = upsertBlock(corrupted, PROJECT_BLOCK);
+  assert.equal(cleaned.split(START).length - 1, 1, "exactly one start marker after upsert");
+  assert.ok(cleaned.includes("# Project Overview"));
+  assert.ok(cleaned.includes("# More Rules"));
+
+  // removeBlock cleans all markers
+  const stripped = removeBlock(corrupted);
+  assert.equal(stripped.includes(START), false);
+  assert.ok(stripped.includes("# Project Overview"));
+  assert.ok(stripped.includes("# More Rules"));
+});
+
+test("custom --key is used for project without overwriting global credentials", () => {
+  const globalCredsFile = path.join(HOME, ".memro", "credentials.json");
+  fs.mkdirSync(path.dirname(globalCredsFile), { recursive: true });
+  fs.writeFileSync(globalCredsFile, JSON.stringify({ api_key: "memro_sk_global_user", agent_id: "agent_global" }));
+
+  // Add a project using a distinct key
+  const customConn = { mcpUrl: "https://mcp.memro.co/mcp", apiKey: "memro_sk_isolated_project" };
+  const c = findClient("cursor");
+  c.add(customConn, { scope: "project", cwd: PROJECT_DIR });
+
+  // Project config has isolated key
+  const projCfg = JSON.parse(fs.readFileSync(c.file("project", PROJECT_DIR), "utf8"));
+  assert.equal(projCfg.mcpServers.memro.headers.Authorization, "Bearer memro_sk_isolated_project");
+
+  // Global credentials file is completely unchanged
+  const globalCreds = JSON.parse(fs.readFileSync(globalCredsFile, "utf8"));
+  assert.equal(globalCreds.api_key, "memro_sk_global_user");
+  assert.equal(globalCreds.agent_id, "agent_global");
 });
