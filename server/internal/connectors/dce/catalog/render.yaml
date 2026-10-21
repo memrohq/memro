@@ -1,0 +1,43 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: render
+  version: 1.0.0
+  description: Sync web services, background workers, and databases from Render
+
+spec:
+  type: rest
+  baseURL: https://api.render.com/v1
+
+  auth:
+    type: bearer
+    secretRef: RENDER_API_KEY
+
+  operations:
+    - name: list_services
+      method: GET
+      path: /services
+      queryParams:
+        limit: "50"
+      pagination:
+        type: cursor
+        cursorParam: cursor
+        cursorPath: cursor
+      response:
+        itemsPath: "$"
+
+  mapping:
+    id: $.service.id
+    title: $.service.name
+    content: $.service.type
+    eventDate: $.service.updatedAt
+
+  sync:
+    mode: incremental
+    checkpoint: service.updatedAt
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 100

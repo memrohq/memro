@@ -1,0 +1,39 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: supabase
+  version: 1.0.0
+  description: Sync projects, organizations, and database states from Supabase Management API
+
+spec:
+  type: rest
+  baseURL: https://api.supabase.com/v1
+
+  auth:
+    type: bearer
+    secretRef: SUPABASE_ACCESS_TOKEN
+
+  operations:
+    - name: list_projects
+      method: GET
+      path: /projects
+      pagination:
+        type: none
+      response:
+        itemsPath: "$"
+
+  mapping:
+    id: $.id
+    title: $.name
+    content: $.status
+    eventDate: $.created_at
+
+  sync:
+    mode: incremental
+    checkpoint: created_at
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 60

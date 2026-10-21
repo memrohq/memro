@@ -1,0 +1,42 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: intercom
+  version: 1.0.0
+  description: Sync customer conversations, lead tickets, and admin replies from Intercom
+
+spec:
+  type: rest
+  baseURL: https://api.intercom.io
+
+  auth:
+    type: bearer
+    secretRef: INTERCOM_ACCESS_TOKEN
+
+  operations:
+    - name: list_conversations
+      method: GET
+      path: /conversations
+      pagination:
+        type: cursor
+        cursorParam: starting_after
+        cursorPath: pages.next.starting_after
+      response:
+        itemsPath: conversations
+
+  mapping:
+    id: $.id
+    title: $.source.subject
+    content: $.source.body
+    eventDate: $.updated_at
+    authorName: $.source.author.name
+
+  sync:
+    mode: incremental
+    checkpoint: updated_at
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 100

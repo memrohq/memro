@@ -1,0 +1,46 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: readwise
+  version: 1.0.0
+  description: Sync book highlights, articles, and tweet notes from Readwise
+
+spec:
+  type: rest
+  baseURL: https://readwise.io/api/v2
+
+  auth:
+    type: apiKey
+    header: Authorization
+    prefix: "Token "
+    secretRef: READWISE_ACCESS_TOKEN
+
+  operations:
+    - name: list_highlights
+      method: GET
+      path: /highlights
+      queryParams:
+        page_size: "100"
+      pagination:
+        type: page
+        pageParam: page
+      response:
+        itemsPath: results
+
+  mapping:
+    id: $.id
+    title: $.title
+    content: $.text
+    eventDate: $.updated
+    authorName: $.author
+    url: $.source_url
+
+  sync:
+    mode: incremental
+    checkpoint: updated
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 60

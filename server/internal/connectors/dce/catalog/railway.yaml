@@ -1,0 +1,42 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: railway
+  version: 1.0.0
+  description: Sync deployments, environments, and services from Railway
+
+spec:
+  type: rest
+  baseURL: https://api.railway.app
+
+  auth:
+    type: bearer
+    secretRef: RAILWAY_API_TOKEN
+
+  operations:
+    - name: list_deployments
+      method: GET
+      path: /v1/deployments
+      pagination:
+        type: cursor
+        cursorParam: after
+        cursorPath: nextCursor
+      response:
+        itemsPath: deployments
+
+  mapping:
+    id: $.id
+    title: $.environmentName
+    content: $.status
+    eventDate: $.createdAt
+    url: $.url
+
+  sync:
+    mode: incremental
+    checkpoint: createdAt
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 100

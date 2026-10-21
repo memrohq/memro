@@ -1,0 +1,41 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: harvest
+  version: 1.0.0
+  description: Sync time entries, project logs, and notes from Harvest
+
+spec:
+  type: rest
+  baseURL: https://api.harvestapp.com/v2
+
+  auth:
+    type: bearer
+    secretRef: HARVEST_ACCESS_TOKEN
+
+  operations:
+    - name: list_time_entries
+      method: GET
+      path: /time_entries
+      pagination:
+        type: page
+        pageParam: page
+      response:
+        itemsPath: time_entries
+
+  mapping:
+    id: $.id
+    title: $.notes
+    content: $.notes
+    eventDate: $.updated_at
+    authorName: $.user.name
+
+  sync:
+    mode: incremental
+    checkpoint: updated_at
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 100

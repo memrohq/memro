@@ -1,0 +1,44 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: youtrack
+  version: 1.0.0
+  description: Sync issues, comments, and project updates from JetBrains YouTrack
+
+spec:
+  type: rest
+  baseURL: https://youtrack.jetbrains.com/api
+
+  auth:
+    type: bearer
+    secretRef: YOUTRACK_PERMANENT_TOKEN
+
+  operations:
+    - name: list_issues
+      method: GET
+      path: /issues
+      queryParams:
+        fields: "id,summary,description,updated,created"
+      pagination:
+        type: offset
+        offsetParam: $skip
+        limitParam: $top
+        limit: 50
+      response:
+        itemsPath: "$"
+
+  mapping:
+    id: $.id
+    title: $.summary
+    content: $.description
+    eventDate: $.updated
+
+  sync:
+    mode: incremental
+    checkpoint: updated
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 60

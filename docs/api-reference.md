@@ -333,6 +333,34 @@ signed requests get `403`.
 
 ---
 
+## Connectors
+
+Slack and GitHub connections that sync into the agent's memory (see
+[Connectors](connectors.md)). Dashboard session only: API keys and signed
+requests get `403`.
+
+| | |
+|---|---|
+| `GET /connectors` | `{"providers": [{"name", "enabled", "sources_managed_by"}], "connections": [Connection]}` |
+| `POST /connectors/{provider}/authorize` | `provider` is `slack` or `github` → `{"url"}`. Open `url` in the same browser; it sets a short-lived cookie checked on the way back. `503` if the connector isn't configured. |
+| `GET /connectors/{id}/sources` | `[{"id", "name", "private", "enabled", "last_synced_at"}]` — Slack channels or GitHub repositories |
+| `PUT /connectors/{id}/sources` | Slack only. Body `{"enabled": {"C0123": true, "C0456": false}}` (≤ 500) → the updated list. `400` with a message for a channel you can't use. |
+| `POST /connectors/{id}/sync` | Sync now; also resumes a paused connection. `202` |
+| `DELETE /connectors/{id}` | Disconnect. `?delete_memories=true` also deletes its memories. → `{"deleted_memories": n}` |
+
+A `Connection` is `{"id", "provider", "account_id", "account_name",
+"external_user_id", "external_user_name", "status", "status_detail",
+"created_at", "last_synced_at", "sources_enabled", "sources_total",
+"memories", "pending_jobs", "manage_url"}`. `status` is `active`, `paused`
+(memory limit reached, or suspended on GitHub), `error` (sync keeps failing;
+`status_detail` says why) or `revoked` (reconnect to use it again).
+
+Called by providers, not by you: `GET /connectors/{provider}/callback`
+(OAuth redirect), `POST /connectors/slack/events` (Slack signature) and
+`POST /connectors/github/webhook` (`X-Hub-Signature-256`).
+
+---
+
 ## Health
 
 ### `GET /health`

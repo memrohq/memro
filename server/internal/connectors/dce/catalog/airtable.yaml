@@ -1,0 +1,39 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: airtable
+  version: 1.0.0
+  description: Sync bases, tables, and views from Airtable
+
+spec:
+  type: rest
+  baseURL: https://api.airtable.com/v0
+
+  auth:
+    type: bearer
+    secretRef: AIRTABLE_PERSONAL_ACCESS_TOKEN
+
+  operations:
+    - name: list_bases
+      method: GET
+      path: /meta/bases
+      pagination:
+        type: cursor
+        cursorParam: offset
+        cursorPath: offset
+      response:
+        itemsPath: bases
+
+  mapping:
+    id: $.id
+    title: $.name
+    content: $.permissionLevel
+
+  sync:
+    mode: full
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 60

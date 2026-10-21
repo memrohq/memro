@@ -1,0 +1,42 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: clickup
+  version: 1.0.0
+  description: Sync tasks, subtasks, and descriptions from ClickUp
+
+spec:
+  type: rest
+  baseURL: https://api.clickup.com/api/v2
+
+  auth:
+    type: apiKey
+    header: Authorization
+    secretRef: CLICKUP_API_KEY
+
+  operations:
+    - name: list_tasks
+      method: GET
+      path: /team
+      pagination:
+        type: page
+        pageParam: page
+      response:
+        itemsPath: tasks
+
+  mapping:
+    id: $.id
+    title: $.name
+    content: $.text_content
+    eventDate: $.date_updated
+    url: $.url
+
+  sync:
+    mode: incremental
+    checkpoint: date_updated
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 100

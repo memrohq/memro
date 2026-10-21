@@ -1,0 +1,41 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: datadog
+  version: 1.0.0
+  description: Sync monitors, alert statuses, and incidents from Datadog
+
+spec:
+  type: rest
+  baseURL: https://api.datadoghq.com/api/v1
+
+  auth:
+    type: apiKey
+    header: DD-API-KEY
+    secretRef: DATADOG_API_KEY
+
+  operations:
+    - name: list_monitors
+      method: GET
+      path: /monitor
+      pagination:
+        type: none
+      response:
+        itemsPath: "$"
+
+  mapping:
+    id: $.id
+    title: $.name
+    content: $.message
+    eventDate: $.modified
+    authorName: $.creator.name
+
+  sync:
+    mode: incremental
+    checkpoint: modified
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 120

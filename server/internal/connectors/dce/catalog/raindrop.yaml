@@ -1,0 +1,43 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: raindrop
+  version: 1.0.0
+  description: Sync bookmarks, highlights, and collections from Raindrop.io
+
+spec:
+  type: rest
+  baseURL: https://api.raindrop.io/rest/v1
+
+  auth:
+    type: bearer
+    secretRef: RAINDROP_TOKEN
+
+  operations:
+    - name: list_bookmarks
+      method: GET
+      path: /raindrops/0
+      queryParams:
+        perpage: "50"
+      pagination:
+        type: page
+        pageParam: page
+      response:
+        itemsPath: items
+
+  mapping:
+    id: $._id
+    title: $.title
+    content: $.excerpt
+    eventDate: $.lastUpdate
+    url: $.link
+
+  sync:
+    mode: incremental
+    checkpoint: lastUpdate
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 120

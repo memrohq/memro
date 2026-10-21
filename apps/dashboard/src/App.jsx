@@ -13,6 +13,7 @@ import Activity from "./views/Activity";
 import Settings from "./views/Settings";
 import Connect from "./views/Connect";
 import Keys from "./views/Keys";
+import Integrations from "./views/Integrations";
 
 const store = {
   get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
@@ -27,6 +28,7 @@ const NAV = [
   ] },
   { group: "Connect", items: [
     { id: "connect", label: "Connect tools", icon: "cable" },
+    { id: "integrations", label: "Integrations", icon: "hub" },
     { id: "keys", label: "API keys", icon: "key" },
   ] },
   { group: "Account", items: [
@@ -68,7 +70,11 @@ export default function App() {
   const [extensions, setExtensions] = useState([]);
   const [systemDark, setSystemDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
 
-  const [view, setView] = useState(() => (window.location.pathname.startsWith("/connect") ? "connect" : "overview"));
+  // Deep links: /connect from `memro connect`, /integrations after Slack or GitHub sign-in.
+  const [view, setView] = useState(() => {
+    const path = window.location.pathname;
+    return path.startsWith("/connect") ? "connect" : path.startsWith("/integrations") ? "integrations" : "overview";
+  });
   const [navOpen, setNavOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [health, setHealth] = useState({});
@@ -427,6 +433,8 @@ export default function App() {
                 <Connect apiBase={apiBase} auth={auth} code={connectCode} onDone={() => go("overview")} onCopy={copy} notify={notify} />
               ) : view === "keys" ? (
                 <Keys apiBase={apiBase} auth={auth} onCopy={copy} notify={notify} />
+              ) : view === "integrations" ? (
+                <Integrations apiBase={apiBase} auth={auth} notify={notify} onOpenMemories={() => { load(); go("memories"); }} />
               ) : !initialized && view !== "settings" ? (
                 <p className="text-[13px] text-muted">Loading your account…</p>
               ) : view === "overview" ? (

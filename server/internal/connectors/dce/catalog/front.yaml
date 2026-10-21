@@ -1,0 +1,41 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: front
+  version: 1.0.0
+  description: Sync shared inbox conversations, assignments, and tags from Front
+
+spec:
+  type: rest
+  baseURL: https://api2.frontapp.com
+
+  auth:
+    type: bearer
+    secretRef: FRONT_API_TOKEN
+
+  operations:
+    - name: list_conversations
+      method: GET
+      path: /conversations
+      pagination:
+        type: cursor
+        cursorParam: page_token
+        cursorPath: _pagination.next
+      response:
+        itemsPath: _results
+
+  mapping:
+    id: $.id
+    title: $.subject
+    content: $.teaser
+    eventDate: $.created_at
+
+  sync:
+    mode: incremental
+    checkpoint: created_at
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 100

@@ -1,0 +1,44 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: trello
+  version: 1.0.0
+  description: Sync cards, lists, and activity logs from Trello
+
+spec:
+  type: rest
+  baseURL: https://api.trello.com/1
+
+  auth:
+    type: apiKey
+    header: Authorization
+    secretRef: TRELLO_API_TOKEN
+
+  operations:
+    - name: list_cards
+      method: GET
+      path: /members/me/cards
+      queryParams:
+        fields: "id,name,desc,dateLastActivity,url"
+        limit: "100"
+      pagination:
+        type: none
+      response:
+        itemsPath: "$"
+
+  mapping:
+    id: $.id
+    title: $.name
+    content: $.desc
+    eventDate: $.dateLastActivity
+    url: $.url
+
+  sync:
+    mode: incremental
+    checkpoint: dateLastActivity
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 100

@@ -1,0 +1,45 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: shortcut
+  version: 1.0.0
+  description: Sync stories, epics, and iterations from Shortcut (formerly Clubhouse)
+
+spec:
+  type: rest
+  baseURL: https://api.app.shortcut.com/api/v3
+
+  auth:
+    type: apiKey
+    header: Shortcut-Token
+    secretRef: SHORTCUT_API_TOKEN
+
+  operations:
+    - name: list_stories
+      method: GET
+      path: /stories/search
+      queryParams:
+        page_size: "50"
+      pagination:
+        type: cursor
+        cursorParam: next
+        cursorPath: next
+      response:
+        itemsPath: data
+
+  mapping:
+    id: $.id
+    title: $.name
+    content: $.description
+    eventDate: $.updated_at
+    url: $.app_url
+
+  sync:
+    mode: incremental
+    checkpoint: updated_at
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 120

@@ -1,0 +1,44 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: zotero
+  version: 1.0.0
+  description: Sync bibliographic items, research papers, and notes from Zotero
+
+spec:
+  type: rest
+  baseURL: https://api.zotero.org
+
+  auth:
+    type: apiKey
+    header: Z-Api-Key
+    secretRef: ZOTERO_API_KEY
+
+  operations:
+    - name: list_items
+      method: GET
+      path: /users/me/items
+      pagination:
+        type: offset
+        offsetParam: start
+        limitParam: limit
+        limit: 50
+      response:
+        itemsPath: "$"
+
+  mapping:
+    id: $.key
+    title: $.data.title
+    content: $.data.abstractNote
+    eventDate: $.data.dateModified
+    url: $.data.url
+
+  sync:
+    mode: incremental
+    checkpoint: data.dateModified
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 60

@@ -1,0 +1,46 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: pipedrive
+  version: 1.0.0
+  description: Sync deals, activities, and organization stages from Pipedrive
+
+spec:
+  type: rest
+  baseURL: https://api.pipedrive.com/v1
+
+  auth:
+    type: apiKey
+    header: Authorization
+    prefix: "Bearer "
+    secretRef: PIPEDRIVE_API_TOKEN
+
+  operations:
+    - name: list_deals
+      method: GET
+      path: /deals
+      queryParams:
+        limit: "50"
+      pagination:
+        type: offset
+        offsetParam: start
+        limitParam: limit
+        limit: 50
+      response:
+        itemsPath: data
+
+  mapping:
+    id: $.id
+    title: $.title
+    content: $.status
+    eventDate: $.update_time
+
+  sync:
+    mode: incremental
+    checkpoint: update_time
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 80

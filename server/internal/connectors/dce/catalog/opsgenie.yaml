@@ -1,0 +1,46 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: opsgenie
+  version: 1.0.0
+  description: Sync alerts, on-call schedules, and notifications from Opsgenie
+
+spec:
+  type: rest
+  baseURL: https://api.opsgenie.com/v2
+
+  auth:
+    type: apiKey
+    header: Authorization
+    prefix: "GenieKey "
+    secretRef: OPSGENIE_API_KEY
+
+  operations:
+    - name: list_alerts
+      method: GET
+      path: /alerts
+      queryParams:
+        limit: "50"
+      pagination:
+        type: offset
+        offsetParam: offset
+        limitParam: limit
+        limit: 50
+      response:
+        itemsPath: data
+
+  mapping:
+    id: $.id
+    title: $.message
+    content: $.description
+    eventDate: $.updatedAt
+
+  sync:
+    mode: incremental
+    checkpoint: updatedAt
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 100

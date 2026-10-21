@@ -1,0 +1,39 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: todoist
+  version: 1.0.0
+  description: Sync active tasks, projects, and comments from Todoist
+
+spec:
+  type: rest
+  baseURL: https://api.todoist.com/rest/v2
+
+  auth:
+    type: bearer
+    secretRef: TODOIST_API_TOKEN
+
+  operations:
+    - name: list_tasks
+      method: GET
+      path: /tasks
+      pagination:
+        type: none
+      response:
+        itemsPath: "$"
+
+  mapping:
+    id: $.id
+    title: $.content
+    content: $.description
+    eventDate: $.due.datetime
+    url: $.url
+
+  sync:
+    mode: full
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 120

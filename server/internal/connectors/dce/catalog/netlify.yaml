@@ -1,0 +1,41 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: netlify
+  version: 1.0.0
+  description: Sync deploys, site statuses, and edge logs from Netlify
+
+spec:
+  type: rest
+  baseURL: https://api.netlify.com/api/v1
+
+  auth:
+    type: bearer
+    secretRef: NETLIFY_AUTH_TOKEN
+
+  operations:
+    - name: list_deploys
+      method: GET
+      path: /deploys
+      pagination:
+        type: page
+        pageParam: page
+      response:
+        itemsPath: "$"
+
+  mapping:
+    id: $.id
+    title: $.name
+    content: $.error_message
+    eventDate: $.created_at
+    url: $.deploy_url
+
+  sync:
+    mode: incremental
+    checkpoint: created_at
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 100

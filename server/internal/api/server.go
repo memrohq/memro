@@ -24,6 +24,7 @@ import (
 	"github.com/memrohq/memro/server/config"
 	"github.com/memrohq/memro/server/extension"
 	"github.com/memrohq/memro/server/internal/auth"
+	"github.com/memrohq/memro/server/internal/connectors"
 	"github.com/memrohq/memro/server/internal/email"
 	"github.com/memrohq/memro/server/internal/embed"
 	"github.com/memrohq/memro/server/internal/engine"
@@ -45,6 +46,7 @@ type Server struct {
 	quota   extension.QuotaPolicy
 	extra   map[string]http.Handler
 
+	connectors      *connectors.Manager
 	ipLimiter       *RateLimiter
 	agentLimiter    *RateLimiter
 	otpLimiter      *RateLimiter // sign-in codes requested per email
@@ -65,6 +67,10 @@ type Deps struct {
 	Usage  extension.UsageMeter
 	Quota  extension.QuotaPolicy
 	Routes map[string]http.Handler // extra unauthenticated routes, e.g. billing webhooks
+
+	// Connectors syncs Slack and GitHub into memory. When nil, NewServer
+	// builds one from Config whose background jobs are not started.
+	Connectors *connectors.Manager
 }
 
 // StoreUsageMeter records usage in the tenant_usage table.
@@ -82,8 +88,18 @@ func NewServer(d Deps) *Server {
 	if quota == nil {
 		quota = extension.PerAgentCap{Max: d.Config.MemorySoftCap}
 	}
+	conns := d.Connectors
+	if conns == nil {
+		var err error
+		conns, err = connectors.New(connectors.Deps{Config: d.Config, Pool: d.Store.Pool, Store: d.Store,
+			Indexer: d.Indexer, Invalidate: d.Engine.Cache().InvalidateAgent, Quota: quota, Usage: usage})
+		if err != nil {
+			panic(err) // misconfiguration; app.Run validates this before building the server
+		}
+	}
 	return &Server{
-		cfg: d.Config, store: d.Store, engine: d.Engine, embed: d.Embed, indexer: d.Indexer,
+		connectors: conns,
+		cfg:        d.Config, store: d.Store, engine: d.Engine, embed: d.Embed, indexer: d.Indexer,
 		files: d.Files, email: d.Email, replay: auth.NewReplayCache(),
 		meter: usage, quota: quota, extra: d.Routes,
 		ipLimiter:       NewRateLimiter(d.Config.RateLimitMax, d.Config.RateLimitWindow),
@@ -116,6 +132,14 @@ func (s *Server) Handler() http.Handler {
 	public("DELETE /auth/logout", s.logout)
 	public("POST /auth/device/code", s.deviceCode)
 	public("POST /auth/device/token", s.deviceToken)
+	public("GET /connectors/{provider}/callback", s.connectorCallback)
+	public("POST /connectors/slack/events", s.slackEvents)
+	public("POST /connectors/github/webhook", s.githubWebhook)
+	public("POST /connectors/linear/webhook", s.linearWebhook)
+	public("POST /connectors/sentry/webhook", s.sentryWebhook)
+	public("POST /connectors/notion/webhook", s.notionWebhook)
+	public("POST /connectors/jira/webhook", s.jiraWebhook)
+	public("POST /connectors/gitlab/webhook", s.gitlabWebhook)
 
 	protected("DELETE /identity/{id}", s.deleteIdentity)
 	protected("GET /identity/{id}/keys", s.listAgentKeys)
@@ -152,6 +176,12 @@ func (s *Server) Handler() http.Handler {
 	protected("GET /api-keys", s.listAPIKeys)
 	protected("POST /api-keys", s.createAPIKey)
 	protected("DELETE /api-keys/{id}", s.revokeAPIKey)
+	protected("GET /connectors", s.listConnectors)
+	protected("POST /connectors/{provider}/authorize", s.authorizeConnector)
+	protected("GET /connectors/{id}/sources", s.connectorSources)
+	protected("PUT /connectors/{id}/sources", s.updateConnectorSources)
+	protected("POST /connectors/{id}/sync", s.syncConnector)
+	protected("DELETE /connectors/{id}", s.deleteConnector)
 
 	for pattern, h := range s.extra {
 		mux.Handle(pattern, h)
@@ -340,9 +370,22 @@ func (s *Server) authenticate(r *http.Request) (Agent, []byte, int, string) {
 		SigningKey: keyHex, KeyRole: role}, raw, 0, ""
 }
 
+// signedWebhooks are authenticated by the sender's HMAC signature and
+// arrive from a few provider addresses shared by every customer, so the
+// per-IP limit would drop legitimate deliveries.
+var signedWebhooks = map[string]bool{
+	"/connectors/slack/events":   true,
+	"/connectors/github/webhook": true,
+	"/connectors/linear/webhook": true,
+	"/connectors/sentry/webhook": true,
+	"/connectors/notion/webhook": true,
+	"/connectors/jira/webhook":   true,
+	"/connectors/gitlab/webhook": true,
+}
+
 func (s *Server) rateLimitIP(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/health" && r.URL.Path != "/metrics" && !s.ipLimiter.Allow(s.clientIP(r)) {
+		if r.URL.Path != "/health" && r.URL.Path != "/metrics" && !signedWebhooks[r.URL.Path] && !s.ipLimiter.Allow(s.clientIP(r)) {
 			metrics.RateLimitHits.Inc()
 			httpError(w, http.StatusTooManyRequests, "Rate limit exceeded")
 			return

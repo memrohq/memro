@@ -1,0 +1,43 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: hubspot
+  version: 1.0.0
+  description: Sync contacts, companies, deals, and engagements from HubSpot CRM
+
+spec:
+  type: rest
+  baseURL: https://api.hubapi.com
+
+  auth:
+    type: bearer
+    secretRef: HUBSPOT_ACCESS_TOKEN
+
+  operations:
+    - name: list_contacts
+      method: GET
+      path: /crm/v3/objects/contacts
+      queryParams:
+        limit: "50"
+      pagination:
+        type: cursor
+        cursorParam: after
+        cursorPath: paging.next.after
+      response:
+        itemsPath: results
+
+  mapping:
+    id: $.id
+    title: $.properties.firstname
+    content: $.properties.email
+    eventDate: $.updatedAt
+
+  sync:
+    mode: incremental
+    checkpoint: updatedAt
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 100

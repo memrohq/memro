@@ -1,0 +1,43 @@
+apiVersion: memro.dev/v1
+kind: Connector
+
+metadata:
+  name: outline
+  version: 1.0.0
+  description: Sync knowledge base documents, collections, and revisions from Outline
+
+spec:
+  type: rest
+  baseURL: https://app.getoutline.com/api
+
+  auth:
+    type: bearer
+    secretRef: OUTLINE_API_KEY
+
+  operations:
+    - name: list_documents
+      method: GET
+      path: /documents.list
+      pagination:
+        type: offset
+        offsetParam: offset
+        limitParam: limit
+        limit: 50
+      response:
+        itemsPath: data
+
+  mapping:
+    id: $.id
+    title: $.title
+    content: $.text
+    eventDate: $.updatedAt
+    url: $.url
+
+  sync:
+    mode: incremental
+    checkpoint: updatedAt
+
+  policies:
+    timeout: 15s
+    maxRetries: 3
+    rateLimitPerMin: 120
