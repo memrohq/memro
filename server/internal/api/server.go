@@ -178,6 +178,7 @@ func (s *Server) Handler() http.Handler {
 	protected("DELETE /api-keys/{id}", s.revokeAPIKey)
 	protected("GET /connectors", s.listConnectors)
 	protected("POST /connectors/{provider}/authorize", s.authorizeConnector)
+	protected("POST /connectors/{provider}/token", s.connectToken)
 	protected("GET /connectors/{id}/sources", s.connectorSources)
 	protected("PUT /connectors/{id}/sources", s.updateConnectorSources)
 	protected("POST /connectors/{id}/sync", s.syncConnector)
