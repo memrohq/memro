@@ -16,8 +16,8 @@ import (
 )
 
 var (
-	ErrSSRFBlocked   = errors.New("dce: request to private or loopback IP address blocked (SSRF protection)")
-	ErrBodyTooLarge  = errors.New("dce: response body exceeded maximum allowed size")
+	ErrSSRFBlocked  = errors.New("dce: request to private or loopback IP address blocked (SSRF protection)")
+	ErrBodyTooLarge = errors.New("dce: response body exceeded maximum allowed size")
 )
 
 // SecretResolver resolves a secret reference into actual credentials.

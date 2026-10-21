@@ -30,8 +30,8 @@ import (
 )
 
 const (
-	ProviderSlack  = "slack"
-	ProviderGitHub = "github"
+	ProviderSlack   = "slack"
+	ProviderGitHub  = "github"
 	ProviderLinear  = "linear"
 	ProviderSentry  = "sentry"
 	ProviderNotion  = "notion"
@@ -156,21 +156,21 @@ type Deps struct {
 
 // Manager owns the connectors, their jobs and their webhooks.
 type Manager struct {
-	deps      Deps
-	cfg       config.ConnectorsConfig
-	sealer    *sealer
-	providers map[string]provider
-	slack     *slackProvider
-	github    *githubProvider
-	linear    *linearProvider
-	sentry    *sentryProvider
-	notion    *notionProvider
+	deps        Deps
+	cfg         config.ConnectorsConfig
+	sealer      *sealer
+	providers   map[string]provider
+	slack       *slackProvider
+	github      *githubProvider
+	linear      *linearProvider
+	sentry      *sentryProvider
+	notion      *notionProvider
 	jira        *jiraProvider
 	gitlab      *gitlabProvider
 	dceRegistry *dce.Registry
 	http        *http.Client
-	wake      chan struct{}
-	now       func() time.Time
+	wake        chan struct{}
+	now         func() time.Time
 
 	namesMu sync.Mutex
 	names   map[string]cachedName // Slack user names, by team/user

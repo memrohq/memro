@@ -148,12 +148,12 @@ func renderGitLabMR(mr *gitlabMergeRequest, notes []gitlabNote, projectName stri
 	}
 
 	meta = map[string]any{
-		"mr_iid":       mr.IID,
-		"project_name": projectName,
-		"state":        mr.State,
+		"mr_iid":        mr.IID,
+		"project_name":  projectName,
+		"state":         mr.State,
 		"source_branch": mr.SourceBranch,
 		"target_branch": mr.TargetBranch,
-		"author":       mr.Author.Username,
+		"author":        mr.Author.Username,
 	}
 
 	return header, b.String(), meta

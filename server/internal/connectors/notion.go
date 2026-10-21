@@ -202,9 +202,9 @@ func (p *notionProvider) handle(ctx context.Context, c *conn, j *job) error {
 
 type notionSearchResults struct {
 	Results []struct {
-		Object string            `json:"object"`
-		ID     string            `json:"id"`
-		Title  []notionRichText  `json:"title,omitempty"`
+		Object string                    `json:"object"`
+		ID     string                    `json:"id"`
+		Title  []notionRichText          `json:"title,omitempty"`
 		Props  map[string]map[string]any `json:"properties,omitempty"`
 	} `json:"results"`
 	HasMore    bool   `json:"has_more"`

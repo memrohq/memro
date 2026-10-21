@@ -196,23 +196,23 @@ type ConnectorsConfig struct {
 	DiscordPublicKey    string
 
 	// API endpoints, overridden in tests.
-	SlackAPIURL    string
-	GitHubAPIURL   string
-	GitHubWebURL   string
-	SlackOAuthURL  string
-	LinearAPIURL   string
-	LinearOAuthURL string
-	SentryAPIURL   string
-	SentryOAuthURL string
-	NotionAPIURL   string
-	NotionOAuthURL string
-	JiraAPIURL     string
-	JiraOAuthURL   string
-	GitLabAPIURL   string
-	GitLabOAuthURL string
-	GoogleAPIURL   string
-	GoogleOAuthURL string
-	DiscordAPIURL  string
+	SlackAPIURL     string
+	GitHubAPIURL    string
+	GitHubWebURL    string
+	SlackOAuthURL   string
+	LinearAPIURL    string
+	LinearOAuthURL  string
+	SentryAPIURL    string
+	SentryOAuthURL  string
+	NotionAPIURL    string
+	NotionOAuthURL  string
+	JiraAPIURL      string
+	JiraOAuthURL    string
+	GitLabAPIURL    string
+	GitLabOAuthURL  string
+	GoogleAPIURL    string
+	GoogleOAuthURL  string
+	DiscordAPIURL   string
 	DiscordOAuthURL string
 }
 

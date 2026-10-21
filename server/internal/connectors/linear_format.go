@@ -130,16 +130,16 @@ func renderLinearIssue(issue *linearIssue, comments []linearComment) (header, bo
 	}
 
 	meta = map[string]any{
-		"source":      ProviderLinear,
-		"connector":   true,
-		"issue_id":    issue.ID,
-		"identifier":  issue.Identifier,
-		"team_id":     issue.Team.ID,
-		"team_key":    issue.Team.Key,
-		"url":         issue.URL,
-		"priority":    priorityName(issue.Priority),
-		"state":       issue.State.Name,
-		"state_type":  issue.State.Type,
+		"source":     ProviderLinear,
+		"connector":  true,
+		"issue_id":   issue.ID,
+		"identifier": issue.Identifier,
+		"team_id":    issue.Team.ID,
+		"team_key":   issue.Team.Key,
+		"url":        issue.URL,
+		"priority":   priorityName(issue.Priority),
+		"state":      issue.State.Name,
+		"state_type": issue.State.Type,
 	}
 	if issue.Project != nil {
 		meta["project"] = issue.Project.Name

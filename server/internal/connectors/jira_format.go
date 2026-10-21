@@ -146,16 +146,16 @@ func renderJiraIssue(issue *jiraIssue, comments []jiraComment, baseURL string) (
 	}
 
 	meta = map[string]any{
-		"source":        "jira",
-		"connector":     true,
-		"issue_key":     issue.Key,
-		"issue_id":      issue.ID,
-		"project_key":   issue.Fields.Project.Key,
-		"project_name":  issue.Fields.Project.Name,
-		"status":        issue.Fields.Status.Name,
-		"type":          domain.Semantic,
-		"url":           issueURL,
-		"comments":      len(comments),
+		"source":       "jira",
+		"connector":    true,
+		"issue_key":    issue.Key,
+		"issue_id":     issue.ID,
+		"project_key":  issue.Fields.Project.Key,
+		"project_name": issue.Fields.Project.Name,
+		"status":       issue.Fields.Status.Name,
+		"type":         domain.Semantic,
+		"url":          issueURL,
+		"comments":     len(comments),
 	}
 	if issue.Fields.Assignee != nil {
 		meta["assignee"] = issue.Fields.Assignee.DisplayName
