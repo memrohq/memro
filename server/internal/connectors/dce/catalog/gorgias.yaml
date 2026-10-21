@@ -1,0 +1,41 @@
+apiVersion: memro.dev/v1
+kind: Connector
+metadata:
+  name: gorgias
+  version: "1"
+  displayName: Gorgias
+  category: communication
+  description: Support tickets with their status, channel, customer and summary.
+  docsURL: https://developers.gorgias.com/reference/authentication
+spec:
+  type: rest
+  baseURL: https://{{config.domain}}.gorgias.com/api
+  fields:
+    - {name: domain, label: Gorgias domain, placeholder: acme, pattern: "[A-Za-z0-9][A-Za-z0-9-]{0,62}", help: "The part before .gorgias.com in your helpdesk URL."}
+    - {name: email, label: Your email, placeholder: you@company.com}
+    - {name: token, label: API key, secret: true, help: "Settings → REST API."}
+  auth: {type: basic, secretRef: token, username: "{{config.email}}", password: "{{config.token}}"}
+  verify: {path: /account, accountId: domain, accountName: domain}
+  operations:
+    - name: tickets
+      method: GET
+      path: /tickets
+      queryParams: {limit: "100", order_by: "updated_datetime:desc"}
+      pagination: {type: cursor, cursorParam: cursor, cursorPath: meta.next_cursor}
+      response: {itemsPath: data}
+  mapping:
+    id: id
+    title: "{{subject}}"
+    content: |
+      Gorgias ticket #{{id}}: {{subject}}
+      Status: {{status}}
+      Channel: {{channel}}
+      Customer: {{customer.name}} <{{customer.email}}>
+      Assignee: {{assignee_user.name}}
+      Tags: {{tags[].name}}
+
+      {{excerpt}}
+    memoryType: episodic
+    eventDate: updated_datetime
+  sync: {mode: incremental, checkpoint: updated_datetime, newestFirst: true}
+  policies: {timeout: 30s, maxRetries: 3}

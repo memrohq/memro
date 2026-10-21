@@ -1,39 +1,32 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: postman
-  version: 1.0.0
-  description: Sync API collections, environments, and mock servers from Postman
-
+  version: "1"
+  displayName: Postman
+  category: engineering
+  description: Your Postman collections and who owns them.
+  docsURL: https://learning.postman.com/docs/developer/postman-api/authentication/
 spec:
   type: rest
   baseURL: https://api.getpostman.com
-
-  auth:
-    type: apiKey
-    header: X-Api-Key
-    secretRef: POSTMAN_API_KEY
-
+  fields:
+    - {name: token, label: API key, secret: true, help: "Settings → API keys."}
+  auth: {type: apiKey, secretRef: token, header: X-API-Key}
+  verify: {path: /me, accountId: user.id, accountName: user.username}
   operations:
-    - name: list_collections
+    - name: collections
       method: GET
       path: /collections
-      pagination:
-        type: none
-      response:
-        itemsPath: collections
-
+      response: {itemsPath: collections}
   mapping:
-    id: $.id
-    title: $.name
-    content: $.uid
-    eventDate: $.updatedAt
-
-  sync:
-    mode: full
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 60
+    id: uid
+    title: "Postman collection {{name}}"
+    content: |
+      Postman collection: {{name}}
+      Owner: {{owner}}
+      Forked from: {{fork.label}}
+      Updated: {{updatedAt}}
+    eventDate: updatedAt
+  sync: {mode: full}
+  policies: {timeout: 30s, maxRetries: 3}

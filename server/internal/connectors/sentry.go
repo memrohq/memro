@@ -128,6 +128,7 @@ func (p *sentryProvider) complete(ctx context.Context, q url.Values) (*authorize
 		creds: map[string]any{
 			"access_token":      tResp.AccessToken,
 			"refresh_token":     tResp.RefreshToken,
+			"expires_at":        tokenExpiry(p.m.now(), tResp.ExpiresIn),
 			"organization_slug": org.Slug,
 			"organization_id":   org.ID,
 		},
@@ -167,6 +168,36 @@ func (p *sentryProvider) get(ctx context.Context, token, path string, out any) e
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+func (p *sentryProvider) tokenEndpoint() tokenEndpoint {
+	return tokenEndpoint{URL: "https://sentry.io/oauth/token/", ClientID: p.m.cfg.SentryClientID,
+		ClientSecret: p.m.cfg.SentryClientSecret}
+}
+
+// call is a GET with the connection's token, refreshed as needed. It
+// returns the Link header's next cursor (results="true" only).
+func (p *sentryProvider) call(ctx context.Context, c *conn, path string, out any) (string, error) {
+	base := p.m.cfg.SentryAPIURL
+	if base == "" {
+		base = "https://sentry.io/api/0"
+	}
+	resp, err := p.m.oauthDo(ctx, c, p.tokenEndpoint(), func(token string) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+path, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		return req, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if err := apiStatus("sentry", resp); err != nil {
+		return "", err
+	}
+	return parseSentryNextCursor(resp.Header.Get("Link")), json.NewDecoder(resp.Body).Decode(out)
+}
+
 func (p *sentryProvider) handle(ctx context.Context, c *conn, j *job) error {
 	switch j.Kind {
 	case jobSources:
@@ -181,7 +212,6 @@ func (p *sentryProvider) handle(ctx context.Context, c *conn, j *job) error {
 }
 
 func (p *sentryProvider) refreshSources(ctx context.Context, c *conn) error {
-	token := c.str("access_token")
 	orgSlug := c.str("organization_slug")
 	if orgSlug == "" {
 		orgSlug = c.AccountID
@@ -192,7 +222,7 @@ func (p *sentryProvider) refreshSources(ctx context.Context, c *conn) error {
 		Name string `json:"name"`
 		Slug string `json:"slug"`
 	}
-	if err := p.get(ctx, token, fmt.Sprintf("/organizations/%s/projects/", url.PathEscape(orgSlug)), &projs); err != nil {
+	if _, err := p.call(ctx, c, fmt.Sprintf("/organizations/%s/projects/", url.PathEscape(orgSlug)), &projs); err != nil {
 		return err
 	}
 
@@ -208,79 +238,55 @@ func (p *sentryProvider) refreshSources(ctx context.Context, c *conn) error {
 	return p.m.replaceSources(ctx, c.ID, list, false)
 }
 
+// syncProject reads one page of the project's issues seen in the last 14
+// days and queues the next page until the pass is done.
 func (p *sentryProvider) syncProject(ctx context.Context, c *conn, projectSlug string) error {
-	token := c.str("access_token")
+	src, err := p.m.source(ctx, c.ID, projectSlug)
+	if err != nil {
+		return err
+	}
+	if src == nil || !src.Enabled {
+		return nil
+	}
 	orgSlug := c.str("organization_slug")
 	if orgSlug == "" {
 		orgSlug = c.AccountID
 	}
-
-	cursor := ""
-	_ = p.m.deps.Pool.QueryRow(ctx, `SELECT cursor FROM connector_sources WHERE connection_id = $1 AND external_id = $2`, c.ID, projectSlug).Scan(&cursor)
-
-	path := fmt.Sprintf("/projects/%s/%s/issues/?statsPeriod=14d&limit=50", url.PathEscape(orgSlug), url.PathEscape(projectSlug))
-	if cursor != "" {
-		path += "&cursor=" + url.QueryEscape(cursor)
+	q := url.Values{"statsPeriod": {"14d"}, "limit": {"100"}, "sort": {"date"}}
+	if src.cursor != "" {
+		q.Set("cursor", src.cursor)
 	}
-
-	base := p.m.cfg.SentryAPIURL
-	if base == "" {
-		base = "https://sentry.io/api/0"
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+path, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err := p.m.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("sentry list issues status %d", resp.StatusCode)
-	}
-
 	var issues []sentryIssue
-	if err := json.NewDecoder(resp.Body).Decode(&issues); err != nil {
+	next, err := p.call(ctx, c, fmt.Sprintf("/projects/%s/%s/issues/?%s", url.PathEscape(orgSlug), url.PathEscape(projectSlug), q.Encode()), &issues)
+	if err != nil {
 		return err
 	}
-
-	for _, issue := range issues {
-		it := sentryItem(&issue, nil)
-		if err := p.m.storeItem(ctx, c, it); err != nil {
+	for i := range issues {
+		if err := p.m.storeItem(ctx, c, sentryItem(&issues[i], nil)); err != nil {
 			return err
 		}
 	}
-
-	// Parse pagination link header if present
-	nextCursor := parseSentryNextCursor(resp.Header.Get("Link"))
-	if nextCursor != "" {
-		if err := p.m.saveCursor(ctx, c.ID, projectSlug, nextCursor, false); err != nil {
+	if next != "" && len(issues) > 0 {
+		if err := p.m.saveCursor(ctx, c.ID, projectSlug, next, false); err != nil {
 			return err
 		}
 		return p.m.enqueue(ctx, nil, c.ID, jobSync, projectSlug, nil, 0)
 	}
-
-	// Done
 	return p.m.saveCursor(ctx, c.ID, projectSlug, "", true)
 }
 
 func (p *sentryProvider) syncIssue(ctx context.Context, c *conn, issueID string) error {
-	token := c.str("access_token")
-
 	var issue sentryIssue
-	if err := p.get(ctx, token, fmt.Sprintf("/issues/%s/", url.PathEscape(issueID)), &issue); err != nil {
+	if _, err := p.call(ctx, c, fmt.Sprintf("/issues/%s/", url.PathEscape(issueID)), &issue); err != nil {
 		return err
 	}
-
+	// Only projects the user chose: a webhook may name any issue.
+	if src, err := p.m.source(ctx, c.ID, issue.Project.Slug); err != nil || src == nil || !src.Enabled {
+		return err
+	}
 	var latestEvent sentryEvent
-	_ = p.get(ctx, token, fmt.Sprintf("/issues/%s/events/latest/", url.PathEscape(issueID)), &latestEvent)
-
-	it := sentryItem(&issue, &latestEvent)
-	return p.m.storeItem(ctx, c, it)
+	_, _ = p.call(ctx, c, fmt.Sprintf("/issues/%s/events/latest/", url.PathEscape(issueID)), &latestEvent)
+	return p.m.storeItem(ctx, c, sentryItem(&issue, &latestEvent))
 }
 
 func (p *sentryProvider) setSources(ctx context.Context, c *conn, enabled map[string]bool) error {
@@ -372,9 +378,14 @@ func (m *Manager) SentryWebhook(ctx context.Context, hdr http.Header, body []byt
 		return http.StatusOK
 	}
 
-	// Fan out to active Sentry connections
-	conns, err := m.connectionsForAccount(ctx, ProviderSentry, "", true)
-	if err != nil || len(conns) == 0 {
+	// Only connections that chose this project; each re-fetches the issue
+	// with its own token.
+	slug := p.Data.Issue.Project.Slug
+	if slug == "" {
+		return http.StatusOK
+	}
+	conns, err := m.connectionsWithSource(ctx, ProviderSentry, "", slug)
+	if err != nil {
 		return http.StatusOK
 	}
 

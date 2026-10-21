@@ -1,46 +1,39 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: pipedrive
-  version: 1.0.0
-  description: Sync deals, activities, and organization stages from Pipedrive
-
+  version: "1"
+  displayName: Pipedrive
+  category: communication
+  description: Deals with their value, stage, status, organization and contact.
+  docsURL: https://pipedrive.readme.io/docs/how-to-find-the-api-token
 spec:
   type: rest
   baseURL: https://api.pipedrive.com/v1
-
-  auth:
-    type: apiKey
-    header: Authorization
-    prefix: "Bearer "
-    secretRef: PIPEDRIVE_API_TOKEN
-
+  fields:
+    - {name: token, label: API token, secret: true, help: "Personal preferences → API."}
+  auth: {type: apiKey, secretRef: token, header: x-api-token}
+  verify: {path: /users/me, accountId: data.company_id, accountName: data.company_name}
   operations:
-    - name: list_deals
+    - name: deals
       method: GET
       path: /deals
-      queryParams:
-        limit: "50"
-      pagination:
-        type: offset
-        offsetParam: start
-        limitParam: limit
-        limit: 50
-      response:
-        itemsPath: data
-
+      queryParams: {sort: "update_time DESC", status: all_not_deleted}
+      pagination: {type: offset, offsetParam: start, limitParam: limit, limit: 100}
+      response: {itemsPath: data}
   mapping:
-    id: $.id
-    title: $.title
-    content: $.status
-    eventDate: $.update_time
-
-  sync:
-    mode: incremental
-    checkpoint: update_time
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 80
+    id: id
+    title: "{{title}}"
+    content: |
+      Pipedrive deal: {{title}}
+      Value: {{value}} {{currency}}
+      Status: {{status}}
+      Stage: {{stage_id}}
+      Organization: {{org_name}}
+      Contact: {{person_name}}
+      Owner: {{owner_name}}
+      Expected close: {{expected_close_date}}
+    eventDate: update_time
+    authorName: owner_name
+  sync: {mode: incremental, checkpoint: update_time, newestFirst: true}
+  policies: {timeout: 30s, maxRetries: 3}

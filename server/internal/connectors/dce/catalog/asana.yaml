@@ -1,39 +1,55 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: asana
-  version: 1.0.0
-  description: Sync workspaces, projects, and tasks from Asana
-
+  version: "1"
+  displayName: Asana
+  category: work
+  description: Tasks assigned to you in the Asana workspaces you choose.
+  docsURL: https://developers.asana.com/docs/personal-access-token
 spec:
   type: rest
   baseURL: https://app.asana.com/api/1.0
-
-  auth:
-    type: bearer
-    secretRef: ASANA_ACCESS_TOKEN
-
-  operations:
-    - name: list_workspaces
+  fields:
+    - {name: token, label: Personal access token, secret: true, help: "My settings → Apps → Developer apps → Create new token."}
+  auth: {type: bearer, secretRef: token}
+  verify: {path: /users/me, accountId: data.gid, accountName: data.name}
+  sources:
+    operation:
+      name: workspaces
       method: GET
       path: /workspaces
+      queryParams: {limit: "100"}
+      pagination: {type: cursor, cursorParam: offset, cursorPath: next_page.offset}
+      response: {itemsPath: data}
+    id: gid
+    name: name
+  operations:
+    - name: tasks
+      method: GET
+      path: /tasks
       queryParams:
-        opt_fields: "gid,name,email_domains"
-      pagination:
-        type: none
-      response:
-        itemsPath: data
-
+        workspace: "{{source.id}}"
+        assignee: me
+        limit: "100"
+        modified_since: "{{checkpoint}}"
+        opt_fields: name,notes,completed,completed_at,due_on,modified_at,created_at,permalink_url,projects.name,assignee.name,tags.name,memberships.section.name
+      pagination: {type: cursor, cursorParam: offset, cursorPath: next_page.offset}
+      response: {itemsPath: data}
   mapping:
-    id: $.gid
-    title: $.name
-    content: $.name
+    id: gid
+    title: "{{name}}"
+    content: |
+      Asana task: {{name}}
+      Projects: {{projects[].name}}
+      Section: {{memberships[].section.name}}
+      Assignee: {{assignee.name}}
+      Completed: {{completed}}
+      Due: {{due_on}}
+      Tags: {{tags[].name}}
 
-  sync:
-    mode: full
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 150
+      {{notes}}
+    eventDate: modified_at
+    url: permalink_url
+  sync: {mode: incremental, checkpoint: modified_at}
+  policies: {timeout: 30s, maxRetries: 3}

@@ -1,44 +1,52 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: monday
-  version: 1.0.0
-  description: Sync items, boards, and updates from Monday.com
-
+  version: "1"
+  displayName: monday.com
+  category: work
+  description: Items from the monday.com boards you choose, with every column.
+  docsURL: https://developer.monday.com/api-reference/docs/authentication
 spec:
   type: rest
   baseURL: https://api.monday.com
-
-  auth:
-    type: apiKey
-    header: Authorization
-    secretRef: MONDAY_API_TOKEN
-
-  operations:
-    - name: list_boards
+  fields:
+    - {name: token, label: Personal API token, secret: true, help: "Profile → Developers → My access tokens."}
+  auth: {type: apiKey, secretRef: token, header: Authorization}
+  headers: {API-Version: "2024-10"}
+  verify:
+    method: POST
+    path: /v2
+    body: '{"query":"{ me { id name account { name } } }"}'
+    accountId: data.me.id
+    accountName: data.me.account.name
+  sources:
+    operation:
+      name: boards
       method: POST
       path: /v2
-      headers:
-        Content-Type: application/json
-      body: '{"query": "query { boards(limit: 50) { id name description updated_at url } }"}'
-      pagination:
-        type: none
-      response:
-        itemsPath: data.boards
-
+      body: '{"query":"query($page: Int!) { boards(limit: 100, page: $page, state: active) { id name type } }","variables":{"page":{{page}}}}'
+      pagination: {type: page, pageParam: "-", limit: 100}
+      response: {itemsPath: data.boards}
+    id: id
+    name: name
+    where: {type: [board]}
+  operations:
+    - name: items
+      method: POST
+      path: /v2
+      body: '{"query":"query($board: [ID!], $cursor: String) { boards(ids: $board) { items_page(limit: 100, cursor: $cursor) { cursor items { id name updated_at url group { title } column_values { column { title } text } } } } }","variables":{"board":["{{source.id}}"],"cursor":{{cursor|json}}}}'
+      pagination: {type: cursor, cursorPath: data.boards.0.items_page.cursor}
+      response: {itemsPath: data.boards.0.items_page.items}
   mapping:
-    id: $.id
-    title: $.name
-    content: $.description
-    eventDate: $.updated_at
-    url: $.url
-
-  sync:
-    mode: incremental
-    checkpoint: updated_at
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 60
+    id: id
+    title: "{{name}}"
+    content: |
+      monday.com item: {{name}}
+      Group: {{group.title}}
+      {{#each column_values}}{{column.title}}: {{text}}
+      {{/each}}
+    eventDate: updated_at
+    url: url
+  sync: {mode: full}
+  policies: {timeout: 30s, maxRetries: 3}

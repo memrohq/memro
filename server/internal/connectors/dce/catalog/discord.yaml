@@ -1,41 +1,46 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: discord
-  version: 1.0.0
-  description: Sync guilds, channels, and threads from Discord
-
+  version: "1"
+  displayName: Discord
+  category: communication
+  description: Messages from the text and announcement channels you choose in one server.
+  docsURL: https://discord.com/developers/docs/topics/oauth2#bots
 spec:
   type: rest
   baseURL: https://discord.com/api/v10
-
-  auth:
-    type: apiKey
-    header: Authorization
-    prefix: "Bot "
-    secretRef: DISCORD_BOT_TOKEN
-
-  operations:
-    - name: list_guilds
+  fields:
+    - {name: token, label: Bot token, secret: true, help: "Developer portal → your app → Bot → Reset token. Turn on the Message Content intent, then add the bot to your server with Read Message History."}
+    - {name: guildId, label: Server ID, pattern: "[0-9]{17,20}", help: "Right-click the server → Copy Server ID (with Developer Mode on)."}
+  auth: {type: apiKey, secretRef: token, header: Authorization, prefix: "Bot "}
+  verify: {path: "/guilds/{{config.guildId}}", accountId: id, accountName: name}
+  sources:
+    operation:
+      name: channels
       method: GET
-      path: /users/@me/guilds
-      pagination:
-        type: cursor
-        cursorParam: after
-        cursorPath: id
-      response:
-        itemsPath: "$"
-
+      path: /guilds/{{config.guildId}}/channels
+      response: {itemsPath: $}
+    id: id
+    name: name
+    where: {type: ["0", "5"]}
+  operations:
+    - name: messages
+      method: GET
+      path: /channels/{{source.id}}/messages
+      queryParams: {limit: "100"}
+      pagination: {type: cursor, cursorParam: before, cursorPath: "-1.id"}
+      response: {itemsPath: $}
   mapping:
-    id: $.id
-    title: $.name
-    content: $.description
-
-  sync:
-    mode: full
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 120
+    id: id
+    title: ""
+    content: |
+      {{author.global_name}} ({{author.username}}): {{content}}
+      Attachments: {{attachments[].filename}}
+      Embeds: {{embeds[].title}}
+    memoryType: episodic
+    eventDate: timestamp
+    authorId: author.id
+    authorName: author.username
+  sync: {mode: incremental, checkpoint: timestamp, newestFirst: true}
+  policies: {timeout: 30s, maxRetries: 3}

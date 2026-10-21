@@ -1,46 +1,41 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: readwise
-  version: 1.0.0
-  description: Sync book highlights, articles, and tweet notes from Readwise
-
+  version: "1"
+  displayName: Readwise
+  category: knowledge
+  description: Your books and articles with every highlight and note.
+  docsURL: https://readwise.io/access_token
 spec:
   type: rest
   baseURL: https://readwise.io/api/v2
-
-  auth:
-    type: apiKey
-    header: Authorization
-    prefix: "Token "
-    secretRef: READWISE_ACCESS_TOKEN
-
+  fields:
+    - {name: token, label: Access token, secret: true, help: "readwise.io/access_token."}
+  auth: {type: apiKey, secretRef: token, header: Authorization, prefix: "Token "}
+  verify: {path: /auth/}
   operations:
-    - name: list_highlights
+    - name: export
       method: GET
-      path: /highlights
-      queryParams:
-        page_size: "100"
-      pagination:
-        type: page
-        pageParam: page
-      response:
-        itemsPath: results
-
+      path: /export/
+      pagination: {type: cursor, cursorParam: pageCursor, cursorPath: nextPageCursor}
+      response: {itemsPath: results}
   mapping:
-    id: $.id
-    title: $.title
-    content: $.text
-    eventDate: $.updated
-    authorName: $.author
-    url: $.source_url
+    id: user_book_id
+    title: "{{readable_title}}"
+    content: |
+      {{readable_title}} by {{author}} ({{category}})
+      Source: {{source_url}}
+      Tags: {{book_tags[].name}}
+      {{summary}}
 
-  sync:
-    mode: incremental
-    checkpoint: updated
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 60
+      Highlights:
+      {{#each highlights}}- {{text}}
+        Note: {{note}}
+      {{/each}}
+    eventDate: highlights.-1.highlighted_at
+    url: readwise_url
+  # Full re-read: updatedAfter returns only the changed highlights, which
+  # would replace a book's memory with a partial list.
+  sync: {mode: full}
+  policies: {timeout: 60s, maxRetries: 3}

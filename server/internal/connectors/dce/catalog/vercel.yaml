@@ -1,43 +1,41 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: vercel
-  version: 1.0.0
-  description: Sync deployments, project domains, and build logs from Vercel
-
+  version: "1"
+  displayName: Vercel
+  category: engineering
+  description: Deployments with their target, state, branch and commit.
+  docsURL: https://vercel.com/docs/rest-api#creating-an-access-token
 spec:
   type: rest
   baseURL: https://api.vercel.com
-
-  auth:
-    type: bearer
-    secretRef: VERCEL_TOKEN
-
+  fields:
+    - {name: token, label: Access token, secret: true, help: "Account settings → Tokens, scoped to the team you want to sync."}
+    - {name: teamId, label: Team ID, optional: true, placeholder: team_…, pattern: "team_[A-Za-z0-9]+", help: "Team settings → General. Leave empty for your personal account."}
+  auth: {type: bearer, secretRef: token}
+  verify: {path: /v2/user, accountId: user.id, accountName: user.username}
   operations:
-    - name: list_deployments
+    - name: deployments
       method: GET
       path: /v6/deployments
-      queryParams:
-        limit: "50"
-      pagination:
-        type: page
-        pageParam: page
-      response:
-        itemsPath: deployments
-
+      queryParams: {limit: "100", teamId: "{{config.teamId}}"}
+      pagination: {type: cursor, cursorParam: until, cursorPath: pagination.next}
+      response: {itemsPath: deployments}
   mapping:
-    id: $.uid
-    title: $.name
-    content: $.state
-    eventDate: $.created
-    url: $.url
-
-  sync:
-    mode: incremental
-    checkpoint: created
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 120
+    id: uid
+    title: "{{name}} deployment ({{target}})"
+    content: |
+      Vercel deployment of {{name}}
+      State: {{state}}
+      Target: {{target}}
+      URL: https://{{url}}
+      Branch: {{meta.githubCommitRef}}
+      Commit: {{meta.githubCommitMessage}}
+      Created by: {{creator.username}}
+    memoryType: episodic
+    eventDate: created
+    authorName: creator.username
+    url: inspectorUrl
+  sync: {mode: incremental, checkpoint: created, newestFirst: true, overlap: 6h}
+  policies: {timeout: 30s, maxRetries: 3}

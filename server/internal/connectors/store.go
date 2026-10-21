@@ -57,6 +57,30 @@ func (m *Manager) connectionsForAccount(ctx context.Context, provider, accountID
 	return out, rows.Err()
 }
 
+// connectionsWithSource returns the active connections of a provider that
+// sync sourceID (a project, team or repository), optionally only those of
+// one account. Webhooks use it to reach exactly the connections whose user
+// chose that source.
+func (m *Manager) connectionsWithSource(ctx context.Context, provider, accountID, sourceID string) ([]*Connection, error) {
+	rows, err := m.deps.Pool.Query(ctx, `SELECT `+connectionColumns+` FROM connector_connections c
+		WHERE c.provider = $1 AND c.status = 'active' AND ($2 = '' OR c.account_id = $2)
+			AND EXISTS (SELECT 1 FROM connector_sources s WHERE s.connection_id = c.id AND s.external_id = $3 AND s.enabled)`,
+		provider, accountID, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Connection
+	for rows.Next() {
+		c, err := scanConnection(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // saveConnection creates the connection or, when the agent reconnects the
 // same account, replaces its credentials and reactivates it.
 func (m *Manager) saveConnection(ctx context.Context, agentID string, tenantID uuid.UUID, provider string, a *authorized) (uuid.UUID, error) {
@@ -230,13 +254,18 @@ type querier interface {
 }
 
 // claim leases the next due job for lease. Rows already leased by another
-// worker are skipped, not waited for.
+// worker are skipped, not waited for. A keyed job also waits while the same
+// work (connection, kind, key) is leased, so one source never syncs twice at
+// once and two passes cannot overwrite each other's position.
 func (m *Manager) claim(ctx context.Context, lease time.Duration) (*job, error) {
 	var j job
 	err := m.deps.Pool.QueryRow(ctx, `UPDATE connector_jobs SET locked_until = $1, attempts = attempts + 1
 		WHERE id = (
-			SELECT id FROM connector_jobs
+			SELECT id FROM connector_jobs j
 			WHERE run_at <= NOW() AND (locked_until IS NULL OR locked_until < NOW())
+				AND (key = '' OR NOT EXISTS (SELECT 1 FROM connector_jobs o
+					WHERE o.connection_id = j.connection_id AND o.kind = j.kind AND o.key = j.key
+						AND o.id <> j.id AND o.locked_until >= NOW()))
 			ORDER BY run_at LIMIT 1 FOR UPDATE SKIP LOCKED)
 		RETURNING id, connection_id, kind, key, payload, attempts`, m.now().Add(lease)).
 		Scan(&j.ID, &j.ConnectionID, &j.Kind, &j.Key, &j.Payload, &j.Attempts)

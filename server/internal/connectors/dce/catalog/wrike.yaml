@@ -1,0 +1,41 @@
+apiVersion: memro.dev/v1
+kind: Connector
+metadata:
+  name: wrike
+  version: "1"
+  displayName: Wrike
+  category: work
+  description: Tasks with their status, importance, dates and description.
+  docsURL: https://developers.wrike.com/oauth-20-authorization/#permanent-tokens
+spec:
+  type: rest
+  baseURL: https://{{config.host}}/api/v4
+  fields:
+    - {name: token, label: Permanent access token, secret: true, help: "Apps & Integrations → API → Create new app → Obtain token."}
+    - {name: host, label: Data center host, placeholder: www.wrike.com, pattern: "www\\.wrike\\.com|app-eu\\.wrike\\.com|app-us2\\.wrike\\.com", help: "www.wrike.com, or app-eu.wrike.com for the EU data center."}
+  auth: {type: bearer, secretRef: token}
+  verify: {path: /contacts, queryParams: {me: "true"}, accountId: data.0.id, accountName: "{{data.0.firstName}} {{data.0.lastName}}"}
+  operations:
+    - name: tasks
+      method: GET
+      path: /tasks
+      queryParams:
+        pageSize: "100"
+        fields: '["description"]'
+        updatedDate: '{"start":"{{checkpoint}}"}'
+      pagination: {type: cursor, cursorParam: nextPageToken, cursorPath: nextPageToken}
+      response: {itemsPath: data}
+  mapping:
+    id: id
+    title: "{{title}}"
+    content: |
+      Wrike task: {{title}}
+      Status: {{status}}
+      Importance: {{importance}}
+      Due: {{dates.due}}
+
+      {{description|text}}
+    eventDate: updatedDate
+    url: permalink
+  sync: {mode: incremental, checkpoint: updatedDate}
+  policies: {timeout: 30s, maxRetries: 3}

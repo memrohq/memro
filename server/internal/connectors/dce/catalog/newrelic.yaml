@@ -1,42 +1,48 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: newrelic
-  version: 1.0.0
-  description: Sync alert violations, policy breaches, and APM incidents from New Relic
-
+  version: "1"
+  displayName: New Relic
+  category: engineering
+  description: Alert issues with their priority, state, entities and condition.
+  docsURL: https://docs.newrelic.com/docs/apis/intro-apis/new-relic-api-keys/#user-key
 spec:
   type: rest
-  baseURL: https://api.newrelic.com/v2
-
-  auth:
-    type: apiKey
-    header: X-Api-Key
-    secretRef: NEW_RELIC_API_KEY
-
+  baseURL: https://{{config.host}}
+  fields:
+    - {name: token, label: User key, secret: true, help: "API keys → Create a key of type User (starts with NRAK-)."}
+    - {name: accountId, label: Account ID, pattern: "[0-9]{1,12}", help: "Shown under your name in the account menu."}
+    - {name: host, label: API host, placeholder: api.newrelic.com, pattern: "api\\.newrelic\\.com|api\\.eu\\.newrelic\\.com", help: "api.newrelic.com, or api.eu.newrelic.com for EU accounts."}
+  auth: {type: apiKey, secretRef: token, header: API-Key}
+  verify:
+    method: POST
+    path: /graphql
+    body: '{"query":"{ actor { user { id name } } }"}'
+    accountId: data.actor.user.id
+    accountName: data.actor.user.name
   operations:
-    - name: list_alerts
-      method: GET
-      path: /alerts_violations.json
-      pagination:
-        type: page
-        pageParam: page
-      response:
-        itemsPath: violations
-
+    - name: issues
+      method: POST
+      path: /graphql
+      body: '{"query":"query($account: Int!, $cursor: String) { actor { account(id: $account) { aiIssues { issues(cursor: $cursor) { nextCursor issues { issueId title priority state createdAt updatedAt closedAt entityNames conditionName policyName description totalIncidents } } } } } }","variables":{"account":{{config.accountId}},"cursor":{{cursor|json}}}}'
+      pagination: {type: cursor, cursorPath: data.actor.account.aiIssues.issues.nextCursor}
+      response: {itemsPath: data.actor.account.aiIssues.issues.issues}
   mapping:
-    id: $.id
-    title: $.label
-    content: $.description
-    eventDate: $.opened_at
-    url: $.links.violation_callback_url
+    id: issueId
+    title: "{{title[]}}"
+    content: |
+      New Relic issue: {{title[]}}
+      Priority: {{priority}}
+      State: {{state}}
+      Entities: {{entityNames[]}}
+      Condition: {{conditionName[]}}
+      Policy: {{policyName[]}}
+      Incidents: {{totalIncidents}}
+      Closed: {{closedAt}}
 
-  sync:
-    mode: incremental
-    checkpoint: opened_at
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 60
+      {{description[]}}
+    memoryType: episodic
+    eventDate: updatedAt
+  sync: {mode: incremental, checkpoint: updatedAt}
+  policies: {timeout: 30s, maxRetries: 3}

@@ -300,8 +300,14 @@ func TestCatalogEmbeddedCount(t *testing.T) {
 		}
 		if p.Name == "monday" {
 			foundMonday = true
-			if p.DisplayName != "Monday.com" || p.Category != "work" || p.Kind != "token" {
+			if p.DisplayName != "monday.com" || p.Category != "work" || p.Kind != "token" || len(p.Fields) == 0 {
 				t.Fatalf("unexpected monday metadata: %+v", p)
+			}
+		}
+		switch p.Name {
+		case ProviderSlack, ProviderGitHub, ProviderLinear, ProviderSentry, ProviderNotion, ProviderJira, ProviderGitLab:
+			if p.Kind != "oauth" {
+				t.Errorf("%s connects with a sign-in link, but is listed as %q", p.Name, p.Kind)
 			}
 		}
 	}

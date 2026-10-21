@@ -1,43 +1,38 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: raindrop
-  version: 1.0.0
-  description: Sync bookmarks, highlights, and collections from Raindrop.io
-
+  version: "1"
+  displayName: Raindrop.io
+  category: knowledge
+  description: Your bookmarks with excerpts, notes, highlights and tags.
+  docsURL: https://developer.raindrop.io/v1/authentication/token
 spec:
   type: rest
   baseURL: https://api.raindrop.io/rest/v1
-
-  auth:
-    type: bearer
-    secretRef: RAINDROP_TOKEN
-
+  fields:
+    - {name: token, label: Test token, secret: true, help: "Settings → Integrations → Create new app → Create test token."}
+  auth: {type: bearer, secretRef: token}
+  verify: {path: /user, accountId: user._id, accountName: user.fullName}
   operations:
-    - name: list_bookmarks
+    - name: bookmarks
       method: GET
       path: /raindrops/0
-      queryParams:
-        perpage: "50"
-      pagination:
-        type: page
-        pageParam: page
-      response:
-        itemsPath: items
-
+      queryParams: {sort: -lastUpdate}
+      pagination: {type: page, pageParam: page, zeroBased: true, limitParam: perpage, limit: 50}
+      response: {itemsPath: items}
   mapping:
-    id: $._id
-    title: $.title
-    content: $.excerpt
-    eventDate: $.lastUpdate
-    url: $.link
-
-  sync:
-    mode: incremental
-    checkpoint: lastUpdate
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 120
+    id: _id
+    title: "{{title}}"
+    content: |
+      Bookmark: {{title}}
+      Link: {{link}}
+      Tags: {{tags[]}}
+      {{excerpt}}
+      Note: {{note}}
+      {{#each highlights}}- {{text}}
+      {{/each}}
+    eventDate: lastUpdate
+    url: link
+  sync: {mode: incremental, checkpoint: lastUpdate, newestFirst: true}
+  policies: {timeout: 30s, maxRetries: 3}

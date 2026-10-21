@@ -1,40 +1,40 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: snyk
-  version: 1.0.0
-  description: Sync vulnerabilities, licenses, and security issues from Snyk
-
+  version: "1"
+  displayName: Snyk
+  category: engineering
+  description: Open security issues in your Snyk organization, with severity and status.
+  docsURL: https://docs.snyk.io/snyk-api/authentication-for-api
 spec:
   type: rest
-  baseURL: https://api.snyk.io/v1
-
-  auth:
-    type: apiKey
-    header: Authorization
-    prefix: "token "
-    secretRef: SNYK_API_TOKEN
-
+  baseURL: https://{{config.host}}/rest
+  fields:
+    - {name: token, label: API token, secret: true, help: "A service account token, or your personal token (Account settings)."}
+    - {name: orgId, label: Organization ID, pattern: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", help: "Organization settings → General → Organization ID."}
+    - {name: host, label: API host, placeholder: api.snyk.io, pattern: "api\\.snyk\\.io|api\\.eu\\.snyk\\.io|api\\.au\\.snyk\\.io|api\\.us\\.snyk\\.io", help: "api.snyk.io, or your region's host (api.eu.snyk.io, api.au.snyk.io)."}
+  auth: {type: apiKey, secretRef: token, header: Authorization, prefix: "token "}
+  headers: {Accept: application/vnd.api+json}
+  verify: {path: /self, queryParams: {version: "2024-10-15"}, accountId: data.id, accountName: data.attributes.name}
   operations:
-    - name: list_orgs
+    - name: issues
       method: GET
-      path: /orgs
-      pagination:
-        type: none
-      response:
-        itemsPath: orgs
-
+      path: /orgs/{{config.orgId}}/issues
+      queryParams: {version: "2024-10-15", limit: "100", updated_after: "{{checkpoint}}"}
+      pagination: {type: nextURL, cursorPath: links.next}
+      response: {itemsPath: data}
   mapping:
-    id: $.id
-    title: $.name
-    content: $.slug
-    url: $.url
-
-  sync:
-    mode: full
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 60
+    id: id
+    title: "{{attributes.title}}"
+    content: |
+      Snyk issue: {{attributes.title}}
+      Key: {{attributes.key}}
+      Type: {{attributes.type}}
+      Severity: {{attributes.effective_severity_level}}
+      Status: {{attributes.status}}
+      Ignored: {{attributes.ignored}}
+      Created: {{attributes.created_at}}
+    eventDate: attributes.updated_at
+  sync: {mode: incremental, checkpoint: attributes.updated_at}
+  policies: {timeout: 30s, maxRetries: 3}

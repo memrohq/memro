@@ -1,39 +1,40 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: airtable
-  version: 1.0.0
-  description: Sync bases, tables, and views from Airtable
-
+  version: "1"
+  displayName: Airtable
+  category: knowledge
+  description: Records from the tables of one Airtable base, every field included.
+  docsURL: https://airtable.com/developers/web/guides/personal-access-tokens
 spec:
   type: rest
   baseURL: https://api.airtable.com/v0
-
-  auth:
-    type: bearer
-    secretRef: AIRTABLE_PERSONAL_ACCESS_TOKEN
-
-  operations:
-    - name: list_bases
+  fields:
+    - {name: token, label: Personal access token, secret: true, help: "airtable.com/create/tokens, with data.records:read and schema.bases:read on this base."}
+    - {name: baseId, label: Base ID, placeholder: appXXXXXXXXXXXXXX, pattern: "app[A-Za-z0-9]{14}", help: "Starts with app; it is in the base's URL."}
+  auth: {type: bearer, secretRef: token}
+  verify: {path: /meta/whoami, accountId: id, accountName: email}
+  sources:
+    operation:
+      name: tables
       method: GET
-      path: /meta/bases
-      pagination:
-        type: cursor
-        cursorParam: offset
-        cursorPath: offset
-      response:
-        itemsPath: bases
-
+      path: /meta/bases/{{config.baseId}}/tables
+      response: {itemsPath: tables}
+    id: id
+    name: name
+  operations:
+    - name: records
+      method: GET
+      path: /{{config.baseId}}/{{source.id}}
+      queryParams: {pageSize: "100"}
+      pagination: {type: cursor, cursorParam: offset, cursorPath: offset}
+      response: {itemsPath: records}
   mapping:
-    id: $.id
-    title: $.name
-    content: $.permissionLevel
-
-  sync:
-    mode: full
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 60
+    id: id
+    title: "{{fields.Name}}"
+    content: |
+      {{fields|kv}}
+    eventDate: createdTime
+  sync: {mode: full}
+  policies: {timeout: 30s, maxRetries: 3}

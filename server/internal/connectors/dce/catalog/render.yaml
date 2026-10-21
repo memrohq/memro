@@ -1,43 +1,47 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: render
-  version: 1.0.0
-  description: Sync web services, background workers, and databases from Render
-
+  version: "1"
+  displayName: Render
+  category: engineering
+  description: Deploys of the services you choose, with status and commit.
+  docsURL: https://render.com/docs/api#1-create-an-api-key
 spec:
   type: rest
   baseURL: https://api.render.com/v1
-
-  auth:
-    type: bearer
-    secretRef: RENDER_API_KEY
-
-  operations:
-    - name: list_services
+  fields:
+    - {name: token, label: API key, secret: true, help: "Account settings → API Keys."}
+  auth: {type: bearer, secretRef: token}
+  verify: {path: /owners, queryParams: {limit: "1"}, accountId: 0.owner.id, accountName: 0.owner.name}
+  sources:
+    operation:
+      name: services
       method: GET
       path: /services
-      queryParams:
-        limit: "50"
-      pagination:
-        type: cursor
-        cursorParam: cursor
-        cursorPath: cursor
-      response:
-        itemsPath: "$"
-
+      queryParams: {limit: "100"}
+      pagination: {type: cursor, cursorParam: cursor, cursorPath: "-1.cursor"}
+      response: {itemsPath: $}
+    id: service.id
+    name: service.name
+  operations:
+    - name: deploys
+      method: GET
+      path: /services/{{source.id}}/deploys
+      queryParams: {limit: "100"}
+      pagination: {type: cursor, cursorParam: cursor, cursorPath: "-1.cursor"}
+      response: {itemsPath: $}
   mapping:
-    id: $.service.id
-    title: $.service.name
-    content: $.service.type
-    eventDate: $.service.updatedAt
-
-  sync:
-    mode: incremental
-    checkpoint: service.updatedAt
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 100
+    id: deploy.id
+    title: "Deploy {{deploy.id}}"
+    content: |
+      Render deploy {{deploy.id}}
+      Status: {{deploy.status}}
+      Trigger: {{deploy.trigger}}
+      Commit: {{deploy.commit.message}}
+      Commit ID: {{deploy.commit.id}}
+      Finished: {{deploy.finishedAt}}
+    memoryType: episodic
+    eventDate: deploy.createdAt
+  sync: {mode: incremental, checkpoint: deploy.createdAt, newestFirst: true, overlap: 6h}
+  policies: {timeout: 30s, maxRetries: 3}

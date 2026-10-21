@@ -1,43 +1,44 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: freshdesk
-  version: 1.0.0
-  description: Sync support tickets, conversations, and resolutions from Freshdesk
-
+  version: "1"
+  displayName: Freshdesk
+  category: communication
+  description: Support tickets with their status, priority, tags and description.
+  docsURL: https://support.freshdesk.com/support/solutions/articles/215517-how-to-find-your-api-key
 spec:
   type: rest
-  baseURL: https://api.freshdesk.com/v2
-
-  auth:
-    type: apiKey
-    header: Authorization
-    secretRef: FRESHDESK_API_KEY
-
+  baseURL: https://{{config.domain}}.freshdesk.com/api/v2
+  fields:
+    - {name: domain, label: Freshdesk domain, placeholder: acme, pattern: "[A-Za-z0-9][A-Za-z0-9-]{0,62}", help: "The part before .freshdesk.com in your helpdesk URL."}
+    - {name: token, label: API key, secret: true, help: "Profile settings → View API key."}
+  auth: {type: basic, secretRef: token, username: "{{config.token}}", password: X}
+  verify: {path: /agents/me, accountId: id, accountName: contact.name}
   operations:
-    - name: list_tickets
+    - name: tickets
       method: GET
       path: /tickets
       queryParams:
-        per_page: "50"
-      pagination:
-        type: page
-        pageParam: page
-      response:
-        itemsPath: "$"
-
+        order_by: updated_at
+        order_type: desc
+        include: description
+        updated_since: "{{checkpoint|or:2000-01-01T00:00:00Z}}"
+      pagination: {type: page, pageParam: page, limitParam: per_page, limit: 100}
+      response: {itemsPath: $}
   mapping:
-    id: $.id
-    title: $.subject
-    content: $.description_text
-    eventDate: $.updated_at
+    id: id
+    title: "#{{id}} {{subject}}"
+    content: |
+      Freshdesk ticket #{{id}}: {{subject}}
+      Status: {{status}}
+      Priority: {{priority}}
+      Type: {{type}}
+      Tags: {{tags[]}}
+      Created: {{created_at}}
 
-  sync:
-    mode: incremental
-    checkpoint: updated_at
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 60
+      {{description_text}}
+    memoryType: episodic
+    eventDate: updated_at
+  sync: {mode: incremental, checkpoint: updated_at, newestFirst: true}
+  policies: {timeout: 30s, maxRetries: 3}

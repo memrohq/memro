@@ -1,4 +1,4 @@
-# 0012. Declarative Connector Engine (DCE)
+# 0014. Declarative Connector Engine (DCE)
 Date: 2026-10-21 · Status: Accepted
 
 ## Context
@@ -29,3 +29,54 @@ However, completely replacing native Go code with generic configuration would br
 - Fast addition of new data sources by writing single declarative YAML manifests in `catalog/`.
 - Zero duplicated code for HTTP retries, pagination loops, and JSONPath normalization.
 - Safe execution in multi-tenant environments with strict SSRF and memory ceilings.
+
+## Revision: production review (2026-10-21)
+
+A review before production found the first catalog could not work for most
+services, and the engine could not express what their APIs need. Changes:
+
+- **Per-connection fields.** A manifest declares the form the user fills in
+  (`spec.fields`: the token plus account details such as a subdomain, site,
+  workspace or second key). Values are templated into the base URL, paths,
+  query, headers and bodies (`{{config.x}}`); a field used in a URL host must
+  have a pattern, so it cannot point requests at another host.
+- **Connect-time check.** `spec.verify` is a cheap request that proves the
+  token works and names the account. A bad token is refused before anything
+  is saved.
+- **Checkpoint is not a page cursor.** The first engine sent the saved
+  checkpoint (a timestamp) as the next page's cursor, so 11 connectors failed
+  from their second sync. A sync now keeps the pass's page cursor, the last
+  finished pass's checkpoint (sent only as a filter, `{{checkpoint}}`) and
+  the highest value seen; the checkpoint advances only when a pass finishes.
+- **Bounded jobs.** One job reads at most 5 pages, saves its position and
+  queues the next; a timeout applies per request (not to the whole run), so
+  large accounts finish across jobs instead of failing at a deadline.
+- **More API shapes.** Pagination by next URL and `Link` header, zero-based
+  pages, offsets in JSON bodies, GraphQL bodies with JSON-safe values
+  (`{{cursor|json}}`), shared headers, `basic` auth from templates, `query`
+  auth, source lists with filters (`where`), per-operation mappings,
+  `{{#each}}` blocks and filters (`text` for HTML, `date`, `unix`, `or`,
+  `kv`, `list`). Mapped text is deterministic, so unchanged items are not
+  re-embedded.
+- **Newest-first sources** stop paging at the last checkpoint less an
+  `overlap` (deploys 6 h, incidents up to 14 days for later status changes).
+- **Hardened HTTP.** Private, loopback, metadata, CGNAT, NAT64/6to4 and
+  multicast addresses are refused when the connection is made (not only
+  when the URL is checked); redirects to another host are refused; retries
+  resend the body; secrets are redacted from errors, including query auth.
+- **Job safety.** A keyed job (connection, kind, key) is not claimed while
+  the same work is leased, so one source never syncs twice at once. A 401
+  revokes a catalog connection; 429 waits.
+- **Catalog.** 43 manifests written against each service's documentation,
+  each tested against a fake API built from the manifest (connect, sources,
+  every operation) plus contract tests of exact headers and bodies. Dropped:
+  Pocket, Height, Obsidian Publish, Basecamp, Help Scout, Railway, GitBook,
+  Slite (see docs/connectors.md for why).
+
+The sign-in connectors were fixed in the same review: Linear, Sentry, Notion,
+Jira and GitLab are listed as sign-in (not token) connectors; expiring tokens
+are refreshed under a per-connection lock; Jira uses `/search/jql` with
+pagination; 403 no longer revokes a whole connection; webhooks require their
+secret, verify signatures (Notion's `sha256=` prefix, no Jira URL secret) and
+reach only connections that chose that source; Linear and Notion items
+fetched by webhook are checked against the chosen teams and databases.

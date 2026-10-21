@@ -1,45 +1,41 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: pagerduty
-  version: 1.0.0
-  description: Sync alerts, incidents, and escalation logs from PagerDuty
-
+  version: "1"
+  displayName: PagerDuty
+  category: engineering
+  description: Incidents with their service, urgency, status and responders.
+  docsURL: https://support.pagerduty.com/main/docs/api-access-keys
 spec:
   type: rest
   baseURL: https://api.pagerduty.com
-
-  auth:
-    type: apiKey
-    header: Authorization
-    prefix: "Token token="
-    secretRef: PAGERDUTY_API_TOKEN
-
+  fields:
+    - {name: token, label: API key, secret: true, help: "A read-only user or general access REST API key (Integrations → API Access Keys)."}
+  auth: {type: apiKey, secretRef: token, header: Authorization, prefix: "Token token="}
+  headers: {Accept: "application/vnd.pagerduty+json;version=2"}
+  verify: {path: /abilities}
   operations:
-    - name: list_incidents
+    - name: incidents
       method: GET
       path: /incidents
-      pagination:
-        type: offset
-        offsetParam: offset
-        limitParam: limit
-        limit: 50
-      response:
-        itemsPath: incidents
-
+      queryParams: {since: "{{checkpoint}}", sort_by: "created_at:desc", time_zone: UTC}
+      pagination: {type: offset, offsetParam: offset, limitParam: limit, limit: 100}
+      response: {itemsPath: incidents}
   mapping:
-    id: $.id
-    title: $.title
-    content: $.summary
-    eventDate: $.created_at
-    url: $.html_url
-
-  sync:
-    mode: incremental
-    checkpoint: created_at
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 120
+    id: id
+    title: "#{{incident_number}} {{title}}"
+    content: |
+      PagerDuty incident #{{incident_number}}: {{title}}
+      Service: {{service.summary}}
+      Status: {{status}}
+      Urgency: {{urgency}}
+      Assigned to: {{assignments[].assignee.summary}}
+      Escalation policy: {{escalation_policy.summary}}
+      Created: {{created_at}}
+      Resolved: {{resolved_at}}
+    memoryType: episodic
+    eventDate: created_at
+    url: html_url
+  sync: {mode: incremental, checkpoint: created_at, newestFirst: true, overlap: 336h}
+  policies: {timeout: 30s, maxRetries: 3}

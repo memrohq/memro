@@ -1,6 +1,7 @@
 package dce
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -10,8 +11,11 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -45,6 +49,7 @@ type NormalizedItem struct {
 	AuthorID   string
 	AuthorName string
 	URL        string
+	MemoryType string // "semantic" or "episodic"
 	Raw        map[string]any
 }
 
@@ -55,11 +60,9 @@ type Sink interface {
 
 // SyncResult captures the outcome of a declarative sync execution.
 type SyncResult struct {
-	ItemsSynced    int           `json:"itemsSynced"`
-	PagesProcessed int           `json:"pagesProcessed"`
-	NewCheckpoint  string        `json:"newCheckpoint"`
-	HasMore        bool          `json:"hasMore"`
-	Duration       time.Duration `json:"duration"`
+	ItemsSynced   int
+	NewCheckpoint string
+	HasMore       bool
 }
 
 // Options configures security boundaries and resource limits for the runtime.
@@ -80,20 +83,54 @@ func NewRuntime(client *http.Client, secrets SecretResolver) *Runtime {
 	return NewRuntimeWithOptions(client, secrets, Options{})
 }
 
+// NewRuntimeWithOptions builds a runtime. Without a client it makes one that
+// refuses private and loopback addresses when it connects (so DNS changes and
+// redirects cannot reach internal services) and checks every redirect.
 func NewRuntimeWithOptions(client *http.Client, secrets SecretResolver, opts Options) *Runtime {
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
-	}
 	if opts.MaxResponseBytes <= 0 {
 		opts.MaxResponseBytes = 10 << 20 // 10MB
 	}
 	if opts.MaxPages <= 0 {
 		opts.MaxPages = 50
 	}
-	return &Runtime{
-		client:  client,
-		secrets: secrets,
-		opts:    opts,
+	if client == nil {
+		client = SafeClient(opts.AllowPrivateIPs)
+	}
+	return &Runtime{client: client, secrets: secrets, opts: opts}
+}
+
+// SafeClient is an HTTP client for third-party APIs: it refuses private,
+// loopback and metadata addresses at connect time and allows at most five
+// redirects, each re-checked.
+func SafeClient(allowPrivate bool) *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	if !allowPrivate {
+		dialer.Control = func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return err
+			}
+			if ip := net.ParseIP(host); ip == nil || isPrivateOrRestrictedIP(ip) {
+				return fmt.Errorf("%w: %s", ErrSSRFBlocked, host)
+			}
+			return nil
+		}
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.DialContext = dialer.DialContext
+	tr.Proxy = nil
+	return &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: tr,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return errors.New("too many redirects")
+			}
+			if req.URL.Host != via[0].URL.Host {
+				return errors.New("redirect to another host refused")
+			}
+			return ValidateDestinationURL(req.URL.String(), allowPrivate)
+		},
 	}
 }
 
@@ -117,11 +154,13 @@ func ValidateDestinationURL(rawURL string, allowPrivate bool) error {
 	if allowPrivate {
 		return nil
 	}
+	if scheme != "https" {
+		return fmt.Errorf("third-party APIs must use https: %s", hostname)
+	}
 
 	// Resolve IP addresses for the hostname
 	ips, err := net.LookupIP(hostname)
 	if err != nil {
-		// If hostname resolution fails, return resolution error
 		return fmt.Errorf("resolve host %s: %w", hostname, err)
 	}
 
@@ -134,509 +173,647 @@ func ValidateDestinationURL(rawURL string, allowPrivate bool) error {
 	return nil
 }
 
+// restrictedNets are ranges a third-party API never lives in: shared and
+// benchmarking space, and IPv6 prefixes that embed an IPv4 address (NAT64,
+// 6to4, Teredo) and could reach a private one.
+var restrictedNets = func() []*net.IPNet {
+	var out []*net.IPNet
+	for _, c := range []string{"100.64.0.0/10", "192.0.0.0/24", "198.18.0.0/15", "240.0.0.0/4",
+		"64:ff9b::/96", "64:ff9b:1::/48", "2002::/16", "2001::/32"} {
+		_, n, _ := net.ParseCIDR(c)
+		out = append(out, n)
+	}
+	return out
+}()
+
 func isPrivateOrRestrictedIP(ip net.IP) bool {
-	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
+		ip.IsPrivate() || ip.IsMulticast() || ip.IsInterfaceLocalMulticast() {
 		return true
 	}
-
-	// Check for AWS/GCP/Azure link-local metadata (169.254.169.254)
-	if ip.String() == "169.254.169.254" {
-		return true
-	}
-
-	// IPv4 RFC 1918 private ranges
 	if ip4 := ip.To4(); ip4 != nil {
-		switch {
-		case ip4[0] == 10:
+		if ip4[0] == 0 || ip4[0] == 127 {
 			return true
-		case ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31:
-			return true
-		case ip4[0] == 192 && ip4[1] == 168:
-			return true
-		case ip4[0] == 127:
-			return true
-		case ip4[0] == 0:
+		}
+		ip = ip4
+	}
+	for _, n := range restrictedNets {
+		if n.Contains(ip) {
 			return true
 		}
 	}
-
-	// IPv6 Unique Local Address (ULA) fc00::/7
-	if len(ip) == net.IPv6len {
-		if (ip[0] & 0xfe) == 0xfc {
-			return true
-		}
-	}
-
 	return false
 }
 
 // sanitizeError strips sensitive tokens from error strings before returning them to callers.
-func sanitizeError(err error, secret string) error {
+func sanitizeError(err error, secrets ...string) error {
 	if err == nil {
 		return nil
 	}
-	if secret == "" {
-		return err
-	}
 	msg := err.Error()
-	if strings.Contains(msg, secret) {
-		msg = strings.ReplaceAll(msg, secret, "[REDACTED]")
+	changed := false
+	for _, s := range secrets {
+		if len(s) >= 4 && strings.Contains(msg, s) {
+			msg = strings.ReplaceAll(msg, s, "[REDACTED]")
+			changed = true
+		}
+	}
+	if changed {
 		return errors.New(msg)
 	}
 	return err
 }
 
-// Execute runs the declared sync operation on a connector manifest.
-func (r *Runtime) Execute(ctx context.Context, m *Manifest, sink Sink, checkpoint string) (*SyncResult, error) {
-	startTime := time.Now()
-	if err := m.Validate(); err != nil {
-		return nil, fmt.Errorf("validate manifest: %w", err)
-	}
+// --- Calls --------------------------------------------------------------------
 
-	// Validate target BaseURL against SSRF
-	if err := ValidateDestinationURL(m.Spec.BaseURL, r.opts.AllowPrivateIPs); err != nil {
+// Call is everything one request needs: the manifest, the user's fields
+// (token and account details) and the sync position.
+type Call struct {
+	Manifest *Manifest
+	Config   map[string]string
+	SourceID string
+	Source   string // source display name
+	Cursor   string // pagination position within the current pass
+	// Checkpoint is the high-water mark from the last finished pass, sent as
+	// {{checkpoint}} so a pass fetches only what changed since.
+	Checkpoint string
+}
+
+func (c Call) vars() Vars {
+	return Vars{Config: c.Config, Cursor: c.Cursor, Checkpoint: c.Checkpoint, SourceID: c.SourceID, SourceName: c.Source}
+}
+
+// secrets are the values to redact from errors: every secret field.
+func (c Call) secrets() []string {
+	var out []string
+	for _, f := range c.Manifest.Spec.Fields {
+		if f.Secret {
+			out = append(out, c.Config[f.Name])
+		}
+	}
+	if ref := c.Manifest.Spec.Auth.SecretRef; ref != "" {
+		out = append(out, c.Config[ref])
+	}
+	return out
+}
+
+// CheckConfig validates the user's fields against the manifest: required
+// fields are present and patterns match.
+func CheckConfig(m *Manifest, cfg map[string]string) error {
+	for _, f := range m.Spec.Fields {
+		v := strings.TrimSpace(cfg[f.Name])
+		if v == "" {
+			if !f.Optional {
+				return fmt.Errorf("%s is required", f.Label)
+			}
+			continue
+		}
+		if f.Pattern != "" && !regexp.MustCompile("^(?:"+f.Pattern+")$").MatchString(v) {
+			return fmt.Errorf("%s does not look right", f.Label)
+		}
+	}
+	return nil
+}
+
+// PageResult is one page of an operation.
+type PageResult struct {
+	Items      []*NormalizedItem
+	NextCursor string // "" when the pass is finished
+	// MaxCheckpoint is the largest checkpoint value seen on this page.
+	MaxCheckpoint string
+}
+
+// Page fetches one page of an operation.
+func (r *Runtime) Page(ctx context.Context, c Call, op OperationSpec) (*PageResult, error) {
+	m := c.Manifest
+	data, resp, reqURL, err := r.do(ctx, c, op.Method, op.Path, op.QueryParams, op.Headers, op.Body, &op.Pagination)
+	if err != nil {
 		return nil, err
 	}
-
-	timeout := m.Spec.Policies.TimeoutDuration(30 * time.Second)
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	// Resolve secret if auth is configured
-	secret := ""
-	if m.Spec.Auth.Type != "none" {
-		s, err := r.secrets.ResolveSecret(ctx, m.Spec.Auth.SecretRef)
-		if err != nil {
-			return nil, fmt.Errorf("resolve secret %s: %w", m.Spec.Auth.SecretRef, err)
-		}
-		secret = s
+	res := &PageResult{}
+	items, _ := ExtractSlice(data, op.Response.ItemsPath)
+	mapping := m.Spec.Mapping
+	if op.Mapping != nil {
+		mapping = *op.Mapping
 	}
-
-	baseURL := m.Spec.BaseURL
-	if strings.Contains(baseURL, "{") && strings.Contains(secret, ":") {
-		prefix, actualSecret, _ := strings.Cut(secret, ":")
-		baseURL = strings.ReplaceAll(baseURL, "{subdomain}", prefix)
-		baseURL = strings.ReplaceAll(baseURL, "{domain}", prefix)
-		baseURL = strings.ReplaceAll(baseURL, "{account_id}", prefix)
-		baseURL = strings.ReplaceAll(baseURL, "{cloudId}", prefix)
-		secret = actualSecret
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		n := normalize(mapping, item)
+		if n.ID == "" {
+			continue
+		}
+		res.Items = append(res.Items, n)
+		if cp := m.Spec.Sync.Checkpoint; cp != "" {
+			res.MaxCheckpoint = laterCheckpoint(res.MaxCheckpoint, ExtractString(item, cp))
+		}
 	}
-
-	result := &SyncResult{
-		NewCheckpoint: checkpoint,
+	if len(items) == 0 {
+		return res, nil
 	}
-	cursor := checkpoint
-
-	// Primary sync operation (first operation in spec)
-	op := m.Spec.Operations[0]
-
-	for page := 0; page < r.opts.MaxPages; page++ {
-		// Respect proactive rate limiting
-		if page > 0 && m.Spec.Policies.RateLimitPerMin > 0 {
-			paceInterval := time.Minute / time.Duration(m.Spec.Policies.RateLimitPerMin)
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(paceInterval):
-			}
-		}
-
-		reqURL, err := r.buildURL(baseURL, op, cursor, page)
-		if err != nil {
-			return nil, err
-		}
-
-		// Check full URL in case operation path points elsewhere
-		if err := ValidateDestinationURL(reqURL, r.opts.AllowPrivateIPs); err != nil {
-			return nil, err
-		}
-
-		var bodyReader io.Reader
-		if op.Body != "" {
-			bodyReader = strings.NewReader(op.Body)
-		}
-		req, err := http.NewRequestWithContext(ctx, op.Method, reqURL, bodyReader)
-		if err != nil {
-			return nil, err
-		}
-		if op.Body != "" {
-			req.GetBody = func() (io.ReadCloser, error) {
-				return io.NopCloser(strings.NewReader(op.Body)), nil
-			}
-		}
-
-		r.applyAuth(req, m.Spec.Auth, secret)
-		for k, v := range op.Headers {
-			req.Header.Set(k, v)
-		}
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := r.executeWithRetry(ctx, req, m.Spec.Policies.MaxRetries)
-		if err != nil {
-			return nil, sanitizeError(fmt.Errorf("http execute %s %s: %w", op.Method, reqURL, err), secret)
-		}
-
-		result.PagesProcessed++
-
-		// Read response body with safe size ceiling
-		lr := io.LimitReader(resp.Body, r.opts.MaxResponseBytes+1)
-		bodyBytes, err := io.ReadAll(lr)
-		resp.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("read response body: %w", err)
-		}
-		if int64(len(bodyBytes)) > r.opts.MaxResponseBytes {
-			return nil, ErrBodyTooLarge
-		}
-
-		if resp.StatusCode >= 400 {
-			sanitizedBody := string(bodyBytes)
-			if secret != "" {
-				sanitizedBody = strings.ReplaceAll(sanitizedBody, secret, "[REDACTED]")
-			}
-			return nil, fmt.Errorf("api status %d: %s", resp.StatusCode, sanitizedBody)
-		}
-
-		var respData any
-		if err := json.Unmarshal(bodyBytes, &respData); err != nil {
-			return nil, fmt.Errorf("unmarshal api response: %w", err)
-		}
-
-		items, ok := ExtractSlice(respData, op.Response.ItemsPath)
-		if !ok || len(items) == 0 {
-			result.HasMore = false
-			break
-		}
-
-		for _, rawItem := range items {
-			itemMap, ok := rawItem.(map[string]any)
-			if !ok {
-				continue
-			}
-			norm := r.normalize(m.Spec.Mapping, itemMap)
-			if err := sink.IngestItem(ctx, norm); err != nil {
-				return nil, sanitizeError(fmt.Errorf("sink ingest %s: %w", norm.ID, err), secret)
-			}
-			result.ItemsSynced++
-
-			// Track latest monotonic checkpoint
-			if m.Spec.Sync.Checkpoint != "" {
-				cpVal := ExtractString(itemMap, m.Spec.Sync.Checkpoint)
-				if cpVal != "" {
-					result.NewCheckpoint = updateCheckpoint(result.NewCheckpoint, cpVal)
-				}
-			}
-		}
-
-		// Determine pagination continuation
-		hasMorePages := false
-		switch op.Pagination.Type {
-		case "cursor":
-			if op.Pagination.CursorPath != "" {
-				nextCursor := ExtractString(respData, op.Pagination.CursorPath)
-				if nextCursor != "" && nextCursor != cursor {
-					cursor = nextCursor
-					hasMorePages = true
-				}
-			}
-		case "page":
-			limit := op.Pagination.Limit
-			if limit <= 0 || len(items) >= limit {
-				hasMorePages = true
-			}
-		case "offset":
-			limit := op.Pagination.Limit
-			if limit <= 0 {
-				limit = 50
-			}
-			if len(items) >= limit {
-				hasMorePages = true
-			}
-		default: // "none"
-			hasMorePages = false
-		}
-
-		if !hasMorePages {
-			result.HasMore = false
-			break
-		}
-		result.HasMore = true
-	}
-
-	result.Duration = time.Since(startTime)
-	return result, nil
-}
-
-func (r *Runtime) buildURL(baseURL string, op OperationSpec, cursor string, page int) (string, error) {
-	full := strings.TrimRight(baseURL, "/") + "/" + strings.TrimLeft(op.Path, "/")
-	u, err := url.Parse(full)
-	if err != nil {
-		return "", err
-	}
-
-	q := u.Query()
-	for k, v := range op.QueryParams {
-		q.Set(k, v)
-	}
-
 	switch op.Pagination.Type {
 	case "cursor":
-		if cursor != "" && op.Pagination.CursorParam != "" {
-			q.Set(op.Pagination.CursorParam, cursor)
+		if next := ExtractString(data, op.Pagination.CursorPath); next != c.Cursor {
+			res.NextCursor = next
 		}
-	case "page":
-		param := op.Pagination.PageParam
-		if param == "" {
-			param = "page"
-		}
-		q.Set(param, strconv.Itoa(page+1))
-	case "offset":
-		param := op.Pagination.OffsetParam
-		if param == "" {
-			param = "offset"
-		}
+	case "nextURL":
+		res.NextCursor = sameHostURL(reqURL, ExtractString(data, op.Pagination.CursorPath))
+	case "linkHeader":
+		res.NextCursor = sameHostURL(reqURL, nextLink(resp.Header.Values("Link")))
+	case "page", "offset":
 		limit := op.Pagination.Limit
-		if limit <= 0 {
-			limit = 50
+		if limit <= 0 || len(items) >= limit {
+			n, _ := strconv.Atoi(c.Cursor)
+			res.NextCursor = strconv.Itoa(n + 1)
 		}
-		q.Set(param, strconv.Itoa(page*limit))
 	}
-
-	if op.Pagination.Limit > 0 && op.Pagination.LimitParam != "" {
-		q.Set(op.Pagination.LimitParam, strconv.Itoa(op.Pagination.Limit))
-	}
-
-	u.RawQuery = q.Encode()
-	return u.String(), nil
+	return res, nil
 }
 
-func (r *Runtime) applyAuth(req *http.Request, auth AuthSpec, secret string) {
-	switch auth.Type {
-	case "bearer":
-		if strings.Contains(secret, ":") {
-			// e.g. Trello apiKey:token
-			key, token, _ := strings.Cut(secret, ":")
-			req.Header.Set("Authorization", fmt.Sprintf("OAuth oauth_consumer_key=\"%s\", oauth_token=\"%s\"", key, token))
-			return
+// Verify checks the user's credentials and names the account.
+func (r *Runtime) Verify(ctx context.Context, c Call) (accountID, accountName string, err error) {
+	v := c.Manifest.Spec.Verify
+	if v == nil {
+		op := c.Manifest.Spec.Operations[0]
+		_, _, _, err = r.do(ctx, c, op.Method, op.Path, op.QueryParams, op.Headers, op.Body, nil)
+		return "", "", err
+	}
+	data, _, _, err := r.do(ctx, c, v.Method, v.Path, v.QueryParams, v.Headers, v.Body, nil)
+	if err != nil {
+		return "", "", err
+	}
+	return renderItem(v.AccountID, data), renderItem(v.AccountName, data), nil
+}
+
+// Source is something the user can choose to sync.
+type Source struct{ ID, Name string }
+
+// ListSources returns the manifest's sources (at most MaxPages pages), or a
+// single "all" source when it declares none.
+func (r *Runtime) ListSources(ctx context.Context, c Call) ([]Source, error) {
+	s := c.Manifest.Spec.Sources
+	if s == nil {
+		return []Source{{ID: "all", Name: "Everything this token can read"}}, nil
+	}
+	var out []Source
+	seen := map[string]bool{}
+	c.Cursor = ""
+	for page := 0; page < r.opts.MaxPages; page++ {
+		data, resp, reqURL, err := r.do(ctx, c, s.Operation.Method, s.Operation.Path, s.Operation.QueryParams,
+			s.Operation.Headers, s.Operation.Body, &s.Operation.Pagination)
+		if err != nil {
+			return nil, err
 		}
-		prefix := auth.Prefix
+		items, _ := ExtractSlice(data, s.Operation.Response.ItemsPath)
+		for _, raw := range items {
+			id, name := renderItem(s.ID, raw), renderItem(s.Name, raw)
+			if id != "" && !seen[id] && matchesWhere(raw, s.Where) {
+				seen[id] = true
+				out = append(out, Source{ID: id, Name: name})
+			}
+		}
+		next := ""
+		switch s.Operation.Pagination.Type {
+		case "cursor":
+			next = ExtractString(data, s.Operation.Pagination.CursorPath)
+		case "nextURL":
+			next = sameHostURL(reqURL, ExtractString(data, s.Operation.Pagination.CursorPath))
+		case "linkHeader":
+			next = sameHostURL(reqURL, nextLink(resp.Header.Values("Link")))
+		case "page", "offset":
+			if len(items) > 0 && s.Operation.Pagination.Limit > 0 && len(items) >= s.Operation.Pagination.Limit {
+				n, _ := strconv.Atoi(c.Cursor)
+				next = strconv.Itoa(n + 1)
+			}
+		}
+		if next == "" || next == c.Cursor || len(items) == 0 {
+			break
+		}
+		c.Cursor = next
+	}
+	sort.SliceStable(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
+	return out, nil
+}
+
+// matchesWhere reports whether item has, at each path, one of the values.
+func matchesWhere(item any, where map[string][]string) bool {
+	for path, allowed := range where {
+		v := ExtractString(item, path)
+		ok := false
+		for _, a := range allowed {
+			ok = ok || v == a
+		}
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// do sends one templated request and decodes its JSON response. For page and
+// offset pagination the cursor is the zero-based page number; for nextURL and
+// linkHeader it is the full URL of the next page (already checked to be on
+// the same host).
+func (r *Runtime) do(ctx context.Context, c Call, method, path string, query, headers map[string]string, body string,
+	pg *PaginationSpec) (any, *http.Response, string, error) {
+	m := c.Manifest
+	if err := CheckConfig(m, c.Config); err != nil && len(m.Spec.Fields) > 0 {
+		return nil, nil, "", err
+	}
+	vars := c.vars()
+	secrets := c.secrets()
+	if pg != nil && (pg.Type == "page" || pg.Type == "offset") {
+		n, _ := strconv.Atoi(c.Cursor)
+		vars.Page = strconv.Itoa(n + pageBase(pg))
+		vars.Offset = strconv.Itoa(n * pageLimit(pg))
+	}
+
+	var reqURL string
+	if pg != nil && (pg.Type == "nextURL" || pg.Type == "linkHeader") && c.Cursor != "" {
+		reqURL = c.Cursor
+	} else {
+		base := render(m.Spec.BaseURL, vars)
+		full := strings.TrimRight(base, "/") + "/" + strings.TrimLeft(render(path, vars), "/")
+		u, err := url.Parse(full)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		q := u.Query()
+		for k, v := range query {
+			if val, ok := renderAll(v, vars); ok && val != "" {
+				q.Set(k, val)
+			}
+		}
+		if pg != nil {
+			switch pg.Type {
+			case "cursor":
+				if c.Cursor != "" && pg.CursorParam != "" {
+					q.Set(pg.CursorParam, c.Cursor)
+				}
+			case "page":
+				if pg.PageParam != "-" { // "-": the page number goes in the body
+					param := pg.PageParam
+					if param == "" {
+						param = "page"
+					}
+					q.Set(param, vars.Page)
+				}
+			case "offset":
+				if pg.OffsetParam != "-" {
+					param := pg.OffsetParam
+					if param == "" {
+						param = "offset"
+					}
+					q.Set(param, vars.Offset)
+				}
+			}
+			if pg.Limit > 0 && pg.LimitParam != "" {
+				q.Set(pg.LimitParam, strconv.Itoa(pg.Limit))
+			}
+		}
+		if m.Spec.Auth.Type == "query" {
+			q.Set(m.Spec.Auth.Header, c.Config[m.Spec.Auth.SecretRef])
+		}
+		u.RawQuery = q.Encode()
+		reqURL = u.String()
+	}
+	if err := ValidateDestinationURL(reqURL, r.opts.AllowPrivateIPs); err != nil {
+		return nil, nil, "", sanitizeError(err, secrets...)
+	}
+
+	method = strings.ToUpper(method)
+	if method == "" {
+		method = http.MethodGet
+	}
+	var reqBody io.Reader
+	if body != "" {
+		reqBody = strings.NewReader(renderJSON(body, vars))
+	}
+	ctx, cancel := context.WithTimeout(ctx, m.Spec.Policies.TimeoutDuration(30*time.Second))
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, method, reqURL, reqBody)
+	if err != nil {
+		return nil, nil, "", sanitizeError(err, secrets...)
+	}
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "memro-connectors/1")
+	if err := r.applyAuth(ctx, req, c); err != nil {
+		return nil, nil, "", err
+	}
+	for k, v := range m.Spec.Headers {
+		if val, ok := renderAll(v, vars); ok && val != "" {
+			req.Header.Set(k, val)
+		}
+	}
+	for k, v := range headers { // may override Accept (vendor media types)
+		if val, ok := renderAll(v, vars); ok && val != "" {
+			req.Header.Set(k, val)
+		}
+	}
+
+	resp, err := r.executeWithRetry(ctx, req, m.Spec.Policies.MaxRetries)
+	if err != nil {
+		return nil, nil, "", sanitizeError(fmt.Errorf("%s %s: %w", method, redactURL(reqURL), err), secrets...)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, r.opts.MaxResponseBytes+1))
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("read response body: %w", err)
+	}
+	if int64(len(raw)) > r.opts.MaxResponseBytes {
+		return nil, nil, "", ErrBodyTooLarge
+	}
+	if resp.StatusCode >= 400 {
+		return nil, resp, reqURL, sanitizeError(&HTTPError{Status: resp.StatusCode, Body: truncate(string(raw), 300)}, secrets...)
+	}
+	var data any
+	if len(bytes.TrimSpace(raw)) > 0 {
+		if err := json.Unmarshal(raw, &data); err != nil {
+			return nil, nil, "", fmt.Errorf("unmarshal api response: %w", err)
+		}
+	}
+	return data, resp, reqURL, nil
+}
+
+func pageBase(pg *PaginationSpec) int {
+	if pg.ZeroBased {
+		return 0
+	}
+	return 1
+}
+
+func pageLimit(pg *PaginationSpec) int {
+	if pg.Limit > 0 {
+		return pg.Limit
+	}
+	return 50
+}
+
+// HTTPError is an error status from the API.
+type HTTPError struct {
+	Status int
+	Body   string
+}
+
+func (e *HTTPError) Error() string { return fmt.Sprintf("api status %d: %s", e.Status, e.Body) }
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
+// redactURL drops the query, which may carry a key (auth type "query").
+func redactURL(raw string) string {
+	if i := strings.IndexByte(raw, '?'); i >= 0 {
+		return raw[:i]
+	}
+	return raw
+}
+
+func (r *Runtime) applyAuth(ctx context.Context, req *http.Request, c Call) error {
+	a := c.Manifest.Spec.Auth
+	secret := ""
+	if a.SecretRef != "" {
+		if v, ok := c.Config[a.SecretRef]; ok {
+			secret = v
+		} else if r.secrets != nil {
+			s, err := r.secrets.ResolveSecret(ctx, a.SecretRef)
+			if err != nil {
+				return fmt.Errorf("resolve secret %s: %w", a.SecretRef, err)
+			}
+			secret = s
+		}
+	}
+	switch a.Type {
+	case "bearer":
+		prefix := a.Prefix
 		if prefix == "" {
 			prefix = "Bearer "
 		}
 		req.Header.Set("Authorization", prefix+secret)
 	case "apiKey":
-		hdr := auth.Header
+		hdr := a.Header
 		if hdr == "" {
 			hdr = "X-API-Key"
 		}
-		if hdr == "DD-API-KEY" && strings.Contains(secret, ":") {
-			apiKey, appKey, _ := strings.Cut(secret, ":")
-			req.Header.Set("DD-API-KEY", apiKey)
-			req.Header.Set("DD-APPLICATION-KEY", appKey)
-			return
-		}
-		prefix := auth.Prefix
-		req.Header.Set(hdr, prefix+secret)
+		req.Header.Set(hdr, a.Prefix+secret)
 	case "basic":
-		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(secret)))
+		cred := secret
+		if a.Username != "" || a.Password != "" {
+			cred = render(a.Username, c.vars()) + ":" + render(a.Password, c.vars())
+		}
+		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(cred)))
 	}
+	return nil
 }
 
 func (r *Runtime) executeWithRetry(ctx context.Context, req *http.Request, maxRetries int) (*http.Response, error) {
 	if maxRetries <= 0 {
-		maxRetries = 1
+		maxRetries = 2
 	}
-
+	var body []byte
+	if req.Body != nil {
+		body, _ = io.ReadAll(req.Body)
+		req.Body.Close()
+	}
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
+		if body != nil {
+			req.Body = io.NopCloser(bytes.NewReader(body))
 		}
-
 		resp, err := r.client.Do(req)
 		if err != nil {
 			lastErr = err
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
+			if errors.Is(err, ErrSSRFBlocked) || ctx.Err() != nil {
+				return nil, err
 			}
-			backoff := time.Duration(attempt+1) * 100 * time.Millisecond
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(backoff):
-			}
+			sleep(ctx, time.Duration(attempt+1)*500*time.Millisecond)
 			continue
 		}
-
-		// Fast fail on permanent client errors (400, 401, 403, 404, 422) - do not retry
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden ||
-			resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusNotFound ||
-			resp.StatusCode == http.StatusUnprocessableEntity {
-			return resp, nil
-		}
-
-		// 429 Too Many Requests -> respect Retry-After header
-		if resp.StatusCode == http.StatusTooManyRequests {
-			resp.Body.Close()
-			if attempt == maxRetries {
-				return nil, fmt.Errorf("rate limit exceeded (HTTP 429) after %d retries", maxRetries)
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			wait := time.Duration(attempt+1) * time.Second
+			if ra, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && ra > 0 {
+				wait = min(time.Duration(ra)*time.Second, 30*time.Second)
 			}
-			retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(retryAfter):
-			}
-			continue
-		}
-
-		// Transient server errors (500, 502, 503, 504) -> retry with backoff
-		if resp.StatusCode == http.StatusInternalServerError ||
-			resp.StatusCode == http.StatusBadGateway ||
-			resp.StatusCode == http.StatusServiceUnavailable ||
-			resp.StatusCode == http.StatusGatewayTimeout {
 			if attempt < maxRetries {
 				resp.Body.Close()
-				backoff := time.Duration(attempt+1) * 150 * time.Millisecond
-				select {
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				case <-time.After(backoff):
-				}
+				sleep(ctx, wait)
 				continue
 			}
 		}
-
 		return resp, nil
 	}
-
 	if lastErr != nil {
 		return nil, lastErr
 	}
 	return nil, errors.New("request failed after retries")
 }
 
-func parseRetryAfter(header string) time.Duration {
-	if header == "" {
-		return 500 * time.Millisecond
+func sleep(ctx context.Context, d time.Duration) {
+	select {
+	case <-ctx.Done():
+	case <-time.After(d):
 	}
-	if sec, err := strconv.Atoi(strings.TrimSpace(header)); err == nil && sec >= 0 {
-		if sec > 60 {
-			sec = 60
-		}
-		return time.Duration(sec) * time.Second
-	}
-	if t, err := http.ParseTime(header); err == nil {
-		d := time.Until(t)
-		if d > 60*time.Second {
-			return 60 * time.Second
-		}
-		if d > 0 {
-			return d
-		}
-	}
-	return 500 * time.Millisecond
 }
 
-func updateCheckpoint(current, candidate string) string {
-	if current == "" {
-		return candidate
-	}
-	if candidate == "" {
-		return current
-	}
-	t1 := parseTimestamp(current)
-	t2 := parseTimestamp(candidate)
-	if !t1.IsZero() && !t2.IsZero() {
-		if t2.After(t1) {
-			return candidate
-		}
-		return current
-	}
-	if n1, err1 := strconv.ParseInt(current, 10, 64); err1 == nil {
-		if n2, err2 := strconv.ParseInt(candidate, 10, 64); err2 == nil {
-			if n2 > n1 {
-				return candidate
-			}
-			return current
+// --- Pagination helpers -----------------------------------------------------------
+
+var linkNext = regexp.MustCompile(`<([^>]+)>\s*;[^,]*rel="?next"?`)
+
+// nextLink is the rel="next" URL of RFC 8288 Link headers.
+func nextLink(values []string) string {
+	for _, v := range values {
+		if m := linkNext.FindStringSubmatch(v); m != nil {
+			return m[1]
 		}
 	}
-	if candidate > current {
-		return candidate
-	}
-	return current
+	return ""
 }
 
-func parseTimestamp(val any) time.Time {
-	if val == nil {
+// sameHostURL resolves next against the current URL and returns it only if
+// it stays on the same scheme and host, so credentials never go elsewhere.
+func sameHostURL(current, next string) string {
+	if next == "" {
+		return ""
+	}
+	cur, err := url.Parse(current)
+	if err != nil {
+		return ""
+	}
+	n, err := cur.Parse(next)
+	if err != nil || n.Scheme != cur.Scheme || n.Host != cur.Host {
+		return ""
+	}
+	return n.String()
+}
+
+// --- Mapping ----------------------------------------------------------------------
+
+func normalize(mapping MappingSpec, raw map[string]any) *NormalizedItem {
+	memType := mapping.MemoryType
+	if memType == "" {
+		memType = "semantic"
+	}
+	return &NormalizedItem{
+		ID:         renderItem(mapping.ID, raw),
+		Title:      renderItem(mapping.Title, raw),
+		Content:    renderItem(mapping.Content, raw),
+		EventDate:  ParseDate(renderItem(mapping.EventDate, raw)),
+		AuthorID:   renderItem(mapping.AuthorID, raw),
+		AuthorName: renderItem(mapping.AuthorName, raw),
+		URL:        renderItem(mapping.URL, raw),
+		MemoryType: memType,
+		Raw:        raw,
+	}
+}
+
+var dateLayouts = []string{
+	time.RFC3339Nano, time.RFC3339,
+	"2006-01-02T15:04:05.000-0700", "2006-01-02T15:04:05-0700", // Jira, Confluence
+	"2006-01-02T15:04:05.000Z", "2006-01-02T15:04:05", "2006-01-02 15:04:05",
+	time.RFC1123Z, time.RFC1123, "2006/01/02 15:04:05 -0700", "2006-01-02",
+}
+
+// ParseDate reads the date formats APIs use, including Unix seconds and
+// milliseconds. Unknown formats give the zero time.
+func ParseDate(s string) time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" {
 		return time.Time{}
 	}
-	switch v := val.(type) {
-	case time.Time:
-		return v.UTC()
-	case float64:
-		if v > 1e11 {
-			return time.UnixMilli(int64(v)).UTC()
+	if n, err := strconv.ParseFloat(s, 64); err == nil && n > 0 {
+		if n > 1e12 {
+			return time.UnixMilli(int64(n)).UTC()
 		}
-		sec := int64(v)
-		nsec := int64((v - float64(sec)) * 1e9)
-		return time.Unix(sec, nsec).UTC()
-	case int64:
-		if v > 1e11 {
-			return time.UnixMilli(v).UTC()
-		}
-		return time.Unix(v, 0).UTC()
-	case int:
-		iv := int64(v)
-		if iv > 1e11 {
-			return time.UnixMilli(iv).UTC()
-		}
-		return time.Unix(iv, 0).UTC()
-	case string:
-		str := strings.TrimSpace(v)
-		if str == "" {
-			return time.Time{}
-		}
-		if num, err := strconv.ParseFloat(str, 64); err == nil {
-			return parseTimestamp(num)
-		}
-		formats := []string{
-			time.RFC3339Nano,
-			time.RFC3339,
-			"2006-01-02T15:04:05Z",
-			"2006-01-02T15:04:05",
-			"2006-01-02 15:04:05",
-			"2006-01-02",
-			time.RFC1123,
-			time.RFC1123Z,
-		}
-		for _, f := range formats {
-			if t, err := time.Parse(f, str); err == nil {
-				return t.UTC()
-			}
+		return time.Unix(int64(n), 0).UTC()
+	}
+	for _, l := range dateLayouts {
+		if t, err := time.Parse(l, s); err == nil {
+			return t.UTC()
 		}
 	}
 	return time.Time{}
 }
 
-func (r *Runtime) normalize(mapping MappingSpec, raw map[string]any) *NormalizedItem {
-	var evDate time.Time
-	if mapping.EventDate != "" {
-		if val, ok := ExtractValue(raw, mapping.EventDate); ok {
-			evDate = parseTimestamp(val)
+// laterCheckpoint returns the later of two checkpoint values: compared as
+// dates when both parse, otherwise as numbers or strings.
+func laterCheckpoint(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	}
+	// Plain numbers (versions, IDs, epoch times) compare as numbers.
+	if na, err := strconv.ParseFloat(a, 64); err == nil {
+		if nb, err := strconv.ParseFloat(b, 64); err == nil {
+			if nb > na {
+				return b
+			}
+			return a
 		}
 	}
-
-	return &NormalizedItem{
-		ID:         ExtractString(raw, mapping.ID),
-		Title:      ExtractString(raw, mapping.Title),
-		Content:    ExtractString(raw, mapping.Content),
-		EventDate:  evDate,
-		AuthorID:   ExtractString(raw, mapping.AuthorID),
-		AuthorName: ExtractString(raw, mapping.AuthorName),
-		URL:        ExtractString(raw, mapping.URL),
-		Raw:        raw,
+	ta, tb := ParseDate(a), ParseDate(b)
+	if !ta.IsZero() && !tb.IsZero() {
+		if tb.After(ta) {
+			return b
+		}
+		return a
 	}
+	if b > a {
+		return b
+	}
+	return a
+}
+
+// --- Legacy entry point -----------------------------------------------------------
+
+// Execute runs the manifest's first operation to the end (up to MaxPages),
+// sending items to sink. checkpoint is the high-water mark of the previous
+// run, available to the operation as {{checkpoint}}.
+func (r *Runtime) Execute(ctx context.Context, m *Manifest, sink Sink, checkpoint string) (*SyncResult, error) {
+	if err := m.Validate(); err != nil {
+		return nil, fmt.Errorf("validate manifest: %w", err)
+	}
+	cfg := map[string]string{}
+	if ref := m.Spec.Auth.SecretRef; ref != "" && r.secrets != nil && m.Spec.Auth.Type != "none" {
+		s, err := r.secrets.ResolveSecret(ctx, ref)
+		if err != nil {
+			return nil, fmt.Errorf("resolve secret %s: %w", ref, err)
+		}
+		cfg[ref] = s
+	}
+	call := Call{Manifest: m, Config: cfg, Checkpoint: checkpoint}
+	op := m.Spec.Operations[0]
+	res := &SyncResult{}
+	high := checkpoint
+	for page := 0; page < r.opts.MaxPages; page++ {
+		p, err := r.Page(ctx, call, op)
+		if err != nil {
+			return nil, err
+		}
+		for _, it := range p.Items {
+			if err := sink.IngestItem(ctx, it); err != nil {
+				return nil, sanitizeError(fmt.Errorf("sink ingest %s: %w", it.ID, err), call.secrets()...)
+			}
+			res.ItemsSynced++
+		}
+		high = laterCheckpoint(high, p.MaxCheckpoint)
+		if p.NextCursor == "" {
+			break
+		}
+		call.Cursor = p.NextCursor
+		res.HasMore = page+1 < r.opts.MaxPages
+	}
+	if high != checkpoint {
+		res.NewCheckpoint = high
+	}
+	return res, nil
 }

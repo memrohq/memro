@@ -1,43 +1,35 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: outline
-  version: 1.0.0
-  description: Sync knowledge base documents, collections, and revisions from Outline
-
+  version: "1"
+  displayName: Outline
+  category: knowledge
+  description: Every document in your Outline workspace, in Markdown.
+  docsURL: https://www.getoutline.com/developers#section/Authentication
 spec:
   type: rest
-  baseURL: https://app.getoutline.com/api
-
-  auth:
-    type: bearer
-    secretRef: OUTLINE_API_KEY
-
+  baseURL: https://{{config.host}}/api
+  fields:
+    - {name: host, label: Outline host, placeholder: acme.getoutline.com, pattern: "[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+(:[0-9]{2,5})?", help: "Your Outline address without https://, e.g. acme.getoutline.com or a self-hosted domain."}
+    - {name: token, label: API key, secret: true, help: "Settings → API Keys."}
+  auth: {type: bearer, secretRef: token}
+  verify: {method: POST, path: /auth.info, body: '{}', accountId: data.team.id, accountName: data.team.name}
   operations:
-    - name: list_documents
-      method: GET
+    - name: documents
+      method: POST
       path: /documents.list
-      pagination:
-        type: offset
-        offsetParam: offset
-        limitParam: limit
-        limit: 50
-      response:
-        itemsPath: data
-
+      body: '{"limit":100,"offset":{{offset}},"sort":"updatedAt","direction":"DESC"}'
+      pagination: {type: offset, offsetParam: "-", limit: 100}
+      response: {itemsPath: data}
   mapping:
-    id: $.id
-    title: $.title
-    content: $.text
-    eventDate: $.updatedAt
-    url: $.url
+    id: id
+    title: "{{title}}"
+    content: |
+      {{title}}
 
-  sync:
-    mode: incremental
-    checkpoint: updatedAt
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 120
+      {{text}}
+    eventDate: updatedAt
+    authorName: updatedBy.name
+  sync: {mode: incremental, checkpoint: updatedAt, newestFirst: true}
+  policies: {timeout: 30s, maxRetries: 3}

@@ -1,43 +1,48 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: trello
-  version: 1.0.0
-  description: Sync cards, lists, and activity logs from Trello
-
+  version: "1"
+  displayName: Trello
+  category: work
+  description: Cards from the Trello boards you choose, with lists, labels and due dates.
+  docsURL: https://developer.atlassian.com/cloud/trello/guides/rest-api/api-introduction/
 spec:
   type: rest
   baseURL: https://api.trello.com/1
-
-  auth:
-    type: bearer
-    secretRef: TRELLO_API_TOKEN
-
-  operations:
-    - name: list_cards
+  fields:
+    - {name: apiKey, label: API key, secret: true, help: "trello.com/power-ups/admin → your Power-Up → API key."}
+    - {name: token, label: Token, secret: true, help: "Generated from the Token link next to your API key (read access)."}
+  auth: {type: query, secretRef: token, header: token}
+  verify: {path: /members/me, queryParams: {key: "{{config.apiKey}}", fields: "id,fullName"}, accountId: id, accountName: fullName}
+  sources:
+    operation:
+      name: boards
       method: GET
-      path: /members/me/cards
+      path: /members/me/boards
+      queryParams: {key: "{{config.apiKey}}", filter: open, fields: "id,name"}
+      response: {itemsPath: $}
+    id: id
+    name: name
+  operations:
+    - name: cards
+      method: GET
+      path: /boards/{{source.id}}/cards/all
       queryParams:
-        fields: "id,name,desc,dateLastActivity,url"
-        limit: "100"
-      pagination:
-        type: none
-      response:
-        itemsPath: "$"
-
+        key: "{{config.apiKey}}"
+        fields: id,name,desc,dateLastActivity,due,closed,shortUrl,labels
+      response: {itemsPath: $}
   mapping:
-    id: $.id
-    title: $.name
-    content: $.desc
-    eventDate: $.dateLastActivity
-    url: $.url
+    id: id
+    title: "{{name}}"
+    content: |
+      Trello card: {{name}}
+      Labels: {{labels[].name}}
+      Due: {{due}}
+      Archived: {{closed}}
 
-  sync:
-    mode: incremental
-    checkpoint: dateLastActivity
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 100
+      {{desc}}
+    eventDate: dateLastActivity
+    url: shortUrl
+  sync: {mode: full}
+  policies: {timeout: 30s, maxRetries: 3}

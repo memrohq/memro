@@ -89,6 +89,16 @@ const BRAND_COLORS = {
   vercel: "from-zinc-500/20 to-zinc-500/5 text-ink",
 };
 
+// What a connection's sources are called, per connector.
+const SOURCE_UNITS = {
+  slack: "channel", github: "repository", gitlab: "project", bitbucket: "repository",
+  jira: "project", sentry: "project", linear: "team", notion: "database",
+  confluence: "space", coda: "doc", airtable: "table", asana: "workspace", clickup: "workspace",
+  trello: "board", monday: "board", plane: "project", discord: "channel", netlify: "site",
+  render: "service", figma: "project",
+};
+const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
 const plural = (unit, n) => (n === 1 ? unit : unit.endsWith("y") ? `${unit.slice(0, -1)}ies` : `${unit}s`);
 
 const STATUS = {
@@ -143,7 +153,7 @@ export default function Integrations({ apiBase, auth, notify, onOpenMemories }) 
     if (res) {
       const p = (data?.providers || []).find((x) => x.name === res.provider);
       const name = p?.display_name || res.provider;
-      if (res.connected) notify(`${name} connected`, res.provider === "slack" ? "Choose the channels to sync." : "Syncing your items now.");
+      if (res.connected) notify(`${name} connected`, `Choose the ${plural(SOURCE_UNITS[res.provider] || "source", 2)} to sync.`);
       else notify(`Couldn't connect ${name}`, res.error || "Please try again.", true);
     }
     load();
@@ -189,7 +199,7 @@ export default function Integrations({ apiBase, auth, notify, onOpenMemories }) 
       const Mark = KNOWN_MARKS[id];
       const name = p.display_name || (id.charAt(0).toUpperCase() + id.slice(1));
       const kind = p.kind || (id === "slack" || id === "github" ? "oauth" : "token");
-      const unit = id === "slack" ? "channel" : id === "github" || id === "gitlab" ? "repository" : "item";
+      const unit = SOURCE_UNITS[id] || "source";
       return {
         id,
         name,
@@ -201,7 +211,9 @@ export default function Integrations({ apiBase, auth, notify, onOpenMemories }) 
         privacy: kind === "oauth"
           ? "Read-only access. You choose which resources Memro syncs."
           : "Read-only token. Sealed securely at rest with AES-256-GCM encryption.",
-        secretRef: p.secret_ref || "API_TOKEN",
+        sourcesManagedBy: p.sources_managed_by,
+        fields: p.fields?.length ? p.fields : [{ name: "token", label: "API token", secret: true }],
+        docsURL: p.docs_url,
         Mark: Mark || null,
         initials: (name || id).slice(0, 2).toUpperCase(),
         colorStyle: BRAND_COLORS[id] || "from-accent/20 to-accent/5 text-accent",
@@ -372,7 +384,9 @@ export default function Integrations({ apiBase, auth, notify, onOpenMemories }) 
                 initials: c.provider.slice(0, 2).toUpperCase(),
                 colorStyle: "bg-surface text-ink",
               };
-              const needsChannels = c.provider === "slack" && c.status === "active" && c.sources_enabled === 0;
+              // Sources picked in Memro start off: nothing is read until the user chooses.
+              const picksSources = p.sourcesManagedBy === "memro" && c.status !== "revoked" && c.sources_total > 0;
+              const needsChannels = picksSources && c.status === "active" && c.sources_enabled === 0;
 
               return (
                 <li key={c.id} className="px-5 py-4">
@@ -398,13 +412,13 @@ export default function Integrations({ apiBase, auth, notify, onOpenMemories }) 
                         </p>
                       )}
                       {needsChannels && (
-                        <p className="text-[12.5px] mt-2 text-accent">Choose which channels to sync — nothing is read until you do.</p>
+                        <p className="text-[12.5px] mt-2 text-accent">Choose which {plural(p.unit, 2)} to sync — nothing is read until you do.</p>
                       )}
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
-                      {c.provider === "slack" && c.status !== "revoked" && (
-                        <button className={needsChannels ? "btn-primary" : "btn-secondary"} onClick={() => setChannelsFor(c)}>
-                          Channels
+                      {picksSources && (c.sources_total > 1 || needsChannels) && (
+                        <button className={needsChannels ? "btn-primary" : "btn-secondary"} onClick={() => setChannelsFor({ ...c, unit: p.unit })}>
+                          {capitalize(plural(p.unit, 2))}
                         </button>
                       )}
                       {c.manage_url && c.status !== "revoked" && (
@@ -472,28 +486,33 @@ export default function Integrations({ apiBase, auth, notify, onOpenMemories }) 
 }
 
 function TokenModal({ apiBase, auth, notify, provider, onClose, onDone }) {
-  const [token, setToken] = useState("");
+  const [values, setValues] = useState({});
   const [busy, setBusy] = useState(false);
-  const [showToken, setShowToken] = useState(false);
+  const [shown, setShown] = useState({});
 
   useEffect(() => {
-    setToken("");
-    setShowToken(false);
+    setValues({});
+    setShown({});
   }, [provider?.id]);
 
   if (!provider) return null;
 
+  const fields = provider.fields || [];
+  const ready = fields.every((f) => f.optional || (values[f.name] || "").trim());
+
   const submit = async (e) => {
     e.preventDefault();
-    if (!token.trim()) return;
+    if (!ready) return;
     setBusy(true);
     try {
-      await api(apiBase, `/connectors/${provider.id}/token`, {
-        method: "POST",
-        auth,
-        json: { token: token.trim() },
-      });
-      notify(`Connected ${provider.name}`, "Sync job has been scheduled.");
+      const out = {};
+      for (const f of fields) {
+        const v = (values[f.name] || "").trim();
+        if (v) out[f.name] = v;
+      }
+      await api(apiBase, `/connectors/${provider.id}/token`, { method: "POST", auth, json: { fields: out } });
+      setValues({});
+      notify(`Connected ${provider.name}`, "The first sync has started.");
       onClose();
       onDone();
     } catch (err) {
@@ -505,41 +524,58 @@ function TokenModal({ apiBase, auth, notify, provider, onClose, onDone }) {
 
   return (
     <Modal open={!!provider} title={`Connect ${provider.name}`} onClose={onClose}>
-      <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={submit} className="space-y-4" autoComplete="off">
         <p className="text-[13px] text-muted">
-          Paste your API token or personal access token with read permissions. Memro seals it with AES-256-GCM encryption and uses it only to sync your items into memory.
+          Use a read-only token where {provider.name} offers one. Memro checks it with {provider.name}, encrypts it, and uses it
+          only to sync into this agent&apos;s memory; it is never shown again.
+          {provider.docsURL && (
+            <>
+              {" "}
+              <a className="underline decoration-line hover:text-ink" href={provider.docsURL} target="_blank" rel="noopener noreferrer">
+                How to create one
+              </a>
+            </>
+          )}
         </p>
 
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-[12px] font-medium text-ink">
-              {provider.secretRef || "API Token"}
-            </label>
-            <button
-              type="button"
-              className="text-[11.5px] text-subtle hover:text-ink cursor-pointer"
-              onClick={() => setShowToken(!showToken)}
-            >
-              {showToken ? "Hide" : "Show"}
-            </button>
+        {fields.map((f, i) => (
+          <div key={f.name} className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label htmlFor={`field-${f.name}`} className="text-[12px] font-medium text-ink">
+                {f.label}
+                {f.optional && <span className="text-subtle font-normal"> (optional)</span>}
+              </label>
+              {f.secret && (
+                <button
+                  type="button"
+                  className="text-[11.5px] text-subtle hover:text-ink cursor-pointer"
+                  onClick={() => setShown({ ...shown, [f.name]: !shown[f.name] })}
+                >
+                  {shown[f.name] ? "Hide" : "Show"}
+                </button>
+              )}
+            </div>
+            <input
+              id={`field-${f.name}`}
+              type={f.secret && !shown[f.name] ? "password" : "text"}
+              className={`input text-[13px] ${f.secret ? "font-mono" : ""}`}
+              placeholder={f.placeholder || (f.secret ? "Paste it here…" : "")}
+              value={values[f.name] || ""}
+              onChange={(e) => setValues({ ...values, [f.name]: e.target.value })}
+              autoFocus={i === 0}
+              required={!f.optional}
+              spellCheck={false}
+            />
+            {f.help && <p className="text-[11.5px] text-subtle">{f.help}</p>}
           </div>
-          <input
-            type={showToken ? "text" : "password"}
-            className="input font-mono text-[13px]"
-            placeholder={`Paste your ${provider.name} token…`}
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            autoFocus
-            required
-          />
-        </div>
+        ))}
 
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" className="btn-ghost" onClick={onClose} disabled={busy}>
             Cancel
           </button>
-          <button type="submit" className="btn-primary" disabled={busy || !token.trim()}>
-            {busy ? "Connecting…" : `Connect ${provider.name}`}
+          <button type="submit" className="btn-primary" disabled={busy || !ready}>
+            {busy ? "Checking…" : `Connect ${provider.name}`}
           </button>
         </div>
       </form>
@@ -548,6 +584,8 @@ function TokenModal({ apiBase, auth, notify, provider, onClose, onDone }) {
 }
 
 function ChannelPicker({ apiBase, auth, notify, conn, onClose, onSaved }) {
+  const unit = conn?.unit || "channel";
+  const units = plural(unit, 2);
   const [sources, setSources] = useState(null);
   const [chosen, setChosen] = useState({});
   const [filter, setFilter] = useState("");
@@ -563,7 +601,7 @@ function ChannelPicker({ apiBase, auth, notify, conn, onClose, onSaved }) {
         setChosen(Object.fromEntries(s.map((x) => [x.id, x.enabled])));
       })
       .catch((err) => {
-        notify("Couldn't load channels", err.message, true);
+        notify(`Couldn't load ${units}`, err.message, true);
         onClose();
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -578,11 +616,11 @@ function ChannelPicker({ apiBase, auth, notify, conn, onClose, onSaved }) {
     try {
       await api(apiBase, `/connectors/${conn.id}/sources`, { method: "PUT", auth, json: { enabled: changes } });
       const on = Object.values(changes).filter(Boolean).length;
-      notify("Channels updated", on ? `Syncing ${on} new ${on === 1 ? "channel" : "channels"}.` : "Syncing stopped for the channels you turned off.");
+      notify(`${capitalize(units)} updated`, on ? `Syncing ${on} new ${plural(unit, on)}.` : `Syncing stopped for the ${units} you turned off.`);
       onSaved();
       onClose();
     } catch (err) {
-      notify("Couldn't update channels", err.message, true);
+      notify(`Couldn't update ${units}`, err.message, true);
     } finally {
       setSaving(false);
     }
@@ -591,7 +629,7 @@ function ChannelPicker({ apiBase, auth, notify, conn, onClose, onSaved }) {
   return (
     <Drawer
       open={!!conn}
-      title={`Channels · ${conn?.account_name || ""}`}
+      title={`${capitalize(units)} · ${conn?.account_name || ""}`}
       onClose={onClose}
       footer={
         <>
@@ -603,19 +641,19 @@ function ChannelPicker({ apiBase, auth, notify, conn, onClose, onSaved }) {
       }
     >
       <p className="text-[13px] text-muted">
-        Messages from these channels become memories. Turning a channel off stops syncing; memories already made from it stay until you delete them.
-        To add a private channel, invite the Memro app to it in Slack, then reopen this list.
+        Content from the {units} you turn on becomes memories. Turning one off stops syncing; memories already made from it stay until you delete them.
+        {conn?.provider === "slack" && " To add a private channel, invite the Memro app to it in Slack, then reopen this list."}
       </p>
       <div className="relative mt-4">
         <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-subtle !text-[18px]" />
-        <input className="input pl-9" placeholder="Filter channels" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter channels" />
+        <input className="input pl-9" placeholder={`Filter ${units}`} value={filter} onChange={(e) => setFilter(e.target.value)} aria-label={`Filter ${units}`} />
       </div>
       <ul className="mt-3 -mx-2">
         {sources === null ? (
           <li className="p-2 space-y-2"><Skeleton className="h-4 w-1/2" /><Skeleton className="h-4 w-1/3" /></li>
         ) : shown.length === 0 ? (
           <li className="px-2 py-6 text-[13px] text-subtle text-center">
-            {sources.length ? "No channels match." : "No channels yet. If you just connected, give it a moment and reopen this list."}
+            {sources.length ? `No ${units} match.` : `No ${units} yet. If you just connected, give it a moment and reopen this list.`}
           </li>
         ) : (
           shown.map((s) => (

@@ -1,41 +1,39 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: harvest
-  version: 1.0.0
-  description: Sync time entries, project logs, and notes from Harvest
-
+  version: "1"
+  displayName: Harvest
+  category: work
+  description: Time entries with project, task, client, hours and notes.
+  docsURL: https://help.getharvest.com/api-v2/authentication-api/authentication/authentication/
 spec:
   type: rest
   baseURL: https://api.harvestapp.com/v2
-
-  auth:
-    type: bearer
-    secretRef: HARVEST_ACCESS_TOKEN
-
+  fields:
+    - {name: token, label: Personal access token, secret: true, help: "id.getharvest.com/developers → Create new personal access token."}
+    - {name: accountId, label: Account ID, pattern: "[0-9]{1,12}", help: "Shown next to the token on the same page."}
+  auth: {type: bearer, secretRef: token}
+  headers: {Harvest-Account-Id: "{{config.accountId}}"}
+  verify: {path: /company, accountName: name}
   operations:
-    - name: list_time_entries
+    - name: time_entries
       method: GET
       path: /time_entries
-      pagination:
-        type: page
-        pageParam: page
-      response:
-        itemsPath: time_entries
-
+      queryParams: {per_page: "100", updated_since: "{{checkpoint}}"}
+      pagination: {type: nextURL, cursorPath: links.next}
+      response: {itemsPath: time_entries}
   mapping:
-    id: $.id
-    title: $.notes
-    content: $.notes
-    eventDate: $.updated_at
-    authorName: $.user.name
-
-  sync:
-    mode: incremental
-    checkpoint: updated_at
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 100
+    id: id
+    title: "{{project.name}} · {{task.name}}"
+    content: |
+      {{spent_date}}: {{hours}} h on {{project.name}} / {{task.name}}
+      Client: {{client.name}}
+      Person: {{user.name}}
+      Billable: {{billable}}
+      Notes: {{notes}}
+    memoryType: episodic
+    eventDate: updated_at
+    authorName: user.name
+  sync: {mode: incremental, checkpoint: updated_at}
+  policies: {timeout: 30s, maxRetries: 3}

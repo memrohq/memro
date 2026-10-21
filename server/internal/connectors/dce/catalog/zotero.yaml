@@ -1,44 +1,43 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: zotero
-  version: 1.0.0
-  description: Sync bibliographic items, research papers, and notes from Zotero
-
+  version: "1"
+  displayName: Zotero
+  category: knowledge
+  description: Papers and sources in your Zotero library, with authors and abstracts.
+  docsURL: https://www.zotero.org/settings/keys
 spec:
   type: rest
   baseURL: https://api.zotero.org
-
-  auth:
-    type: apiKey
-    header: Z-Api-Key
-    secretRef: ZOTERO_API_KEY
-
+  fields:
+    - {name: token, label: API key, secret: true, help: "zotero.org/settings/keys → Create new private key (read-only library access)."}
+    - {name: userId, label: User ID, pattern: "[0-9]{1,12}", help: "Shown at the top of zotero.org/settings/keys."}
+  auth: {type: apiKey, secretRef: token, header: Zotero-API-Key}
+  headers: {Zotero-API-Version: "3"}
+  verify: {path: /keys/current, accountId: userID, accountName: username}
   operations:
-    - name: list_items
+    - name: items
       method: GET
-      path: /users/me/items
-      pagination:
-        type: offset
-        offsetParam: start
-        limitParam: limit
-        limit: 50
-      response:
-        itemsPath: "$"
-
+      path: /users/{{config.userId}}/items/top
+      queryParams: {since: "{{checkpoint}}", sort: dateModified, direction: desc}
+      pagination: {type: offset, offsetParam: start, limitParam: limit, limit: 100}
+      response: {itemsPath: $}
   mapping:
-    id: $.key
-    title: $.data.title
-    content: $.data.abstractNote
-    eventDate: $.data.dateModified
-    url: $.data.url
+    id: key
+    title: "{{data.title}}"
+    content: |
+      {{data.title}}
+      Type: {{data.itemType}}
+      Authors: {{data.creators[].lastName}}
+      Published: {{data.date}}
+      In: {{data.publicationTitle}}
+      URL: {{data.url}}
+      DOI: {{data.DOI}}
+      Tags: {{data.tags[].tag}}
 
-  sync:
-    mode: incremental
-    checkpoint: data.dateModified
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 60
+      {{data.abstractNote}}
+    eventDate: data.dateModified
+    url: links.alternate.href
+  sync: {mode: incremental, checkpoint: version, newestFirst: true}
+  policies: {timeout: 30s, maxRetries: 3}

@@ -15,7 +15,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -93,7 +92,20 @@ type ProviderInfo struct {
 	DisplayName      string `json:"display_name,omitempty"`
 	Category         string `json:"category,omitempty"`
 	Description      string `json:"description,omitempty"`
-	SecretRef        string `json:"secret_ref,omitempty"`
+	DocsURL          string `json:"docs_url,omitempty"`
+	// Fields are a token connector's connect form (the token and any
+	// account details such as a subdomain).
+	Fields []FieldInfo `json:"fields,omitempty"`
+}
+
+// FieldInfo is one input of a token connector's connect form.
+type FieldInfo struct {
+	Name        string `json:"name"`
+	Label       string `json:"label"`
+	Help        string `json:"help,omitempty"`
+	Placeholder string `json:"placeholder,omitempty"`
+	Secret      bool   `json:"secret,omitempty"`
+	Optional    bool   `json:"optional,omitempty"`
 }
 
 // Errors returned to API handlers.
@@ -157,25 +169,31 @@ type Deps struct {
 	Quota      extension.QuotaPolicy
 	Usage      extension.UsageMeter
 	HTTPClient *http.Client
+	// Catalog replaces the embedded connector catalog and CatalogClient the
+	// hardened client its requests use; with CatalogClient set, private
+	// addresses are allowed. Both exist for tests against fake APIs and are
+	// never set in production.
+	Catalog       []*dce.Manifest
+	CatalogClient *http.Client
 }
 
 // Manager owns the connectors, their jobs and their webhooks.
 type Manager struct {
-	deps        Deps
-	cfg         config.ConnectorsConfig
-	sealer      *sealer
-	providers   map[string]provider
-	slack       *slackProvider
-	github      *githubProvider
-	linear      *linearProvider
-	sentry      *sentryProvider
-	notion      *notionProvider
-	jira        *jiraProvider
-	gitlab      *gitlabProvider
-	dceRegistry *dce.Registry
-	http        *http.Client
-	wake        chan struct{}
-	now         func() time.Time
+	deps      Deps
+	cfg       config.ConnectorsConfig
+	sealer    *sealer
+	providers map[string]provider
+	slack     *slackProvider
+	github    *githubProvider
+	linear    *linearProvider
+	sentry    *sentryProvider
+	notion    *notionProvider
+	jira      *jiraProvider
+	gitlab    *gitlabProvider
+	catalog   []*catalogProvider
+	http      *http.Client
+	wake      chan struct{}
+	now       func() time.Time
 
 	namesMu sync.Mutex
 	names   map[string]cachedName // Slack user names, by team/user
@@ -256,14 +274,22 @@ func New(d Deps) (*Manager, error) {
 	m.providers[ProviderJira] = m.jira
 	m.providers[ProviderGitLab] = m.gitlab
 
-	// Initialize Declarative Connector Engine (DCE) registry
-	m.dceRegistry = dce.NewRegistry()
-	if err := m.dceRegistry.LoadFromFS(dce.CatalogFS, "catalog"); err != nil {
-		slog.Warn("failed to load embedded catalog, falling back to disk", "err", err)
-		_ = m.dceRegistry.LoadFromDir("server/internal/connectors/dce/catalog")
+	// Catalog connectors (ADR 0014): one manifest each, connected with a token.
+	catalog := d.Catalog
+	if catalog == nil {
+		var err error
+		if catalog, err = dce.Catalog(); err != nil {
+			return nil, fmt.Errorf("connector catalog: %w", err)
+		}
 	}
-	for _, manifest := range m.dceRegistry.All() {
-		m.providers[strings.ToLower(manifest.Metadata.Name)] = newDeclarativeProvider(m, manifest)
+	rt := dce.NewRuntimeWithOptions(d.CatalogClient, nil, dce.Options{AllowPrivateIPs: d.CatalogClient != nil})
+	for _, man := range catalog {
+		if _, native := m.providers[man.Metadata.Name]; native {
+			return nil, fmt.Errorf("catalog connector %q clashes with a built-in connector", man.Metadata.Name)
+		}
+		cp := &catalogProvider{m: m, man: man, rt: rt}
+		m.providers[man.Metadata.Name] = cp
+		m.catalog = append(m.catalog, cp)
 	}
 
 	for name, p := range m.providers {
@@ -272,30 +298,19 @@ func New(d Deps) (*Manager, error) {
 	return m, nil
 }
 
-// RegisterDeclarativeManifest registers a compiled DCE manifest into the manager.
-func (m *Manager) RegisterDeclarativeManifest(manifest *dce.Manifest) error {
-	if err := m.dceRegistry.Register(manifest); err != nil {
-		return err
-	}
-	m.providers[strings.ToLower(manifest.Metadata.Name)] = newDeclarativeProvider(m, manifest)
-	return nil
-}
-
 // Providers lists every connector and whether it is configured.
 func (m *Manager) Providers() []ProviderInfo {
 	list := []ProviderInfo{
 		withMetadata(m.slack.info(), "Slack", "oauth", "communication", "Conversations from channels you choose, kept up to date as people post, edit, and delete."),
 		withMetadata(m.github.info(), "GitHub", "oauth", "engineering", "Issues, pull requests, discussions, and commits from the repositories you share."),
-		withMetadata(m.linear.info(), "Linear", "token", "work", "Issues, initiatives, priorities, and discussion from the teams you select."),
-		withMetadata(m.sentry.info(), "Sentry", "token", "engineering", "Production issues, exceptions, stack traces, and culprit files from the projects you choose."),
-		withMetadata(m.notion.info(), "Notion", "token", "knowledge", "Product specs, architectural decisions, RFCs, and engineering knowledge bases."),
-		withMetadata(m.jira.info(), "Jira", "token", "work", "Epics, stories, bugs, comments, and sprint changes from your Atlassian workspace."),
-		withMetadata(m.gitlab.info(), "GitLab", "token", "engineering", "Merge requests, issues, commits, and pipeline logs from your GitLab repositories."),
+		withMetadata(m.linear.info(), "Linear", "oauth", "work", "Issues, initiatives, priorities, and discussion from the teams you select."),
+		withMetadata(m.sentry.info(), "Sentry", "oauth", "engineering", "Production issues, exceptions, stack traces, and culprit files from the projects you choose."),
+		withMetadata(m.notion.info(), "Notion", "oauth", "knowledge", "Product specs, architectural decisions, RFCs, and engineering knowledge bases."),
+		withMetadata(m.jira.info(), "Jira", "oauth", "work", "Epics, stories, bugs, comments, and sprint changes from your Atlassian workspace."),
+		withMetadata(m.gitlab.info(), "GitLab", "oauth", "engineering", "Merge requests, issues, commits, and pipeline logs from your GitLab repositories."),
 	}
-	for _, manifest := range m.dceRegistry.All() {
-		if p, ok := m.providers[strings.ToLower(manifest.Metadata.Name)]; ok {
-			list = append(list, p.info())
-		}
+	for _, p := range m.catalog {
+		list = append(list, p.info())
 	}
 	return list
 }

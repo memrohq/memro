@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -55,12 +54,13 @@ func (p *linearProvider) authorizeURL(state string) string {
 }
 
 type linearTokenResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int64  `json:"expires_in"`
-	Scope       string `json:"scope"`
-	Error       string `json:"error"`
-	ErrorDesc   string `json:"error_description"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int64  `json:"expires_in"`
+	Scope        string `json:"scope"`
+	Error        string `json:"error"`
+	ErrorDesc    string `json:"error_description"`
 }
 
 func (p *linearProvider) complete(ctx context.Context, q url.Values) (*authorized, error) {
@@ -128,6 +128,8 @@ func (p *linearProvider) complete(ctx context.Context, q url.Values) (*authorize
 		userName:    viewer.Name,
 		creds: map[string]any{
 			"access_token":         tResp.AccessToken,
+			"refresh_token":        tResp.RefreshToken,
+			"expires_at":           tokenExpiry(p.m.now(), tResp.ExpiresIn),
 			"organization_id":      org.ID,
 			"organization_name":    org.Name,
 			"organization_url_key": org.URLKey,
@@ -135,39 +137,59 @@ func (p *linearProvider) complete(ctx context.Context, q url.Values) (*authorize
 	}, nil
 }
 
+// gql runs a query with a bare token (while connecting).
 func (p *linearProvider) gql(ctx context.Context, token, query string, vars map[string]any, out any) error {
-	apiURL := p.m.cfg.LinearAPIURL
-	if apiURL == "" {
-		apiURL = "https://api.linear.app/graphql"
-	}
-
-	body, err := json.Marshal(map[string]any{"query": query, "variables": vars})
+	req, err := p.gqlRequest(ctx, token, query, vars)
 	if err != nil {
 		return err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-
 	resp, err := p.m.http.Do(req)
 	if err != nil {
 		return err
 	}
+	return p.gqlResult(resp, out)
+}
+
+// gqlConn runs a query with the connection's token, refreshing it as needed
+// (Linear apps created after October 2025 get 24-hour tokens).
+func (p *linearProvider) gqlConn(ctx context.Context, c *conn, query string, vars map[string]any, out any) error {
+	ep := tokenEndpoint{URL: "https://api.linear.app/oauth/token", ClientID: p.m.cfg.LinearClientID,
+		ClientSecret: p.m.cfg.LinearClientSecret}
+	resp, err := p.m.oauthDo(ctx, c, ep, func(token string) (*http.Request, error) {
+		return p.gqlRequest(ctx, token, query, vars)
+	})
+	if err != nil {
+		return err
+	}
+	return p.gqlResult(resp, out)
+}
+
+func (p *linearProvider) gqlRequest(ctx context.Context, token, query string, vars map[string]any) (*http.Request, error) {
+	apiURL := p.m.cfg.LinearAPIURL
+	if apiURL == "" {
+		apiURL = "https://api.linear.app/graphql"
+	}
+	body, err := json.Marshal(map[string]any{"query": query, "variables": vars})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	return req, nil
+}
+
+func (p *linearProvider) gqlResult(resp *http.Response, out any) error {
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+	if resp.StatusCode == http.StatusUnauthorized {
 		return &revokedError{"Linear authorization revoked or expired."}
 	}
-	if resp.StatusCode == http.StatusTooManyRequests {
-		return &rateLimitedError{after: time.Minute}
-	}
-	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("linear api status %d: %s", resp.StatusCode, string(b))
+	if err := apiStatus("linear", resp); err != nil {
+		return err
 	}
 
 	return json.NewDecoder(resp.Body).Decode(out)
@@ -187,7 +209,6 @@ func (p *linearProvider) handle(ctx context.Context, c *conn, j *job) error {
 }
 
 func (p *linearProvider) refreshSources(ctx context.Context, c *conn) error {
-	token := c.str("access_token")
 	var q struct {
 		Data struct {
 			Teams struct {
@@ -200,7 +221,7 @@ func (p *linearProvider) refreshSources(ctx context.Context, c *conn) error {
 		} `json:"data"`
 	}
 	query := `query { teams { nodes { id name key } } }`
-	if err := p.gql(ctx, token, query, nil, &q); err != nil {
+	if err := p.gqlConn(ctx, c, query, nil, &q); err != nil {
 		return err
 	}
 
@@ -218,7 +239,6 @@ func (p *linearProvider) refreshSources(ctx context.Context, c *conn) error {
 }
 
 func (p *linearProvider) syncTeam(ctx context.Context, c *conn, teamID string) error {
-	token := c.str("access_token")
 
 	// Read team cursor
 	cursor := ""
@@ -260,7 +280,7 @@ func (p *linearProvider) syncTeam(ctx context.Context, c *conn, teamID string) e
 		}
 	}`
 
-	if err := p.gql(ctx, token, query, vars, &q); err != nil {
+	if err := p.gqlConn(ctx, c, query, vars, &q); err != nil {
 		return err
 	}
 
@@ -285,7 +305,6 @@ func (p *linearProvider) syncTeam(ctx context.Context, c *conn, teamID string) e
 }
 
 func (p *linearProvider) syncIssue(ctx context.Context, c *conn, issueID string) error {
-	token := c.str("access_token")
 	var q struct {
 		Data struct {
 			Issue *linearIssue `json:"issue"`
@@ -307,12 +326,20 @@ func (p *linearProvider) syncIssue(ctx context.Context, c *conn, issueID string)
 		}
 	}`
 
-	if err := p.gql(ctx, token, query, map[string]any{"id": issueID}, &q); err != nil {
+	if err := p.gqlConn(ctx, c, query, map[string]any{"id": issueID}, &q); err != nil {
 		return err
 	}
 
 	if q.Data.Issue == nil {
 		// Issue deleted on Linear
+		return p.m.removeItem(ctx, c, "issue:"+issueID)
+	}
+	// Only teams the user chose: a webhook names issues from every team in
+	// the organization, private ones included. An issue moved out of a chosen
+	// team is removed.
+	if src, err := p.m.source(ctx, c.ID, q.Data.Issue.Team.ID); err != nil {
+		return err
+	} else if src == nil || !src.Enabled {
 		return p.m.removeItem(ctx, c, "issue:"+issueID)
 	}
 

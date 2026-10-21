@@ -1,44 +1,40 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: youtrack
-  version: 1.0.0
-  description: Sync issues, comments, and project updates from JetBrains YouTrack
-
+  version: "1"
+  displayName: YouTrack
+  category: work
+  description: Issues with their project, fields and description.
+  docsURL: https://www.jetbrains.com/help/youtrack/server/manage-permanent-token.html
 spec:
   type: rest
-  baseURL: https://youtrack.jetbrains.com/api
-
-  auth:
-    type: bearer
-    secretRef: YOUTRACK_PERMANENT_TOKEN
-
+  baseURL: https://{{config.host}}/api
+  fields:
+    - {name: host, label: YouTrack host, placeholder: acme.youtrack.cloud, pattern: "[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+(:[0-9]{2,5})?", help: "Your YouTrack address without https://, e.g. acme.youtrack.cloud."}
+    - {name: token, label: Permanent token, secret: true, help: "Profile → Account security → New token, with the YouTrack scope."}
+  auth: {type: bearer, secretRef: token}
+  verify: {path: /users/me, queryParams: {fields: "id,login,fullName"}, accountId: id, accountName: fullName}
   operations:
-    - name: list_issues
+    - name: issues
       method: GET
       path: /issues
       queryParams:
-        fields: "id,summary,description,updated,created"
-      pagination:
-        type: offset
-        offsetParam: $skip
-        limitParam: $top
-        limit: 50
-      response:
-        itemsPath: "$"
-
+        query: "sort by: updated desc"
+        fields: "idReadable,summary,description,created,updated,resolved,project(name),reporter(fullName),customFields(name,value(name,fullName))"
+      pagination: {type: offset, offsetParam: $skip, limitParam: $top, limit: 100}
+      response: {itemsPath: $}
   mapping:
-    id: $.id
-    title: $.summary
-    content: $.description
-    eventDate: $.updated
-
-  sync:
-    mode: incremental
-    checkpoint: updated
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 60
+    id: idReadable
+    title: "{{idReadable}} {{summary}}"
+    content: |
+      {{idReadable}}: {{summary}}
+      Project: {{project.name}}
+      Reporter: {{reporter.fullName}}
+      {{#each customFields}}{{name}}: {{value.name}}{{value.fullName}}
+      {{/each}}
+      {{description}}
+    eventDate: updated
+    authorName: reporter.fullName
+  sync: {mode: incremental, checkpoint: updated, newestFirst: true}
+  policies: {timeout: 30s, maxRetries: 3}

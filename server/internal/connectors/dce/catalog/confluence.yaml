@@ -1,45 +1,46 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: confluence
-  version: 1.0.0
-  description: Sync spaces, pages, and documentation from Atlassian Confluence
-
+  version: "1"
+  displayName: Confluence
+  category: knowledge
+  description: Pages from the Confluence spaces you choose, as plain text.
+  docsURL: https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/
 spec:
   type: rest
-  baseURL: https://api.atlassian.com/ex/confluence
-
-  auth:
-    type: bearer
-    secretRef: CONFLUENCE_ACCESS_TOKEN
-
-  operations:
-    - name: list_pages
+  baseURL: https://{{config.site}}.atlassian.net/wiki
+  fields:
+    - {name: site, label: Site name, placeholder: acme, pattern: "[A-Za-z0-9][A-Za-z0-9-]{0,62}", help: "The part before .atlassian.net in your Confluence URL."}
+    - {name: email, label: Atlassian account email, placeholder: you@company.com}
+    - {name: token, label: API token, secret: true, help: "id.atlassian.com → Security → API tokens."}
+  auth: {type: basic, secretRef: token, username: "{{config.email}}", password: "{{config.token}}"}
+  verify: {path: /rest/api/user/current, accountId: accountId, accountName: displayName}
+  sources:
+    operation:
+      name: spaces
       method: GET
-      path: /wiki/api/v2/pages
-      queryParams:
-        limit: "50"
-      pagination:
-        type: cursor
-        cursorParam: cursor
-        cursorPath: _links.next
-      response:
-        itemsPath: results
-
+      path: /api/v2/spaces
+      queryParams: {limit: "250", status: current}
+      pagination: {type: nextURL, cursorPath: _links.next}
+      response: {itemsPath: results}
+    id: id
+    name: name
+  operations:
+    - name: pages
+      method: GET
+      path: /api/v2/spaces/{{source.id}}/pages
+      queryParams: {limit: "100", body-format: storage, sort: -modified-date, status: current}
+      pagination: {type: nextURL, cursorPath: _links.next}
+      response: {itemsPath: results}
   mapping:
-    id: $.id
-    title: $.title
-    content: $.body.storage.value
-    eventDate: $.version.createdAt
-    authorName: $.authorId
-    url: $._links.webui
+    id: id
+    title: "{{title}}"
+    content: |
+      {{title}}
 
-  sync:
-    mode: incremental
-    checkpoint: version.createdAt
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 100
+      {{body.storage.value|text}}
+    eventDate: version.createdAt
+    authorId: version.authorId
+  sync: {mode: incremental, checkpoint: version.createdAt, newestFirst: true}
+  policies: {timeout: 30s, maxRetries: 3}

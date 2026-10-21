@@ -1,43 +1,65 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: bitbucket
-  version: 1.0.0
-  description: Sync pull requests, issues, and commit activity from Bitbucket Cloud
-
+  version: "1"
+  displayName: Bitbucket
+  category: engineering
+  description: Pull requests from the Bitbucket repositories you choose.
+  docsURL: https://support.atlassian.com/bitbucket-cloud/docs/api-tokens/
 spec:
   type: rest
   baseURL: https://api.bitbucket.org/2.0
-
-  auth:
-    type: bearer
-    secretRef: BITBUCKET_ACCESS_TOKEN
-
-  operations:
-    - name: list_repositories
+  fields:
+    - {name: email, label: Atlassian account email, placeholder: you@company.com}
+    - {name: token, label: API token, secret: true, help: "Bitbucket → Personal settings → API tokens, with read access to repositories and pull requests."}
+    - {name: workspace, label: Workspace ID, placeholder: acme, pattern: "[A-Za-z0-9_.-]{1,100}", help: "The part after bitbucket.org/ in your workspace URL."}
+  auth: {type: basic, secretRef: token, username: "{{config.email}}", password: "{{config.token}}"}
+  verify: {path: /user, accountId: account_id, accountName: display_name}
+  sources:
+    operation:
+      name: repositories
       method: GET
-      path: /repositories
+      path: /repositories/{{config.workspace}}
+      queryParams: {role: member, pagelen: "100", fields: "next,values.slug,values.full_name"}
+      pagination: {type: nextURL, cursorPath: next}
+      response: {itemsPath: values}
+    id: slug
+    name: full_name
+  operations:
+    - name: pullrequests
+      method: GET
+      path: /repositories/{{config.workspace}}/{{source.id}}/pullrequests
       queryParams:
         pagelen: "50"
-      pagination:
-        type: page
-        pageParam: page
-      response:
-        itemsPath: values
-
+        sort: -updated_on
+        q: 'updated_on > {{checkpoint}}'
+        state: OPEN
+      pagination: {type: nextURL, cursorPath: next}
+      response: {itemsPath: values}
+    - name: pullrequests_closed
+      method: GET
+      path: /repositories/{{config.workspace}}/{{source.id}}/pullrequests
+      queryParams:
+        pagelen: "50"
+        sort: -updated_on
+        q: 'updated_on > {{checkpoint}}'
+        state: MERGED
+      pagination: {type: nextURL, cursorPath: next}
+      response: {itemsPath: values}
   mapping:
-    id: $.uuid
-    title: $.name
-    content: $.description
-    eventDate: $.updated_on
-    url: $.links.html.href
+    id: id
+    title: "PR #{{id}}: {{title}}"
+    content: |
+      {{source.repository.full_name}} PR #{{id}}: {{title}}
+      State: {{state}}
+      Author: {{author.display_name}}
+      Branch: {{source.branch.name}} → {{destination.branch.name}}
+      Updated: {{updated_on}}
 
-  sync:
-    mode: incremental
-    checkpoint: updated_on
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 120
+      {{description}}
+    eventDate: updated_on
+    authorName: author.display_name
+    url: links.html.href
+  sync: {mode: incremental, checkpoint: updated_on, newestFirst: true}
+  policies: {timeout: 30s, maxRetries: 3}
