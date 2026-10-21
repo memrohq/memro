@@ -425,7 +425,8 @@ export default function App() {
         </header>
 
         <main className="flex-1 overflow-y-auto scroll-thin">
-          <div className="max-w-[1240px] mx-auto px-4 md:px-8 py-6 md:py-8">
+          {/* The connector catalog uses the full width; other pages keep a reading width. */}
+          <div className={`${view === "integrations" ? "max-w-[1680px]" : "max-w-[1240px]"} mx-auto px-4 md:px-8 py-6 md:py-8`}>
             <div key={view} className="fade-in">
               {activeExtension ? (
                 <ExtensionView view={activeExtension} dark={dark} />
