@@ -11,11 +11,12 @@ it by meaning, keyword or time, and reason over how memories connect.
 | [MCP server](mcp.md) | Use Memro from Claude Code, Codex, Cursor, VS Code and any MCP client. |
 | [API reference](api-reference.md) | Every HTTP endpoint with request and response shapes. |
 | SDKs | [Python](sdks/python.md) · [JavaScript / TypeScript](sdks/javascript.md) · [Go](sdks/go.md) |
-| [Connectors](connectors.md) | Sync Slack channels and GitHub issues and pull requests into memory. |
+| [Connectors](connectors.md) | Sync 50 sources, including Slack, GitHub, Linear, Sentry and Notion, into memory. |
 | [Webhooks](webhooks.md) | Get a POST when an agent stores a memory. |
 | [Limits and errors](limits-and-errors.md) | Rate limits, size limits, quotas and error handling. |
 | [Self-hosting](self-hosting.md) | Run the server, MCP server and dashboard yourself. |
 | [Decision records](decisions/README.md) | Why Memro is built the way it is. |
+| [Memro vs Mem0 vs Zep](comparisons/memro-vs-mem0-vs-zep.md) | How Memro's design differs from other agent memory projects, and when to pick each. |
 
 **Endpoints**
 

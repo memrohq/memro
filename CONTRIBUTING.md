@@ -50,10 +50,15 @@ MEMRO_BASE_URL=http://localhost:8081 memro-mcp
 Docker images are built from the repository root, e.g.
 `docker build -f mcp/Dockerfile .`.
 
+## Quick Start: Contributing a Connector (Easiest Way to Contribute)
+
+Want to contribute without diving into core Go code? You can add support for your favorite tools, services, or APIs in under 15 minutes by adding a declarative YAML manifest in `server/internal/connectors/dce/catalog/`.
+
+👉 Read the [Connector Contribution Guide](docs/contributing/add-a-connector.md) to get started!
+
 ## Making changes
 
-1. Open an issue first for anything larger than a small fix, so we can agree
-   on the approach.
+1. Check our [Good First Issues](https://github.com/memrohq/memro/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) or open an issue first for anything larger than a small fix, so we can agree on the approach.
 2. Keep pull requests focused on one change and include tests.
 3. Run the tests for every component you touched.
 4. Write commit messages that explain *why*, not just *what*.
