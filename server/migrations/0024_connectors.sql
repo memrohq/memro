@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS connector_connections (
     id                  UUID PRIMARY KEY,
     tenant_id           UUID NOT NULL,
     agent_id            TEXT NOT NULL REFERENCES agent_identities(id) ON DELETE CASCADE,
-    provider            TEXT NOT NULL CHECK (provider IN ('slack', 'github', 'linear', 'sentry', 'notion')),
+    provider            TEXT NOT NULL,
     account_id          TEXT NOT NULL,            -- Slack team ID / GitHub installation ID
     account_name        TEXT NOT NULL DEFAULT '',
     external_user_id    TEXT NOT NULL DEFAULT '', -- Slack user ID / GitHub user ID that connected

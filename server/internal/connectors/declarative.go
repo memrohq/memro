@@ -76,9 +76,21 @@ func (s *connectorItemSink) IngestItem(ctx context.Context, norm *dce.Normalized
 		header = fmt.Sprintf("[%s · %s]", strings.ToUpper(s.manifest.Metadata.Name), norm.ID)
 	}
 
-	body := norm.Content
-	if norm.Title != "" && !strings.Contains(norm.Content, norm.Title) {
-		body = norm.Title + "\n\n" + norm.Content
+	body := strings.TrimSpace(norm.Content)
+	if body == "" && norm.Raw != nil {
+		var b strings.Builder
+		for k, v := range norm.Raw {
+			if v != nil && k != "id" && k != "gid" {
+				b.WriteString(fmt.Sprintf("- **%s**: %v\n", k, v))
+			}
+		}
+		body = strings.TrimSpace(b.String())
+	}
+	if norm.Title != "" && !strings.Contains(body, norm.Title) {
+		body = norm.Title + "\n\n" + body
+	}
+	if body == "" {
+		body = norm.ID
 	}
 
 	evDate := norm.EventDate
@@ -128,15 +140,26 @@ func (p *declarativeProvider) handle(ctx context.Context, c *conn, j *job) error
 
 	res, err := runtime.Execute(ctx, p.manifest, sink, cursor)
 	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "api status 401") || strings.Contains(errStr, "api status 403") {
+			return &revokedError{msg: fmt.Sprintf("%s credentials invalid or revoked: %v", dce.FormattedDisplayName(p.manifest.Metadata.Name), err)}
+		}
+		if strings.Contains(errStr, "HTTP 429") || strings.Contains(errStr, "api status 429") {
+			return &rateLimitedError{after: 60 * time.Second}
+		}
 		return err
 	}
 
-	if res.NewCheckpoint != "" {
-		_, _ = p.m.deps.Pool.Exec(ctx, `UPDATE connector_sources SET cursor = $3, last_synced_at = NOW() WHERE connection_id = $1 AND external_id = $2`,
-			c.ID, p.manifest.Metadata.Name, res.NewCheckpoint)
-	} else {
-		_, _ = p.m.deps.Pool.Exec(ctx, `UPDATE connector_sources SET last_synced_at = NOW() WHERE connection_id = $1 AND external_id = $2`,
-			c.ID, p.manifest.Metadata.Name)
+	checkpoint := res.NewCheckpoint
+	if checkpoint == "" {
+		checkpoint = cursor
+	}
+	if err := p.m.saveCursor(ctx, c.ID, p.manifest.Metadata.Name, checkpoint, true); err != nil {
+		return err
+	}
+
+	if res.HasMore {
+		_ = p.m.enqueue(ctx, nil, c.ID, jobSync, p.manifest.Metadata.Name, nil, 0)
 	}
 
 	return nil

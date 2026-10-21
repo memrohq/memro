@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/memrohq/memro/server/internal/auth"
+	"github.com/memrohq/memro/server/internal/connectors/dce"
 )
 
 // StateCookie holds the OAuth state in the browser that started the flow.
@@ -93,6 +94,9 @@ func (m *Manager) ConnectToken(ctx context.Context, providerName, agentID string
 	if err != nil {
 		return nil, err
 	}
+	_, _ = m.deps.Pool.Exec(ctx, `INSERT INTO connector_sources (connection_id, external_id, name, is_private, enabled)
+		VALUES ($1, $2, $3, false, true)
+		ON CONFLICT (connection_id, external_id) DO UPDATE SET enabled = true`, id, providerName, dce.FormattedDisplayName(providerName))
 	if err := m.enqueue(ctx, nil, id, jobSources, jobSources, nil, 0); err != nil {
 		return nil, err
 	}

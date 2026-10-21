@@ -266,9 +266,7 @@ func (p *jiraProvider) syncProject(ctx context.Context, c *conn, projectKey stri
 		}
 	}
 
-	_, _ = p.m.deps.Pool.Exec(ctx, `UPDATE connector_sources SET cursor = '', last_synced_at = NOW() WHERE connection_id = $1 AND external_id = $2`,
-		c.ID, projectKey)
-	return nil
+	return p.m.saveCursor(ctx, c.ID, projectKey, "", true)
 }
 
 func (p *jiraProvider) syncIssue(ctx context.Context, c *conn, issueKey string) error {

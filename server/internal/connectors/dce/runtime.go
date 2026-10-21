@@ -212,6 +212,16 @@ func (r *Runtime) Execute(ctx context.Context, m *Manifest, sink Sink, checkpoin
 		secret = s
 	}
 
+	baseURL := m.Spec.BaseURL
+	if strings.Contains(baseURL, "{") && strings.Contains(secret, ":") {
+		prefix, actualSecret, _ := strings.Cut(secret, ":")
+		baseURL = strings.ReplaceAll(baseURL, "{subdomain}", prefix)
+		baseURL = strings.ReplaceAll(baseURL, "{domain}", prefix)
+		baseURL = strings.ReplaceAll(baseURL, "{account_id}", prefix)
+		baseURL = strings.ReplaceAll(baseURL, "{cloudId}", prefix)
+		secret = actualSecret
+	}
+
 	result := &SyncResult{
 		NewCheckpoint: checkpoint,
 	}
@@ -231,7 +241,7 @@ func (r *Runtime) Execute(ctx context.Context, m *Manifest, sink Sink, checkpoin
 			}
 		}
 
-		reqURL, err := r.buildURL(m.Spec.BaseURL, op, cursor, page)
+		reqURL, err := r.buildURL(baseURL, op, cursor, page)
 		if err != nil {
 			return nil, err
 		}
@@ -241,9 +251,18 @@ func (r *Runtime) Execute(ctx context.Context, m *Manifest, sink Sink, checkpoin
 			return nil, err
 		}
 
-		req, err := http.NewRequestWithContext(ctx, op.Method, reqURL, nil)
+		var bodyReader io.Reader
+		if op.Body != "" {
+			bodyReader = strings.NewReader(op.Body)
+		}
+		req, err := http.NewRequestWithContext(ctx, op.Method, reqURL, bodyReader)
 		if err != nil {
 			return nil, err
+		}
+		if op.Body != "" {
+			req.GetBody = func() (io.ReadCloser, error) {
+				return io.NopCloser(strings.NewReader(op.Body)), nil
+			}
 		}
 
 		r.applyAuth(req, m.Spec.Auth, secret)
@@ -394,6 +413,12 @@ func (r *Runtime) buildURL(baseURL string, op OperationSpec, cursor string, page
 func (r *Runtime) applyAuth(req *http.Request, auth AuthSpec, secret string) {
 	switch auth.Type {
 	case "bearer":
+		if strings.Contains(secret, ":") {
+			// e.g. Trello apiKey:token
+			key, token, _ := strings.Cut(secret, ":")
+			req.Header.Set("Authorization", fmt.Sprintf("OAuth oauth_consumer_key=\"%s\", oauth_token=\"%s\"", key, token))
+			return
+		}
 		prefix := auth.Prefix
 		if prefix == "" {
 			prefix = "Bearer "
@@ -403,6 +428,12 @@ func (r *Runtime) applyAuth(req *http.Request, auth AuthSpec, secret string) {
 		hdr := auth.Header
 		if hdr == "" {
 			hdr = "X-API-Key"
+		}
+		if hdr == "DD-API-KEY" && strings.Contains(secret, ":") {
+			apiKey, appKey, _ := strings.Cut(secret, ":")
+			req.Header.Set("DD-API-KEY", apiKey)
+			req.Header.Set("DD-APPLICATION-KEY", appKey)
+			return
 		}
 		prefix := auth.Prefix
 		req.Header.Set(hdr, prefix+secret)

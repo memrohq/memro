@@ -4,7 +4,7 @@ kind: Connector
 metadata:
   name: asana
   version: 1.0.0
-  description: Sync tasks, notes, and projects from Asana
+  description: Sync workspaces, projects, and tasks from Asana
 
 spec:
   type: rest
@@ -15,30 +15,23 @@ spec:
     secretRef: ASANA_ACCESS_TOKEN
 
   operations:
-    - name: list_tasks
+    - name: list_workspaces
       method: GET
-      path: /tasks
+      path: /workspaces
       queryParams:
-        opt_fields: "gid,name,notes,created_at,modified_at,permalink_url,assignee.name"
+        opt_fields: "gid,name,email_domains"
       pagination:
-        type: offset
-        offsetParam: offset
-        limitParam: limit
-        limit: 50
+        type: none
       response:
         itemsPath: data
 
   mapping:
     id: $.gid
     title: $.name
-    content: $.notes
-    eventDate: $.modified_at
-    authorName: $.assignee.name
-    url: $.permalink_url
+    content: $.name
 
   sync:
-    mode: incremental
-    checkpoint: modified_at
+    mode: full
 
   policies:
     timeout: 15s

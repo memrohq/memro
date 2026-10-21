@@ -295,14 +295,13 @@ func (p *notionProvider) syncSource(ctx context.Context, c *conn, sourceID strin
 		}
 
 		if qRes.HasMore && qRes.NextCursor != "" {
-			_, _ = p.m.deps.Pool.Exec(ctx, `UPDATE connector_sources SET cursor = $3, last_synced_at = NOW() WHERE connection_id = $1 AND external_id = $2`,
-				c.ID, sourceID, qRes.NextCursor)
+			if err := p.m.saveCursor(ctx, c.ID, sourceID, qRes.NextCursor, false); err != nil {
+				return err
+			}
 			return p.m.enqueue(ctx, nil, c.ID, jobSync, sourceID, nil, 0)
 		}
 
-		_, _ = p.m.deps.Pool.Exec(ctx, `UPDATE connector_sources SET cursor = '', last_synced_at = NOW() WHERE connection_id = $1 AND external_id = $2`,
-			c.ID, sourceID)
-		return nil
+		return p.m.saveCursor(ctx, c.ID, sourceID, "", true)
 	}
 
 	// If database query failed, try as individual page
@@ -335,7 +334,10 @@ func (p *notionProvider) syncPage(ctx context.Context, c *conn, pageID string) e
 
 	blocks, _ := p.fetchBlocks(ctx, token, pg.ID)
 	it := notionItem(wsName, &pg, blocks)
-	return p.m.storeItem(ctx, c, it)
+	if err := p.m.storeItem(ctx, c, it); err != nil {
+		return err
+	}
+	return p.m.saveCursor(ctx, c.ID, pageID, "", true)
 }
 
 func (p *notionProvider) setSources(ctx context.Context, c *conn, enabled map[string]bool) error {

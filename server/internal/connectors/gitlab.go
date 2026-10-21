@@ -227,9 +227,7 @@ func (p *gitlabProvider) syncProject(ctx context.Context, c *conn, projectIDStr 
 		}
 	}
 
-	_, _ = p.m.deps.Pool.Exec(ctx, `UPDATE connector_sources SET cursor = '', last_synced_at = NOW() WHERE connection_id = $1 AND external_id = $2`,
-		c.ID, projectIDStr)
-	return nil
+	return p.m.saveCursor(ctx, c.ID, projectIDStr, "", true)
 }
 
 func (p *gitlabProvider) syncMR(ctx context.Context, c *conn, key string) error {

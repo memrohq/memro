@@ -258,15 +258,14 @@ func (p *sentryProvider) syncProject(ctx context.Context, c *conn, projectSlug s
 	// Parse pagination link header if present
 	nextCursor := parseSentryNextCursor(resp.Header.Get("Link"))
 	if nextCursor != "" {
-		_, _ = p.m.deps.Pool.Exec(ctx, `UPDATE connector_sources SET cursor = $3, last_synced_at = NOW() WHERE connection_id = $1 AND external_id = $2`,
-			c.ID, projectSlug, nextCursor)
+		if err := p.m.saveCursor(ctx, c.ID, projectSlug, nextCursor, false); err != nil {
+			return err
+		}
 		return p.m.enqueue(ctx, nil, c.ID, jobSync, projectSlug, nil, 0)
 	}
 
 	// Done
-	_, _ = p.m.deps.Pool.Exec(ctx, `UPDATE connector_sources SET cursor = '', last_synced_at = NOW() WHERE connection_id = $1 AND external_id = $2`,
-		c.ID, projectSlug)
-	return nil
+	return p.m.saveCursor(ctx, c.ID, projectSlug, "", true)
 }
 
 func (p *sentryProvider) syncIssue(ctx context.Context, c *conn, issueID string) error {

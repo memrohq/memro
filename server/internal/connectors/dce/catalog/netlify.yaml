@@ -15,9 +15,9 @@ spec:
     secretRef: NETLIFY_AUTH_TOKEN
 
   operations:
-    - name: list_deploys
+    - name: list_sites
       method: GET
-      path: /deploys
+      path: /sites
       pagination:
         type: page
         pageParam: page
@@ -27,9 +27,9 @@ spec:
   mapping:
     id: $.id
     title: $.name
-    content: $.error_message
-    eventDate: $.created_at
-    url: $.deploy_url
+    content: $.state
+    eventDate: $.updated_at
+    url: $.url
 
   sync:
     mode: incremental

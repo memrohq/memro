@@ -274,15 +274,14 @@ func (p *linearProvider) syncTeam(ctx context.Context, c *conn, teamID string) e
 	pageInfo := q.Data.Team.Issues.PageInfo
 	if pageInfo.HasNextPage && pageInfo.EndCursor != "" {
 		// Update cursor and queue next page
-		_, _ = p.m.deps.Pool.Exec(ctx, `UPDATE connector_sources SET cursor = $3, last_synced_at = NOW() WHERE connection_id = $1 AND external_id = $2`,
-			c.ID, teamID, pageInfo.EndCursor)
+		if err := p.m.saveCursor(ctx, c.ID, teamID, pageInfo.EndCursor, false); err != nil {
+			return err
+		}
 		return p.m.enqueue(ctx, nil, c.ID, jobSync, teamID, nil, 0)
 	}
 
 	// Done: clear cursor
-	_, _ = p.m.deps.Pool.Exec(ctx, `UPDATE connector_sources SET cursor = '', last_synced_at = NOW() WHERE connection_id = $1 AND external_id = $2`,
-		c.ID, teamID)
-	return nil
+	return p.m.saveCursor(ctx, c.ID, teamID, "", true)
 }
 
 func (p *linearProvider) syncIssue(ctx context.Context, c *conn, issueID string) error {

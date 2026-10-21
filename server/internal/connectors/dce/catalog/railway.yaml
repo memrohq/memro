@@ -8,33 +8,33 @@ metadata:
 
 spec:
   type: rest
-  baseURL: https://api.railway.app
+  baseURL: https://backboard.railway.com
 
   auth:
     type: bearer
     secretRef: RAILWAY_API_TOKEN
 
   operations:
-    - name: list_deployments
-      method: GET
-      path: /v1/deployments
+    - name: list_projects
+      method: POST
+      path: /graphql/v2
+      headers:
+        Content-Type: application/json
+      body: '{"query": "query { projects { edges { node { id name description createdAt updatedAt } } } }"}'
       pagination:
-        type: cursor
-        cursorParam: after
-        cursorPath: nextCursor
+        type: none
       response:
-        itemsPath: deployments
+        itemsPath: data.projects.edges
 
   mapping:
-    id: $.id
-    title: $.environmentName
-    content: $.status
-    eventDate: $.createdAt
-    url: $.url
+    id: $.node.id
+    title: $.node.name
+    content: $.node.description
+    eventDate: $.node.updatedAt
 
   sync:
     mode: incremental
-    checkpoint: createdAt
+    checkpoint: node.updatedAt
 
   policies:
     timeout: 15s

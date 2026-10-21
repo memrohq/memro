@@ -16,25 +16,21 @@ spec:
     secretRef: CLICKUP_API_KEY
 
   operations:
-    - name: list_tasks
+    - name: list_workspaces
       method: GET
       path: /team
       pagination:
-        type: page
-        pageParam: page
+        type: none
       response:
-        itemsPath: tasks
+        itemsPath: teams
 
   mapping:
     id: $.id
     title: $.name
-    content: $.text_content
-    eventDate: $.date_updated
-    url: $.url
+    content: $.name
 
   sync:
-    mode: incremental
-    checkpoint: date_updated
+    mode: full
 
   policies:
     timeout: 15s
