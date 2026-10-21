@@ -234,7 +234,17 @@ func (c *Client) CreateIdentity(ctx context.Context) (*AgentIdentity, error) {
 	if err != nil {
 		return nil, err
 	}
-	r, _ := c.jsonReq(http.MethodPost, "/identity", map[string]string{"public_key": kp.PublicKey}, nil)
+	body := map[string]any{"public_key": kp.PublicKey}
+	var pow struct {
+		Difficulty int `json:"difficulty"`
+	}
+	switch err := c.do(ctx, request{method: http.MethodGet, path: "/identity/pow", noAuth: true}, &pow); {
+	case err == nil:
+		body["pow"] = SolvePow(kp.PublicKey, pow.Difficulty)
+	case !IsNotFound(err): // servers older than ADR 0013 have no /identity/pow
+		return nil, err
+	}
+	r, _ := c.jsonReq(http.MethodPost, "/identity", body, nil)
 	r.noAuth = true
 	if err := c.do(ctx, r, nil); err != nil {
 		return nil, err

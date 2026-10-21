@@ -35,6 +35,7 @@
   },
   "homepage": "https://memro.co",
   "dependencies": {
+    "@noble/hashes": "^1.8.0",
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {

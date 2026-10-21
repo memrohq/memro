@@ -7,6 +7,7 @@ it by meaning, keyword or time, and reason over how memories connect.
 |---|---|
 | [Quickstart](quickstart.md) | Connect your coding tools in one command, or call Memro from code in five minutes. |
 | [Concepts](concepts.md) | Agents, memories, memory types, search modes and the memory engine. |
+| [Agents that sign themselves up](agents.md) | How an AI agent creates its own Memro identity with no person involved, and what it can do before a person claims it. |
 | [Authentication](authentication.md) | API keys, signed requests and the device login behind `npx memro-cli connect`. |
 | [MCP server](mcp.md) | Use Memro from Claude Code, Codex, Cursor, VS Code and any MCP client. |
 | [API reference](api-reference.md) | Every HTTP endpoint with request and response shapes. |

@@ -8,10 +8,34 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone
 
 from memro import Agent, MemroClient, Memory, SearchResult
-from memro.crypto import generate_keypair, sign_body
+import hashlib
+
+from memro.crypto import generate_keypair, sign_body, solve_pow
 
 
 # ── Crypto tests ─────────────────────────────────────────────────────────────
+
+def test_solve_pow_meets_difficulty():
+    pub, _ = generate_keypair()
+    ts, nonce = solve_pow(pub, 12, timestamp=1800000000)
+    assert ts == 1800000000
+    digest = hashlib.sha256(f"memro-identity-v1:{pub}:{ts}:{nonce}".encode()).digest()
+    assert int.from_bytes(digest, "big") >> (256 - 12) == 0
+
+def test_create_identity_sends_pow():
+    client = MemroClient(base_url="http://test")
+    calls = []
+    def fake_json(method, path, **kw):
+        calls.append((method, path, kw))
+        if path == "/identity/pow":
+            return {"difficulty": 8, "required": True}
+        return {"agent_id": kw["json_body"]["public_key"]}
+    with patch.object(client, "_json", side_effect=fake_json):
+        ident = client.create_identity()
+    body = calls[-1][2]["json_body"]
+    assert body["public_key"] == ident["agent_id"]
+    digest = hashlib.sha256(f"memro-identity-v1:{body['public_key']}:{body['pow']['timestamp']}:{body['pow']['nonce']}".encode()).digest()
+    assert digest[0] == 0
 
 def test_generate_keypair():
     pub, priv = generate_keypair()

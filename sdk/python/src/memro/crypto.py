@@ -2,6 +2,7 @@
 ed25519 cryptographic operations for the memro protocol.
 Uses PyNaCl (libsodium bindings).
 """
+import hashlib
 import time
 from typing import Tuple
 
@@ -74,3 +75,36 @@ def sign_body(private_key_hex: str, body: bytes) -> dict:
         "X-Signature": signature_hex,
         "X-Timestamp": timestamp,
     }
+
+
+POW_PREFIX = "memro-identity-v1"
+
+
+def _leading_zero_bits(digest: bytes) -> int:
+    n = 0
+    for byte in digest:
+        if byte == 0:
+            n += 8
+            continue
+        return n + 8 - byte.bit_length()
+    return n
+
+
+def solve_pow(public_key: str, difficulty: int, timestamp: int = None) -> Tuple[int, str]:
+    """
+    Proof-of-work for registering an agent (ADR 0013): a nonce whose SHA-256
+    over "memro-identity-v1:<public_key>:<timestamp>:<nonce>" starts with
+    `difficulty` zero bits. Returns (timestamp, nonce). Difficulty 20 takes
+    about a second.
+    """
+    if timestamp is None:
+        timestamp = int(time.time())
+    base = hashlib.sha256(f"{POW_PREFIX}:{public_key}:{timestamp}:".encode())
+    i = 0
+    while True:
+        nonce = format(i, "x")
+        h = base.copy()
+        h.update(nonce.encode())
+        if _leading_zero_bits(h.digest()) >= difficulty:
+            return timestamp, nonce
+        i += 1

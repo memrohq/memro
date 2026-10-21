@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 import requests
 from requests import Response
 
-from .crypto import generate_keypair, sign_body, sign_request
+from .crypto import generate_keypair, sign_body, sign_request, solve_pow
 
 DEFAULT_BASE_URL = "https://api.memro.co"
 API_KEY_PREFIX = "memro_sk_"
@@ -173,9 +173,23 @@ class MemroClient:
         leaves this machine.
         """
         public_key, private_key = generate_keypair()
-        data = self._json("POST", "/identity", json_body={"public_key": public_key}, auth=False)
+        body: Dict[str, Any] = {"public_key": public_key}
+        pow_params = self._pow_params()
+        if pow_params is not None:
+            timestamp, nonce = solve_pow(public_key, int(pow_params.get("difficulty", 0)))
+            body["pow"] = {"timestamp": timestamp, "nonce": nonce}
+        data = self._json("POST", "/identity", json_body=body, auth=False)
         data["private_key"] = private_key
         return data
+
+    def _pow_params(self) -> Optional[dict]:
+        """The server's registration proof-of-work settings, or None if it has none."""
+        try:
+            return self._json("GET", "/identity/pow", auth=False)
+        except MemroError as e:
+            if e.status_code == 404:
+                return None
+            raise
 
     def get_identity(self, agent_id: str) -> dict:
         """Whether an agent is registered: {id, created_at}. The owner is not public."""

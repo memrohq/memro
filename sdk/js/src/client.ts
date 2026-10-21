@@ -2,7 +2,7 @@
  * Low-level HTTP client for the Memro API. One method per endpoint; most
  * code should use `Agent`, which keeps the credentials.
  */
-import { generateKeypair, signRequest } from './crypto.js';
+import { generateKeypair, signRequest, solvePow } from './crypto.js';
 import type {
   ConflictAnalysis, EvolutionResult, ExportData, FileInput, HealthStatus, Memory, MemoryChain,
   MemoryTimeline, ReasoningResult, ResolutionResult, SearchResponse, TemporalResult, TemporalStats,
@@ -154,8 +154,20 @@ export class MemroClient {
   /** Generates a key pair locally and registers only the public key. */
   async createIdentity(): Promise<{ agent_id: string; private_key: string }> {
     const kp = generateKeypair();
-    await this.request('POST', '/identity', { json: { public_key: kp.publicKey }, auth: false });
+    const body: Record<string, unknown> = { public_key: kp.publicKey };
+    const pow = await this.powParams();
+    if (pow) body.pow = solvePow(kp.publicKey, pow.difficulty);
+    await this.request('POST', '/identity', { json: body, auth: false });
     return { agent_id: kp.publicKey, private_key: kp.privateKey };
+  }
+  /** The server's registration proof-of-work settings, or null if it has none. */
+  private async powParams(): Promise<{ difficulty: number; required: boolean } | null> {
+    try {
+      return await this.request<{ difficulty: number; required: boolean }>('GET', '/identity/pow', { auth: false });
+    } catch (e) {
+      if (e instanceof MemroError && e.status === 404) return null;
+      throw e;
+    }
   }
   getIdentity(agentId: string) {
     return this.request<{ id: string; created_at: string }>('GET', `/identity/${agentId}`, { auth: false });

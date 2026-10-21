@@ -18,7 +18,7 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0010](0010-connector-hardening.md) | Connector hardening: untrusted memory content, working claims, safer config writes | 2026-10-19 | Accepted |
 | [0011](0011-slack-and-github-connectors.md) | Slack and GitHub connectors | 2026-10-20 | Accepted |
 | [0012](0012-identity-accounts-and-spaces.md) | Users, agents, accounts and Spaces; API keys cannot delete agents; platform admins | 2026-10-20 | Accepted |
-| [0013](0013-agent-keys-claims-and-expiry.md) | Agent identity separate from its keys; claiming and expiry | 2026-10-21 | Accepted |
+| [0013](0013-agent-keys-claims-and-expiry.md) | Agent identity separate from its keys; claiming and expiry | 2026-10-21 | Accepted (steps 1 and 4 built) |
 | [0014](0014-declarative-connector-engine.md) | Declarative Connector Engine (DCE) | 2026-10-21 | Accepted |
 | [0015](0015-verified-code-memory.md) | Verified memory for coding agents: anchors, validity and provenance | 2026-10-21 | Proposed |
 

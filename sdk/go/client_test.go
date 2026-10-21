@@ -3,7 +3,10 @@ package memro
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -124,5 +127,49 @@ func TestDefaultsToMemroCloud(t *testing.T) {
 	t.Setenv("MEMRO_BASE_URL", "")
 	if got := NewClient(nil).BaseURL(); got != DefaultBaseURL {
 		t.Fatalf("base URL = %q", got)
+	}
+}
+
+func TestCreateIdentitySolvesTheServerProof(t *testing.T) {
+	var sent struct {
+		PublicKey string   `json:"public_key"`
+		Pow       PowProof `json:"pow"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/identity/pow":
+			io.WriteString(w, `{"difficulty":8,"required":true}`)
+		case "/identity":
+			_ = json.NewDecoder(r.Body).Decode(&sent)
+			io.WriteString(w, `{"agent_id":"x"}`)
+		}
+	}))
+	defer srv.Close()
+	id, err := NewClient(&ClientOptions{BaseURL: srv.URL}).CreateIdentity(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("memro-identity-v1:%s:%d:%s", sent.PublicKey, sent.Pow.Timestamp, sent.Pow.Nonce)))
+	if sent.PublicKey != id.AgentID || sum[0] != 0 {
+		t.Fatalf("proof %+v for %s does not meet 8 bits", sent.Pow, sent.PublicKey)
+	}
+}
+
+func TestCreateIdentityWithoutPowEndpoint(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/identity/pow" {
+			http.Error(w, `{"error":"Identity not found"}`, http.StatusNotFound)
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		io.WriteString(w, `{}`)
+	}))
+	defer srv.Close()
+	if _, err := NewClient(&ClientOptions{BaseURL: srv.URL}).CreateIdentity(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body["pow"]; ok {
+		t.Fatal("sent a proof to a server that has none")
 	}
 }
