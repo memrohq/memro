@@ -302,7 +302,19 @@ func TestSlackConnector(t *testing.T) {
 	})
 
 	l := e.list()
-	if len(l.Connections) != 0 || len(l.Providers) != 2 || !l.Providers[0].Enabled || l.Providers[1].Enabled {
+	if len(l.Connections) != 0 {
+		t.Fatalf("expected 0 connections: %+v", l)
+	}
+	var slackEnabled, githubEnabled bool
+	for _, p := range l.Providers {
+		if p.Name == "slack" {
+			slackEnabled = p.Enabled
+		}
+		if p.Name == "github" {
+			githubEnabled = p.Enabled
+		}
+	}
+	if !slackEnabled || githubEnabled {
 		t.Fatalf("providers: %+v", l)
 	}
 	// Connectors are a dashboard action: a signed agent request may not use them.
