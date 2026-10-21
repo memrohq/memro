@@ -43,6 +43,12 @@ type connEnv struct {
 }
 
 func setupConnectors(t *testing.T, memoryCap int, mutate func(*config.Config)) *connEnv {
+	return setupConnectorsDeps(t, memoryCap, mutate, nil)
+}
+
+// setupConnectorsDeps also lets a test change the connector manager's
+// dependencies (a fake HTTP transport, a test catalog).
+func setupConnectorsDeps(t *testing.T, memoryCap int, mutate func(*config.Config), deps func(*connectors.Deps)) *connEnv {
 	key := make([]byte, 32)
 	_, _ = rand.Read(key)
 	var mgr *connectors.Manager
@@ -55,8 +61,12 @@ func setupConnectors(t *testing.T, memoryCap int, mutate func(*config.Config)) *
 		mutate(&d.Config)
 		quota := extension.PerAgentCap{Max: memoryCap}
 		d.Quota = quota
-		m, err := connectors.New(connectors.Deps{Config: d.Config, Pool: d.Store.Pool, Store: d.Store, Indexer: d.Indexer,
-			Invalidate: d.Engine.Cache().InvalidateAgent, Quota: quota})
+		cd := connectors.Deps{Config: d.Config, Pool: d.Store.Pool, Store: d.Store, Indexer: d.Indexer,
+			Invalidate: d.Engine.Cache().InvalidateAgent, Quota: quota}
+		if deps != nil {
+			deps(&cd)
+		}
+		m, err := connectors.New(cd)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -1,41 +1,48 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: netlify
-  version: 1.0.0
-  description: Sync deploys, site statuses, and edge logs from Netlify
-
+  version: "1"
+  displayName: Netlify
+  category: engineering
+  description: Deploys of the sites you choose, with branch, commit and errors.
+  docsURL: https://docs.netlify.com/api/get-started/#authentication
 spec:
   type: rest
   baseURL: https://api.netlify.com/api/v1
-
-  auth:
-    type: bearer
-    secretRef: NETLIFY_AUTH_TOKEN
-
-  operations:
-    - name: list_sites
+  fields:
+    - {name: token, label: Personal access token, secret: true, help: "User settings → Applications → Personal access tokens."}
+  auth: {type: bearer, secretRef: token}
+  verify: {path: /user, accountId: id, accountName: full_name}
+  sources:
+    operation:
+      name: sites
       method: GET
       path: /sites
-      pagination:
-        type: page
-        pageParam: page
-      response:
-        itemsPath: "$"
-
+      queryParams: {filter: all}
+      pagination: {type: page, pageParam: page, limitParam: per_page, limit: 100}
+      response: {itemsPath: $}
+    id: id
+    name: name
+  operations:
+    - name: deploys
+      method: GET
+      path: /sites/{{source.id}}/deploys
+      pagination: {type: page, pageParam: page, limitParam: per_page, limit: 100}
+      response: {itemsPath: $}
   mapping:
-    id: $.id
-    title: $.name
-    content: $.state
-    eventDate: $.updated_at
-    url: $.url
-
-  sync:
-    mode: incremental
-    checkpoint: created_at
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 100
+    id: id
+    title: "{{name}} deploy ({{context}})"
+    content: |
+      Netlify deploy of {{name}}
+      State: {{state}}
+      Context: {{context}}
+      Branch: {{branch}}
+      Commit: {{title}}
+      URL: {{deploy_ssl_url}}
+      Error: {{error_message}}
+    memoryType: episodic
+    eventDate: created_at
+    url: admin_url
+  sync: {mode: incremental, checkpoint: created_at, newestFirst: true, overlap: 6h}
+  policies: {timeout: 30s, maxRetries: 3}

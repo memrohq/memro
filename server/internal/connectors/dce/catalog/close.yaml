@@ -1,45 +1,37 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: close
-  version: 1.0.0
-  description: Sync leads, opportunities, and sales activities from Close CRM
-
+  version: "1"
+  displayName: Close
+  category: communication
+  description: Leads with their status, contacts and description.
+  docsURL: https://developer.close.com/topics/authentication/
 spec:
   type: rest
   baseURL: https://api.close.com/api/v1
-
-  auth:
-    type: apiKey
-    header: Authorization
-    prefix: "Bearer "
-    secretRef: CLOSE_API_KEY
-
+  fields:
+    - {name: token, label: API key, secret: true, help: "Settings → Developer → API Keys."}
+  auth: {type: basic, secretRef: token, username: "{{config.token}}", password: ""}
+  verify: {path: /me/, accountId: id, accountName: "{{first_name}} {{last_name}}"}
   operations:
-    - name: list_leads
+    - name: leads
       method: GET
-      path: /lead
-      pagination:
-        type: offset
-        offsetParam: _skip
-        limitParam: _limit
-        limit: 50
-      response:
-        itemsPath: data
-
+      path: /lead/
+      queryParams: {_order_by: -date_updated}
+      pagination: {type: offset, offsetParam: _skip, limitParam: _limit, limit: 100}
+      response: {itemsPath: data}
   mapping:
-    id: $.id
-    title: $.name
-    content: $.description
-    eventDate: $.date_updated
-    url: $.url
+    id: id
+    title: "{{display_name}}"
+    content: |
+      Close lead: {{display_name}}
+      Status: {{status_label}}
+      Contacts: {{contacts[].name}}
+      Website: {{url}}
 
-  sync:
-    mode: incremental
-    checkpoint: date_updated
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 100
+      {{description}}
+    eventDate: date_updated
+    url: html_url
+  sync: {mode: incremental, checkpoint: date_updated, newestFirst: true}
+  policies: {timeout: 30s, maxRetries: 3}

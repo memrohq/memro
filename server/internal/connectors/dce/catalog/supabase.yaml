@@ -1,39 +1,34 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: supabase
-  version: 1.0.0
-  description: Sync projects, organizations, and database states from Supabase Management API
-
+  version: "1"
+  displayName: Supabase
+  category: engineering
+  description: Your Supabase projects with their region, status and database version.
+  docsURL: https://supabase.com/docs/reference/api/introduction
 spec:
   type: rest
   baseURL: https://api.supabase.com/v1
-
-  auth:
-    type: bearer
-    secretRef: SUPABASE_ACCESS_TOKEN
-
+  fields:
+    - {name: token, label: Personal access token, secret: true, help: "Account → Access Tokens."}
+  auth: {type: bearer, secretRef: token}
+  verify: {path: /organizations}
   operations:
-    - name: list_projects
+    - name: projects
       method: GET
       path: /projects
-      pagination:
-        type: none
-      response:
-        itemsPath: "$"
-
+      response: {itemsPath: $}
   mapping:
-    id: $.id
-    title: $.name
-    content: $.status
-    eventDate: $.created_at
-
-  sync:
-    mode: incremental
-    checkpoint: created_at
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 60
+    id: id
+    title: "Supabase project {{name}}"
+    content: |
+      Supabase project {{name}} ({{id}})
+      Organization: {{organization_id}}
+      Region: {{region}}
+      Status: {{status}}
+      Postgres: {{database.version}}
+      Created: {{created_at}}
+    eventDate: created_at
+  sync: {mode: full}
+  policies: {timeout: 30s, maxRetries: 3}

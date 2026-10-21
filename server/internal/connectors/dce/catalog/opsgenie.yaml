@@ -1,46 +1,40 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: opsgenie
-  version: 1.0.0
-  description: Sync alerts, on-call schedules, and notifications from Opsgenie
-
+  version: "1"
+  displayName: Opsgenie
+  category: engineering
+  description: Alerts with their priority, status, owner and tags.
+  docsURL: https://support.atlassian.com/opsgenie/docs/api-key-management/
 spec:
   type: rest
-  baseURL: https://api.opsgenie.com/v2
-
-  auth:
-    type: apiKey
-    header: Authorization
-    prefix: "GenieKey "
-    secretRef: OPSGENIE_API_KEY
-
+  baseURL: https://api.{{config.region}}opsgenie.com/v2
+  fields:
+    - {name: token, label: API key, secret: true, help: "An API integration key with Read access (Settings → Integrations → API)."}
+    - {name: region, label: "Region (EU accounts: eu.)", optional: true, placeholder: "eu.", pattern: "eu\\.", help: "Leave empty for US accounts; enter eu. for EU accounts."}
+  auth: {type: apiKey, secretRef: token, header: Authorization, prefix: "GenieKey "}
+  verify: {path: /account, accountName: data.name}
   operations:
-    - name: list_alerts
+    - name: alerts
       method: GET
       path: /alerts
-      queryParams:
-        limit: "50"
-      pagination:
-        type: offset
-        offsetParam: offset
-        limitParam: limit
-        limit: 50
-      response:
-        itemsPath: data
-
+      queryParams: {sort: updatedAt, order: desc}
+      pagination: {type: offset, offsetParam: offset, limitParam: limit, limit: 100}
+      response: {itemsPath: data}
   mapping:
-    id: $.id
-    title: $.message
-    content: $.description
-    eventDate: $.updatedAt
-
-  sync:
-    mode: incremental
-    checkpoint: updatedAt
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 100
+    id: id
+    title: "#{{tinyId}} {{message}}"
+    content: |
+      Opsgenie alert #{{tinyId}}: {{message}}
+      Status: {{status}}
+      Priority: {{priority}}
+      Owner: {{owner}}
+      Acknowledged: {{acknowledged}}
+      Source: {{source}}
+      Tags: {{tags[]}}
+      Created: {{createdAt}}
+    memoryType: episodic
+    eventDate: updatedAt
+  sync: {mode: incremental, checkpoint: updatedAt, newestFirst: true, overlap: 168h}
+  policies: {timeout: 30s, maxRetries: 3}

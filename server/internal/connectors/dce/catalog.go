@@ -2,136 +2,87 @@ package dce
 
 import (
 	"embed"
+	"fmt"
+	"io/fs"
+	"path"
+	"sort"
 	"strings"
 )
 
+// The connector catalog: one YAML manifest per service, built into the
+// binary. Each becomes a token connector the user connects by pasting an API
+// token (ADR 0014).
+//
 //go:embed catalog/*.yaml
-var CatalogFS embed.FS
+var catalogFS embed.FS
 
-// CategoryMapping maps connector names to intuitive dashboard categories.
-var CategoryMapping = map[string]string{
-	"asana":    "work",
-	"monday":   "work",
-	"trello":   "work",
-	"clickup":  "work",
-	"basecamp": "work",
-	"shortcut": "work",
-	"youtrack": "work",
-	"todoist":  "work",
-	"height":   "work",
-	"linear":   "work",
-	"jira":     "work",
+// Categories shown in the dashboard, in order.
+var Categories = []string{"engineering", "knowledge", "work", "communication"}
 
-	"github":     "engineering",
-	"gitlab":     "engineering",
-	"sentry":     "engineering",
-	"datadog":    "engineering",
-	"pagerduty":  "engineering",
-	"opsgenie":   "engineering",
-	"newrelic":   "engineering",
-	"circleci":   "engineering",
-	"snyk":       "engineering",
-	"sonarcloud": "engineering",
-	"netlify":    "engineering",
-	"vercel":     "engineering",
-	"railway":    "engineering",
-	"render":     "engineering",
-	"supabase":   "engineering",
-	"postman":    "engineering",
-	"bitbucket":  "engineering",
-
-	"notion":     "knowledge",
-	"confluence": "knowledge",
-	"airtable":   "knowledge",
-	"coda":       "knowledge",
-	"outline":    "knowledge",
-	"obsidian":   "knowledge",
-	"readwise":   "knowledge",
-	"raindrop":   "knowledge",
-	"pocket":     "knowledge",
-	"zotero":     "knowledge",
-
-	"slack":     "communication",
-	"discord":   "communication",
-	"hubspot":   "communication",
-	"intercom":  "communication",
-	"zendesk":   "communication",
-	"freshdesk": "communication",
-	"front":     "communication",
-	"close":     "communication",
-	"pipedrive": "communication",
-	"harvest":   "communication",
-	"helpscout": "communication",
+// Catalog loads and validates every manifest in catalog/. A broken manifest
+// is a build error, caught by TestCatalog, not something to skip at run time.
+func Catalog() ([]*Manifest, error) {
+	files, err := fs.Glob(catalogFS, "catalog/*.yaml")
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(files)
+	var out []*Manifest
+	seen := map[string]bool{}
+	for _, f := range files {
+		data, err := catalogFS.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		m, err := ParseManifestYAML(data)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", f, err)
+		}
+		if want := strings.TrimSuffix(path.Base(f), ".yaml"); m.Metadata.Name != want {
+			return nil, fmt.Errorf("%s: metadata.name %q must match the file name", f, m.Metadata.Name)
+		}
+		if err := checkCatalogEntry(m); err != nil {
+			return nil, fmt.Errorf("%s: %w", f, err)
+		}
+		if seen[m.Metadata.Name] {
+			return nil, fmt.Errorf("%s: duplicate connector %q", f, m.Metadata.Name)
+		}
+		seen[m.Metadata.Name] = true
+		out = append(out, m)
+	}
+	return out, nil
 }
 
-// DisplayNames maps connector names to proper display casing.
-var DisplayNames = map[string]string{
-	"asana":      "Asana",
-	"monday":     "Monday.com",
-	"trello":     "Trello",
-	"clickup":    "ClickUp",
-	"basecamp":   "Basecamp",
-	"shortcut":   "Shortcut",
-	"youtrack":   "YouTrack",
-	"todoist":    "Todoist",
-	"height":     "Height",
-	"linear":     "Linear",
-	"jira":       "Jira",
-	"github":     "GitHub",
-	"gitlab":     "GitLab",
-	"sentry":     "Sentry",
-	"datadog":    "Datadog",
-	"pagerduty":  "PagerDuty",
-	"opsgenie":   "Opsgenie",
-	"newrelic":   "New Relic",
-	"circleci":   "CircleCI",
-	"snyk":       "Snyk",
-	"sonarcloud": "SonarCloud",
-	"netlify":    "Netlify",
-	"vercel":     "Vercel",
-	"railway":    "Railway",
-	"render":     "Render",
-	"supabase":   "Supabase",
-	"postman":    "Postman",
-	"bitbucket":  "Bitbucket",
-	"notion":     "Notion",
-	"confluence": "Confluence",
-	"airtable":   "Airtable",
-	"coda":       "Coda",
-	"outline":    "Outline",
-	"obsidian":   "Obsidian",
-	"readwise":   "Readwise",
-	"raindrop":   "Raindrop.io",
-	"pocket":     "Pocket",
-	"zotero":     "Zotero",
-	"slack":      "Slack",
-	"discord":    "Discord",
-	"hubspot":    "HubSpot",
-	"intercom":   "Intercom",
-	"zendesk":    "Zendesk",
-	"freshdesk":  "Freshdesk",
-	"front":      "Front",
-	"close":      "Close CRM",
-	"pipedrive":  "Pipedrive",
-	"harvest":    "Harvest",
-	"helpscout":  "Help Scout",
-}
-
-// FormattedDisplayName returns the formatted name for a connector.
-func FormattedDisplayName(name string) string {
-	if dn, ok := DisplayNames[strings.ToLower(name)]; ok {
-		return dn
+// checkCatalogEntry holds catalog manifests to more than Validate: the
+// dashboard needs a name, category and docs link, the user needs a secret
+// field to paste the token into, and connecting needs a verify request.
+func checkCatalogEntry(m *Manifest) error {
+	md := m.Metadata
+	if md.DisplayName == "" || md.DocsURL == "" {
+		return fmt.Errorf("displayName and docsURL are required in the catalog")
 	}
-	if len(name) > 0 {
-		return strings.ToUpper(name[:1]) + name[1:]
+	known := false
+	for _, c := range Categories {
+		known = known || c == md.Category
 	}
-	return name
-}
-
-// CategoryFor returns the category for a connector name.
-func CategoryFor(name string) string {
-	if cat, ok := CategoryMapping[strings.ToLower(name)]; ok {
-		return cat
+	if !known {
+		return fmt.Errorf("category %q is not one of %v", md.Category, Categories)
 	}
-	return "work"
+	if !strings.HasPrefix(md.DocsURL, "https://") {
+		return fmt.Errorf("docsURL must be https")
+	}
+	if !strings.HasPrefix(m.Spec.BaseURL, "https://") {
+		return fmt.Errorf("baseURL must be https")
+	}
+	secret := false
+	for _, f := range m.Spec.Fields {
+		secret = secret || f.Secret
+	}
+	if !secret {
+		return fmt.Errorf("a catalog connector needs a secret field for the token")
+	}
+	if m.Spec.Verify == nil {
+		return fmt.Errorf("a catalog connector needs a verify request")
+	}
+	return nil
 }

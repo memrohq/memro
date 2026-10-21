@@ -1,44 +1,45 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: coda
-  version: 1.0.0
-  description: Sync documents, tables, and formulas from Coda
-
+  version: "1"
+  displayName: Coda
+  category: knowledge
+  description: The page outline of the Coda docs you choose.
+  docsURL: https://coda.io/developers/apis/v1#section/Introduction/Authentication
 spec:
   type: rest
   baseURL: https://coda.io/apis/v1
-
-  auth:
-    type: bearer
-    secretRef: CODA_API_TOKEN
-
-  operations:
-    - name: list_docs
+  fields:
+    - {name: token, label: API token, secret: true, help: "Account settings → API settings → Generate API token (read-only)."}
+  auth: {type: bearer, secretRef: token}
+  verify: {path: /whoami, accountId: loginId, accountName: name}
+  sources:
+    operation:
+      name: docs
       method: GET
       path: /docs
-      queryParams:
-        limit: "50"
-      pagination:
-        type: cursor
-        cursorParam: pageToken
-        cursorPath: nextPageToken
-      response:
-        itemsPath: items
-
+      queryParams: {limit: "100"}
+      pagination: {type: cursor, cursorParam: pageToken, cursorPath: nextPageToken}
+      response: {itemsPath: items}
+    id: id
+    name: name
+  operations:
+    - name: pages
+      method: GET
+      path: /docs/{{source.id}}/pages
+      queryParams: {limit: "100"}
+      pagination: {type: cursor, cursorParam: pageToken, cursorPath: nextPageToken}
+      response: {itemsPath: items}
   mapping:
-    id: $.id
-    title: $.name
-    content: $.description
-    eventDate: $.updatedAt
-    url: $.browserLink
-
-  sync:
-    mode: incremental
-    checkpoint: updatedAt
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 100
+    id: id
+    title: "{{name}}"
+    content: |
+      Coda page: {{name}}
+      {{subtitle}}
+      Parent: {{parent.name}}
+      Link: {{browserLink}}
+    eventDate: updatedAt
+    url: browserLink
+  sync: {mode: full}
+  policies: {timeout: 30s, maxRetries: 3}

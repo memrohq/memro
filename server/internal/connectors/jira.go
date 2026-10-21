@@ -9,7 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -168,6 +168,7 @@ func (p *jiraProvider) complete(ctx context.Context, q url.Values) (*authorized,
 		creds: map[string]any{
 			"access_token":  tResp.AccessToken,
 			"refresh_token": tResp.RefreshToken,
+			"expires_at":    tokenExpiry(p.m.now(), tResp.ExpiresIn),
 			"cloud_id":      site.ID,
 			"site_name":     site.Name,
 			"site_url":      site.URL,
@@ -175,40 +176,33 @@ func (p *jiraProvider) complete(ctx context.Context, q url.Values) (*authorized,
 	}, nil
 }
 
-func (p *jiraProvider) apiGet(ctx context.Context, c *conn, path string, out any) error {
-	cloudID := c.str("cloud_id")
-	token := c.str("access_token")
+func (p *jiraProvider) tokenEndpoint() tokenEndpoint {
+	return tokenEndpoint{URL: "https://auth.atlassian.com/oauth/token", ClientID: p.m.cfg.JiraClientID,
+		ClientSecret: p.m.cfg.JiraClientSecret, JSON: true}
+}
 
+func (p *jiraProvider) apiGet(ctx context.Context, c *conn, path string, out any) error {
 	base := p.m.cfg.JiraAPIURL
 	if base == "" {
 		base = "https://api.atlassian.com"
 	}
-	apiURL := fmt.Sprintf("%s/ex/jira/%s%s", base, cloudID, path)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := p.m.http.Do(req)
+	apiURL := fmt.Sprintf("%s/ex/jira/%s%s", base, url.PathEscape(c.str("cloud_id")), path)
+	resp, err := p.m.oauthDo(ctx, c, p.tokenEndpoint(), func(token string) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/json")
+		return req, nil
+	})
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return &revokedError{"Jira authorization revoked or expired."}
+	if err := apiStatus("jira", resp); err != nil {
+		return err
 	}
-	if resp.StatusCode == http.StatusTooManyRequests {
-		return &rateLimitedError{after: time.Minute}
-	}
-	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("jira api status %d: %s", resp.StatusCode, string(b))
-	}
-
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
@@ -249,24 +243,56 @@ func (p *jiraProvider) refreshSources(ctx context.Context, c *conn) error {
 	return p.m.replaceSources(ctx, c.ID, sources, false)
 }
 
+// syncProject reads one page of a project's issues, oldest change first,
+// from the last checkpoint (less a day: JQL dates are in the user's time
+// zone), and queues the next page until the pass is done.
 func (p *jiraProvider) syncProject(ctx context.Context, c *conn, projectKey string) error {
-	jql := fmt.Sprintf("project = '%s' ORDER BY updated DESC", projectKey)
-	path := fmt.Sprintf("/rest/api/3/search?jql=%s&maxResults=50&fields=*all", url.QueryEscape(jql))
-
-	var searchRes struct {
-		Issues []jiraIssue `json:"issues"`
+	src, err := p.m.source(ctx, c.ID, projectKey)
+	if err != nil {
+		return err
 	}
-	if err := p.apiGet(ctx, c, path, &searchRes); err != nil {
+	if src == nil || !src.Enabled {
+		return nil
+	}
+	var st syncState
+	if src.cursor != "" {
+		_ = json.Unmarshal([]byte(src.cursor), &st)
+	}
+	jql := fmt.Sprintf(`project = "%s"`, strings.ReplaceAll(projectKey, `"`, ``))
+	if t := parseJiraTime(st.Checkpoint); !t.IsZero() {
+		jql += fmt.Sprintf(` AND updated >= "%s"`, t.Add(-24*time.Hour).Format("2006-01-02 15:04"))
+	} else if p.m.cfg.BackfillDays > 0 {
+		jql += fmt.Sprintf(` AND updated >= -%dd`, p.m.cfg.BackfillDays)
+	}
+	jql += " ORDER BY updated ASC"
+	q := url.Values{"jql": {jql}, "maxResults": {"100"}, "fields": {"*all"}}
+	if st.Cursor != "" {
+		q.Set("nextPageToken", st.Cursor)
+	}
+	var res struct {
+		Issues        []jiraIssue `json:"issues"`
+		NextPageToken string      `json:"nextPageToken"`
+		IsLast        bool        `json:"isLast"`
+	}
+	if err := p.apiGet(ctx, c, "/rest/api/3/search/jql?"+q.Encode(), &res); err != nil {
 		return fmt.Errorf("jira search issues: %w", err)
 	}
-
-	for _, issue := range searchRes.Issues {
-		if err := p.ingestIssue(ctx, c, &issue); err != nil {
+	for i := range res.Issues {
+		if err := p.ingestIssue(ctx, c, &res.Issues[i]); err != nil {
 			return err
 		}
+		st.High = laterOf(st.High, res.Issues[i].Fields.Updated)
 	}
-
-	return p.m.saveCursor(ctx, c.ID, projectKey, "", true)
+	if res.NextPageToken != "" && !res.IsLast && len(res.Issues) > 0 {
+		st.Cursor = res.NextPageToken
+		b, _ := json.Marshal(st)
+		if err := p.m.saveCursor(ctx, c.ID, projectKey, string(b), false); err != nil {
+			return err
+		}
+		return p.m.enqueue(ctx, nil, c.ID, jobSync, projectKey, nil, 0)
+	}
+	b, _ := json.Marshal(syncState{Checkpoint: laterOf(st.Checkpoint, st.High)})
+	return p.m.saveCursor(ctx, c.ID, projectKey, string(b), true)
 }
 
 func (p *jiraProvider) syncIssue(ctx context.Context, c *conn, issueKey string) error {
@@ -274,6 +300,10 @@ func (p *jiraProvider) syncIssue(ctx context.Context, c *conn, issueKey string) 
 	var issue jiraIssue
 	if err := p.apiGet(ctx, c, path, &issue); err != nil {
 		return fmt.Errorf("jira get issue %s: %w", issueKey, err)
+	}
+	// Only projects the user chose: a webhook names any issue on the site.
+	if src, err := p.m.source(ctx, c.ID, issue.Fields.Project.Key); err != nil || src == nil || !src.Enabled {
+		return err
 	}
 	return p.ingestIssue(ctx, c, &issue)
 }
@@ -352,41 +382,56 @@ func VerifyJiraWebhookSignature(secret, sig string, body []byte) bool {
 	return subtle.ConstantTimeCompare([]byte(strings.ToLower(sig)), []byte(strings.ToLower(expected))) == 1
 }
 
-// JiraWebhook processes incoming Jira cloud webhooks.
-func (m *Manager) JiraWebhook(ctx context.Context, hdr http.Header, query url.Values, body []byte) int {
-	if m.cfg.JiraWebhookSecret != "" {
-		sig := hdr.Get("X-Hub-Signature")
-		if sig == "" {
-			sig = hdr.Get("X-Atlassian-Webhook-Signature")
-		}
-		if !VerifyJiraWebhookSignature(m.cfg.JiraWebhookSecret, sig, body) {
-			if query.Get("secret") != m.cfg.JiraWebhookSecret {
-				metrics.ConnectorWebhooks.WithLabelValues(ProviderJira, "bad_signature").Inc()
-				return http.StatusUnauthorized
-			}
-		}
+// JiraWebhook processes Jira webhooks. They must carry an HMAC signature
+// made with JIRA_WEBHOOK_SECRET; without the secret configured, webhooks are
+// off and the periodic sync keeps data current. The issue is re-fetched with
+// each matching connection's own token, so a webhook never decides content.
+func (m *Manager) JiraWebhook(ctx context.Context, hdr http.Header, body []byte) int {
+	if m.cfg.JiraWebhookSecret == "" {
+		return http.StatusServiceUnavailable
+	}
+	sig := hdr.Get("X-Hub-Signature")
+	if sig == "" {
+		sig = hdr.Get("X-Atlassian-Webhook-Signature")
+	}
+	if !VerifyJiraWebhookSignature(m.cfg.JiraWebhookSecret, sig, body) {
+		metrics.ConnectorWebhooks.WithLabelValues(ProviderJira, "bad_signature").Inc()
+		return http.StatusUnauthorized
 	}
 
 	var ev JiraWebhookEvent
 	if err := json.Unmarshal(body, &ev); err != nil {
 		return http.StatusBadRequest
 	}
-
 	metrics.ConnectorWebhooks.WithLabelValues(ProviderJira, ev.WebhookEvent).Inc()
-
-	if ev.Issue.Key == "" {
+	if ev.Issue.Key == "" || ev.Issue.Fields.Project.Key == "" {
 		return http.StatusOK
 	}
-
-	// Schedule sync across all connections for this Jira project
-	conns, err := m.connectionsForAccount(ctx, ProviderJira, ev.Issue.Fields.Project.ID, true)
-	if err != nil || len(conns) == 0 {
+	conns, err := m.connectionsWithSource(ctx, ProviderJira, jiraCloudID(ev.Issue.Self), ev.Issue.Fields.Project.Key)
+	if err != nil {
+		slog.Error("jira webhook", "err", err)
 		return http.StatusOK
 	}
-
 	for _, c := range conns {
+		if ev.WebhookEvent == "jira:issue_deleted" {
+			if cc, err := m.open(ctx, c); err == nil {
+				_ = m.removeItem(ctx, cc, "issue:"+ev.Issue.Key)
+			}
+			continue
+		}
 		_ = m.enqueue(ctx, nil, c.ID, jobItem, ev.Issue.Key, nil, 5*time.Second)
 	}
-
 	return http.StatusOK
+}
+
+// jiraCloudID is the site ID in an issue's API URL
+// (https://api.atlassian.com/ex/jira/<cloud id>/rest/...), or "" for a
+// site-hosted URL.
+func jiraCloudID(self string) string {
+	_, rest, ok := strings.Cut(self, "/ex/jira/")
+	if !ok {
+		return ""
+	}
+	id, _, _ := strings.Cut(rest, "/")
+	return id
 }

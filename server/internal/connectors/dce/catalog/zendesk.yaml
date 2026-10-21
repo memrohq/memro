@@ -1,42 +1,42 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: zendesk
-  version: 1.0.0
-  description: Sync support tickets, satisfaction ratings, and customer comments from Zendesk
-
+  version: "1"
+  displayName: Zendesk
+  category: communication
+  description: Support tickets with their status, priority, tags and description.
+  docsURL: https://support.zendesk.com/hc/en-us/articles/4408889192858-Managing-access-to-the-Zendesk-API
 spec:
   type: rest
-  baseURL: https://api.zendesk.com/api/v2
-
-  auth:
-    type: bearer
-    secretRef: ZENDESK_API_TOKEN
-
+  baseURL: https://{{config.subdomain}}.zendesk.com/api/v2
+  fields:
+    - {name: subdomain, label: Subdomain, placeholder: acme, pattern: "[A-Za-z0-9][A-Za-z0-9-]{0,62}", help: "The part before .zendesk.com in your Zendesk URL."}
+    - {name: email, label: Agent email, placeholder: you@company.com}
+    - {name: token, label: API token, secret: true, help: "Admin Center → Apps and integrations → Zendesk API → Add API token."}
+  auth: {type: basic, secretRef: token, username: "{{config.email}}/token", password: "{{config.token}}"}
+  verify: {path: /users/me.json, accountId: user.id, accountName: user.name}
   operations:
-    - name: list_tickets
+    - name: tickets
       method: GET
       path: /tickets.json
-      pagination:
-        type: cursor
-        cursorParam: page[after]
-        cursorPath: meta.after_cursor
-      response:
-        itemsPath: tickets
-
+      queryParams: {"page[size]": "100", sort: -updated_at}
+      pagination: {type: cursor, cursorParam: "page[after]", cursorPath: meta.after_cursor}
+      response: {itemsPath: tickets}
   mapping:
-    id: $.id
-    title: $.subject
-    content: $.description
-    eventDate: $.updated_at
-    url: $.url
+    id: id
+    title: "#{{id}} {{subject}}"
+    content: |
+      Zendesk ticket #{{id}}: {{subject}}
+      Status: {{status}}
+      Priority: {{priority}}
+      Type: {{type}}
+      Channel: {{via.channel}}
+      Tags: {{tags[]}}
+      Created: {{created_at}}
 
-  sync:
-    mode: incremental
-    checkpoint: updated_at
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 100
+      {{description}}
+    memoryType: episodic
+    eventDate: updated_at
+  sync: {mode: incremental, checkpoint: updated_at, newestFirst: true}
+  policies: {timeout: 30s, maxRetries: 3}

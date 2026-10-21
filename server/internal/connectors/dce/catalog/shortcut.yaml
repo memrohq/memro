@@ -1,45 +1,42 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: shortcut
-  version: 1.0.0
-  description: Sync stories, epics, and iterations from Shortcut (formerly Clubhouse)
-
+  version: "1"
+  displayName: Shortcut
+  category: work
+  description: Stories with their type, state, labels and description.
+  docsURL: https://developer.shortcut.com/api/rest/v3#Authentication
 spec:
   type: rest
   baseURL: https://api.app.shortcut.com/api/v3
-
-  auth:
-    type: apiKey
-    header: Shortcut-Token
-    secretRef: SHORTCUT_API_TOKEN
-
+  fields:
+    - {name: token, label: API token, secret: true, help: "Settings → Your account → API Tokens."}
+  auth: {type: apiKey, secretRef: token, header: Shortcut-Token}
+  verify: {path: /member, accountId: id, accountName: profile.name}
   operations:
-    - name: list_stories
+    - name: stories
       method: GET
-      path: /stories/search
+      path: /search/stories
       queryParams:
-        page_size: "50"
-      pagination:
-        type: cursor
-        cursorParam: next
-        cursorPath: next
-      response:
-        itemsPath: data
-
+        query: "updated:{{checkpoint|date|or:2000-01-01}}..*"
+        page_size: "25"
+        detail: full
+      pagination: {type: nextURL, cursorPath: next}
+      response: {itemsPath: data}
   mapping:
-    id: $.id
-    title: $.name
-    content: $.description
-    eventDate: $.updated_at
-    url: $.app_url
+    id: id
+    title: "sc-{{id}} {{name}}"
+    content: |
+      Shortcut story sc-{{id}}: {{name}}
+      Type: {{story_type}}
+      Completed: {{completed}}
+      Estimate: {{estimate}}
+      Labels: {{labels[].name}}
+      Deadline: {{deadline}}
 
-  sync:
-    mode: incremental
-    checkpoint: updated_at
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 120
+      {{description}}
+    eventDate: updated_at
+    url: app_url
+  sync: {mode: incremental, checkpoint: updated_at}
+  policies: {timeout: 30s, maxRetries: 3}

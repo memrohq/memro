@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,7 +22,7 @@ type sentryIssue struct {
 	Culprit   string               `json:"culprit"`
 	Level     string               `json:"level"`
 	Status    string               `json:"status"`
-	Count     int                  `json:"count"`
+	Count     flexInt              `json:"count"` // a string in Sentry's API
 	UserCount int                  `json:"userCount"`
 	FirstSeen time.Time            `json:"firstSeen"`
 	LastSeen  time.Time            `json:"lastSeen"`
@@ -195,4 +196,22 @@ func sentryItem(issue *sentryIssue, latestEvent *sentryEvent) item {
 		EventDate: &eventDate,
 		Meta:      meta,
 	}
+}
+
+// flexInt decodes a number sent either as a JSON number or as a string
+// (Sentry sends issue counts as strings, which can exceed 32 bits).
+type flexInt int64
+
+func (f *flexInt) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), `"`)
+	if s == "" || s == "null" {
+		*f = 0
+		return nil
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return err
+	}
+	*f = flexInt(n)
+	return nil
 }

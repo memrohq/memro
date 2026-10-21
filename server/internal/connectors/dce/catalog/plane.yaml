@@ -1,0 +1,47 @@
+apiVersion: memro.dev/v1
+kind: Connector
+metadata:
+  name: plane
+  version: "1"
+  displayName: Plane
+  category: work
+  description: Work items from the Plane projects you choose.
+  docsURL: https://developers.plane.so/api-reference/introduction
+spec:
+  type: rest
+  baseURL: https://{{config.host}}/api/v1
+  fields:
+    - {name: token, label: API key, secret: true, help: "Profile settings → Personal access tokens."}
+    - {name: workspace, label: Workspace slug, placeholder: acme, pattern: "[A-Za-z0-9_-]{1,100}", help: "The part after app.plane.so/ in your workspace URL."}
+    - {name: host, label: API host, placeholder: api.plane.so, pattern: "[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+(:[0-9]{2,5})?", help: "api.plane.so for Plane Cloud, or your self-hosted domain."}
+  auth: {type: apiKey, secretRef: token, header: X-API-Key}
+  verify: {path: /users/me/, accountId: id, accountName: display_name}
+  sources:
+    operation:
+      name: projects
+      method: GET
+      path: /workspaces/{{config.workspace}}/projects/
+      queryParams: {per_page: "100"}
+      pagination: {type: cursor, cursorParam: cursor, cursorPath: next_cursor}
+      response: {itemsPath: results}
+    id: id
+    name: name
+  operations:
+    - name: issues
+      method: GET
+      path: /workspaces/{{config.workspace}}/projects/{{source.id}}/issues/
+      queryParams: {per_page: "100", order_by: "-updated_at"}
+      pagination: {type: cursor, cursorParam: cursor, cursorPath: next_cursor}
+      response: {itemsPath: results}
+  mapping:
+    id: id
+    title: "{{name}}"
+    content: |
+      Plane work item #{{sequence_id}}: {{name}}
+      Priority: {{priority}}
+      Target date: {{target_date}}
+
+      {{description_stripped}}
+    eventDate: updated_at
+  sync: {mode: incremental, checkpoint: updated_at, newestFirst: true}
+  policies: {timeout: 30s, maxRetries: 3}

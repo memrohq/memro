@@ -1,39 +1,37 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: todoist
-  version: 1.0.0
-  description: Sync active tasks, projects, and comments from Todoist
-
+  version: "1"
+  displayName: Todoist
+  category: work
+  description: Your open Todoist tasks with due dates, priorities and labels.
+  docsURL: https://todoist.com/help/articles/find-your-api-token-Jpzx9IIlB
 spec:
   type: rest
-  baseURL: https://api.todoist.com/rest/v2
-
-  auth:
-    type: bearer
-    secretRef: TODOIST_API_TOKEN
-
+  baseURL: https://api.todoist.com/api/v1
+  fields:
+    - {name: token, label: API token, secret: true, help: "Settings → Integrations → Developer → API token."}
+  auth: {type: bearer, secretRef: token}
+  verify: {path: /user, accountId: id, accountName: full_name}
   operations:
-    - name: list_tasks
+    - name: tasks
       method: GET
       path: /tasks
-      pagination:
-        type: none
-      response:
-        itemsPath: "$"
-
+      queryParams: {limit: "200"}
+      pagination: {type: cursor, cursorParam: cursor, cursorPath: next_cursor}
+      response: {itemsPath: results}
   mapping:
-    id: $.id
-    title: $.content
-    content: $.description
-    eventDate: $.due.datetime
-    url: $.url
+    id: id
+    title: "{{content}}"
+    content: |
+      Todoist task: {{content}}
+      Due: {{due.string}} ({{due.date}})
+      Priority: {{priority}}
+      Labels: {{labels[]}}
+      Project: {{project_id}}
 
-  sync:
-    mode: full
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 120
+      {{description}}
+    eventDate: updated_at
+  sync: {mode: full}
+  policies: {timeout: 30s, maxRetries: 3}

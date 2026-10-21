@@ -1,43 +1,40 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: sonarcloud
-  version: 1.0.0
-  description: Sync code smells, bugs, and security hotspots from SonarCloud
-
+  version: "1"
+  displayName: SonarQube Cloud
+  category: engineering
+  description: Code issues across your organization's projects, with severity and rule.
+  docsURL: https://docs.sonarsource.com/sonarqube-cloud/advanced-setup/web-api/
 spec:
   type: rest
   baseURL: https://sonarcloud.io/api
-
-  auth:
-    type: bearer
-    secretRef: SONARCLOUD_TOKEN
-
+  fields:
+    - {name: token, label: User token, secret: true, help: "My Account → Security → Generate token."}
+    - {name: organization, label: Organization key, pattern: "[A-Za-z0-9_.-]{1,255}", help: "Shown in your organization's URL, sonarcloud.io/organizations/<key>."}
+  auth: {type: bearer, secretRef: token}
+  verify: {path: /organizations/search, queryParams: {organizations: "{{config.organization}}"}, accountId: organizations.0.key, accountName: organizations.0.name}
   operations:
-    - name: list_issues
+    - name: issues
       method: GET
       path: /issues/search
-      queryParams:
-        ps: "50"
-      pagination:
-        type: page
-        pageParam: p
-      response:
-        itemsPath: issues
-
+      queryParams: {organization: "{{config.organization}}", s: UPDATE_DATE, asc: "false", resolved: "false"}
+      pagination: {type: page, pageParam: p, limitParam: ps, limit: 100}
+      response: {itemsPath: issues}
   mapping:
-    id: $.key
-    title: $.message
-    content: $.rule
-    eventDate: $.updateDate
-    authorName: $.author
-
-  sync:
-    mode: incremental
-    checkpoint: updateDate
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 60
+    id: key
+    title: "{{message}}"
+    content: |
+      SonarQube Cloud issue in {{project}}: {{message}}
+      File: {{component}}
+      Line: {{line}}
+      Severity: {{severity}}
+      Type: {{type}}
+      Status: {{status}}
+      Rule: {{rule}}
+      Author: {{author}}
+    eventDate: updateDate
+    authorName: author
+  sync: {mode: incremental, checkpoint: updateDate, newestFirst: true}
+  policies: {timeout: 30s, maxRetries: 3}

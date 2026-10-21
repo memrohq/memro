@@ -1,0 +1,42 @@
+apiVersion: memro.dev/v1
+kind: Connector
+metadata:
+  name: buildkite
+  version: "1"
+  displayName: Buildkite
+  category: engineering
+  description: Builds across your organization's pipelines, with state, branch and commit.
+  docsURL: https://buildkite.com/docs/apis/managing-api-tokens
+spec:
+  type: rest
+  baseURL: https://api.buildkite.com/v2
+  fields:
+    - {name: token, label: API access token, secret: true, help: "Personal settings → API Access Tokens, with read_builds and read_pipelines."}
+    - {name: org, label: Organization slug, placeholder: acme, pattern: "[a-z0-9][a-z0-9-]{0,99}", help: "The part after buildkite.com/ in your organization's URL."}
+  auth: {type: bearer, secretRef: token}
+  verify: {path: /access-token, accountId: uuid}
+  operations:
+    - name: builds
+      method: GET
+      path: /organizations/{{config.org}}/builds
+      queryParams: {per_page: "100", created_from: "{{checkpoint}}"}
+      pagination: {type: linkHeader}
+      response: {itemsPath: $}
+  mapping:
+    id: id
+    title: "{{pipeline.name}} build #{{number}}"
+    content: |
+      Buildkite build #{{number}} of {{pipeline.name}}
+      State: {{state}}
+      Branch: {{branch}}
+      Commit: {{commit}}
+      Message: {{message}}
+      Created by: {{creator.name}}
+      Started: {{started_at}}
+      Finished: {{finished_at}}
+    memoryType: episodic
+    eventDate: created_at
+    authorName: creator.name
+    url: web_url
+  sync: {mode: incremental, checkpoint: created_at, newestFirst: true, overlap: 6h}
+  policies: {timeout: 30s, maxRetries: 3}

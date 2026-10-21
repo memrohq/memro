@@ -1,0 +1,40 @@
+apiVersion: memro.dev/v1
+kind: Connector
+metadata:
+  name: figma
+  version: "1"
+  displayName: Figma
+  category: knowledge
+  description: Design files in the Figma team projects you choose.
+  docsURL: https://help.figma.com/hc/en-us/articles/8085703771159-Manage-personal-access-tokens
+spec:
+  type: rest
+  baseURL: https://api.figma.com/v1
+  fields:
+    - {name: token, label: Personal access token, secret: true, help: "Settings → Security → Personal access tokens, with file and project read scopes."}
+    - {name: teamId, label: Team ID, pattern: "[0-9]{1,30}", help: "The number after /team/ in your team's URL."}
+  auth: {type: apiKey, secretRef: token, header: X-Figma-Token}
+  verify: {path: /me, accountId: id, accountName: handle}
+  sources:
+    operation:
+      name: projects
+      method: GET
+      path: /teams/{{config.teamId}}/projects
+      response: {itemsPath: projects}
+    id: id
+    name: name
+  operations:
+    - name: files
+      method: GET
+      path: /projects/{{source.id}}/files
+      response: {itemsPath: files}
+  mapping:
+    id: key
+    title: "{{name}}"
+    content: |
+      Figma file: {{name}}
+      Last modified: {{last_modified}}
+      Link: https://www.figma.com/design/{{key}}
+    eventDate: last_modified
+  sync: {mode: full}
+  policies: {timeout: 30s, maxRetries: 3}

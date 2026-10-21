@@ -1,42 +1,43 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: intercom
-  version: 1.0.0
-  description: Sync customer conversations, lead tickets, and admin replies from Intercom
-
+  version: "1"
+  displayName: Intercom
+  category: communication
+  description: Customer conversations with their state, assignee and first message.
+  docsURL: https://developers.intercom.com/docs/build-an-integration/learn-more/authentication
 spec:
   type: rest
-  baseURL: https://api.intercom.io
-
-  auth:
-    type: bearer
-    secretRef: INTERCOM_ACCESS_TOKEN
-
+  baseURL: https://{{config.host}}
+  fields:
+    - {name: token, label: Access token, secret: true, help: "Developer Hub → your app → Authentication → Access token."}
+    - {name: host, label: Region, placeholder: api.intercom.io, pattern: "api\\.intercom\\.io|api\\.eu\\.intercom\\.io|api\\.au\\.intercom\\.io", help: "api.intercom.io, or api.eu.intercom.io / api.au.intercom.io for EU and Australian workspaces."}
+  auth: {type: bearer, secretRef: token}
+  headers: {Intercom-Version: "2.11"}
+  verify: {path: /me, accountId: app.id_code, accountName: app.name}
   operations:
-    - name: list_conversations
+    - name: conversations
       method: GET
       path: /conversations
-      pagination:
-        type: cursor
-        cursorParam: starting_after
-        cursorPath: pages.next.starting_after
-      response:
-        itemsPath: conversations
-
+      queryParams: {per_page: "60"}
+      pagination: {type: cursor, cursorParam: starting_after, cursorPath: pages.next.starting_after}
+      response: {itemsPath: conversations}
   mapping:
-    id: $.id
-    title: $.source.subject
-    content: $.source.body
-    eventDate: $.updated_at
-    authorName: $.source.author.name
+    id: id
+    title: "{{source.subject|text}}"
+    content: |
+      Intercom conversation {{id}}
+      Title: {{title}}
+      State: {{state}}
+      From: {{source.author.name}} <{{source.author.email}}>
+      Assignee: {{admin_assignee_id}}
+      Tags: {{tags.tags[].name}}
 
-  sync:
-    mode: incremental
-    checkpoint: updated_at
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 100
+      {{source.body|text}}
+    memoryType: episodic
+    eventDate: updated_at
+    authorName: source.author.name
+    url: source.url
+  sync: {mode: incremental, checkpoint: updated_at, newestFirst: true}
+  policies: {timeout: 30s, maxRetries: 3}

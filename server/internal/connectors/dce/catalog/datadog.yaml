@@ -1,41 +1,42 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: datadog
-  version: 1.0.0
-  description: Sync monitors, alert statuses, and incidents from Datadog
-
+  version: "1"
+  displayName: Datadog
+  category: engineering
+  description: Monitors with their queries, messages and current state.
+  docsURL: https://docs.datadoghq.com/account_management/api-app-keys/
 spec:
   type: rest
-  baseURL: https://api.datadoghq.com/api/v1
-
-  auth:
-    type: apiKey
-    header: DD-API-KEY
-    secretRef: DATADOG_API_KEY
-
+  baseURL: https://api.{{config.site}}
+  fields:
+    - {name: site, label: Datadog site, placeholder: datadoghq.com, pattern: "datadoghq\\.com|us3\\.datadoghq\\.com|us5\\.datadoghq\\.com|datadoghq\\.eu|ap1\\.datadoghq\\.com|ap2\\.datadoghq\\.com|ddog-gov\\.com", help: "The domain in your Datadog URL, e.g. datadoghq.eu."}
+    - {name: apiKey, label: API key, secret: true, help: "Organization settings → API keys."}
+    - {name: appKey, label: Application key, secret: true, help: "Organization settings → Application keys, scoped to monitors_read."}
+  auth: {type: apiKey, secretRef: apiKey, header: DD-API-KEY}
+  headers: {DD-APPLICATION-KEY: "{{config.appKey}}"}
+  verify: {path: /api/v1/monitor, queryParams: {page_size: "1"}}
   operations:
-    - name: list_monitors
+    - name: monitors
       method: GET
-      path: /monitor
-      pagination:
-        type: none
-      response:
-        itemsPath: "$"
-
+      path: /api/v1/monitor
+      queryParams: {page_size: "100"}
+      pagination: {type: page, pageParam: page, zeroBased: true, limit: 100}
+      response: {itemsPath: $}
   mapping:
-    id: $.id
-    title: $.name
-    content: $.message
-    eventDate: $.modified
-    authorName: $.creator.name
+    id: id
+    title: "Monitor: {{name}}"
+    content: |
+      Datadog monitor: {{name}}
+      State: {{overall_state}}
+      Type: {{type}}
+      Query: {{query}}
+      Tags: {{tags[]}}
+      Created by: {{creator.name}}
 
-  sync:
-    mode: incremental
-    checkpoint: modified
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 120
+      {{message}}
+    eventDate: modified
+    authorName: creator.name
+  sync: {mode: full}
+  policies: {timeout: 30s, maxRetries: 3}

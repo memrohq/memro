@@ -1,0 +1,41 @@
+apiVersion: memro.dev/v1
+kind: Connector
+metadata:
+  name: gong
+  version: "1"
+  displayName: Gong
+  category: communication
+  description: Recorded calls with their title, time, duration and scope.
+  docsURL: https://help.gong.io/docs/receive-access-to-the-api
+spec:
+  type: rest
+  baseURL: https://{{config.host}}/v2
+  fields:
+    - {name: host, label: API base host, placeholder: api.gong.io, pattern: "api\\.gong\\.io|[a-z0-9-]+\\.api\\.gong\\.io", help: "Company settings → API: the host of the base URL shown there."}
+    - {name: accessKey, label: Access key, help: "Company settings → API → Create access key."}
+    - {name: token, label: Access key secret, secret: true, help: "Shown once, next to the access key."}
+  auth: {type: basic, secretRef: token, username: "{{config.accessKey}}", password: "{{config.token}}"}
+  verify: {path: /users}
+  operations:
+    - name: calls
+      method: GET
+      path: /calls
+      queryParams: {fromDateTime: "{{checkpoint}}"}
+      pagination: {type: cursor, cursorParam: cursor, cursorPath: records.cursor}
+      response: {itemsPath: calls}
+  mapping:
+    id: id
+    title: "{{title}}"
+    content: |
+      Gong call: {{title}}
+      Started: {{started}}
+      Duration: {{duration}} s
+      Direction: {{direction}}
+      Scope: {{scope}}
+      System: {{system}}
+      Recording: {{url}}
+    memoryType: episodic
+    eventDate: started
+    url: url
+  sync: {mode: incremental, checkpoint: started}
+  policies: {timeout: 30s, maxRetries: 3}

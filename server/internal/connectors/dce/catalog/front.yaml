@@ -1,41 +1,37 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: front
-  version: 1.0.0
-  description: Sync shared inbox conversations, assignments, and tags from Front
-
+  version: "1"
+  displayName: Front
+  category: communication
+  description: Conversations with their status, assignee, tags and latest message.
+  docsURL: https://dev.frontapp.com/docs/create-and-revoke-api-tokens
 spec:
   type: rest
   baseURL: https://api2.frontapp.com
-
-  auth:
-    type: bearer
-    secretRef: FRONT_API_TOKEN
-
+  fields:
+    - {name: token, label: API token, secret: true, help: "Settings → Developers → API tokens, with the Shared resources read scope."}
+  auth: {type: bearer, secretRef: token}
+  verify: {path: /me, accountId: id, accountName: name}
   operations:
-    - name: list_conversations
+    - name: conversations
       method: GET
       path: /conversations
-      pagination:
-        type: cursor
-        cursorParam: page_token
-        cursorPath: _pagination.next
-      response:
-        itemsPath: _results
-
+      queryParams: {limit: "100"}
+      pagination: {type: nextURL, cursorPath: _pagination.next}
+      response: {itemsPath: _results}
   mapping:
-    id: $.id
-    title: $.subject
-    content: $.teaser
-    eventDate: $.created_at
-
-  sync:
-    mode: incremental
-    checkpoint: created_at
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 100
+    id: id
+    title: "{{subject}}"
+    content: |
+      Front conversation: {{subject}}
+      Status: {{status}}
+      Assignee: {{assignee.email}}
+      Contact: {{recipient.handle}}
+      Tags: {{tags[].name}}
+      Latest message: {{last_message.blurb}}
+    memoryType: episodic
+    eventDate: last_message.created_at
+  sync: {mode: full}
+  policies: {timeout: 30s, maxRetries: 3}

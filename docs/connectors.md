@@ -1,4 +1,4 @@
-# Connectors: Slack, GitHub, Linear, Sentry, and Notion
+# Connectors
 
 Connectors sync content from the tools your team uses into an agent's
 memory, and keep it current. Each connection belongs to the dashboard user
@@ -36,6 +36,82 @@ Memro automatically parses ticket keys (`ENG-123`), PR/Issue shorthand (`#42`), 
 - Synced text is written by other people. Treat it as untrusted input in
   your agents, as with any memory (see [ADR 0010](decisions/0010-connector-hardening.md)).
 
+## Token connectors (the catalog)
+
+Besides the sign-in connectors above (Slack, GitHub, Linear, Sentry, Notion,
+Jira, GitLab), 43 services connect with an API token the user pastes in the
+dashboard. Each is one manifest in
+[`server/internal/connectors/dce/catalog`](../server/internal/connectors/dce/catalog)
+run by the declarative connector engine ([ADR 0014](decisions/0014-declarative-connector-engine.md)).
+
+- **Connecting checks the token** with a cheap request to the service and
+  names the account; a wrong token or field is refused with a message and
+  nothing is saved.
+- **The token is encrypted** (AES-256-GCM with `CONNECTOR_ENCRYPTION_KEY`,
+  bound to the connection) and stored in Postgres with the connection. It is
+  never returned by the API, logged, or put in Secret Manager. Secret Manager
+  holds only the server's own keys, so the number of users does not matter.
+- **Syncs are incremental where the service allows it** (a checkpoint sent as
+  a filter), page through in jobs of 5 pages, and resume where they stopped
+  after a restart. Services without a filter are re-read every 30 minutes;
+  unchanged items cost nothing (chunk hashes).
+- **A refused token (401) marks the connection disconnected**; the user
+  reconnects with a new one.
+- Requests go only to the service's own host: private, loopback and metadata
+  addresses are refused when connecting, and redirects to another host are
+  not followed.
+
+| Area | Connector | What becomes memory | You enter | Sources |
+|---|---|---|---|---|
+| Engineering | Bitbucket | Pull requests from the Bitbucket repositories you choose. | Atlassian account email, API token, Workspace ID | you choose |
+| Engineering | Buildkite | Builds across your organization's pipelines, with state, branch and commit. | API access token, Organization slug | everything the token reads |
+| Engineering | CircleCI | Pipelines with their branch, commit and trigger. | Personal API token, Organization slug | everything the token reads |
+| Engineering | Datadog | Monitors with their queries, messages and current state. | Datadog site, API key, Application key | everything the token reads |
+| Engineering | Grafana | Dashboards in your Grafana instance, with folders and tags. | Grafana host, Service account token | everything the token reads |
+| Engineering | Netlify | Deploys of the sites you choose, with branch, commit and errors. | Personal access token | you choose |
+| Engineering | New Relic | Alert issues with their priority, state, entities and condition. | User key, Account ID, API host | everything the token reads |
+| Engineering | Opsgenie | Alerts with their priority, status, owner and tags. | API key, Region (EU accounts: eu.) | everything the token reads |
+| Engineering | PagerDuty | Incidents with their service, urgency, status and responders. | API key | everything the token reads |
+| Engineering | Postman | Your Postman collections and who owns them. | API key | everything the token reads |
+| Engineering | Render | Deploys of the services you choose, with status and commit. | API key | you choose |
+| Engineering | Snyk | Open security issues in your Snyk organization, with severity and status. | API token, Organization ID, API host | everything the token reads |
+| Engineering | SonarQube Cloud | Code issues across your organization's projects, with severity and rule. | User token, Organization key | everything the token reads |
+| Engineering | Supabase | Your Supabase projects with their region, status and database version. | Personal access token | everything the token reads |
+| Engineering | Vercel | Deployments with their target, state, branch and commit. | Access token, Team ID | everything the token reads |
+| Knowledge | Airtable | Records from the tables of one Airtable base, every field included. | Personal access token, Base ID | you choose |
+| Knowledge | Coda | The page outline of the Coda docs you choose. | API token | you choose |
+| Knowledge | Confluence | Pages from the Confluence spaces you choose, as plain text. | Site name, Atlassian account email, API token | you choose |
+| Knowledge | Figma | Design files in the Figma team projects you choose. | Personal access token, Team ID | you choose |
+| Knowledge | Outline | Every document in your Outline workspace, in Markdown. | Outline host, API key | everything the token reads |
+| Knowledge | Raindrop.io | Your bookmarks with excerpts, notes, highlights and tags. | Test token | everything the token reads |
+| Knowledge | Readwise | Your books and articles with every highlight and note. | Access token | everything the token reads |
+| Knowledge | Zotero | Papers and sources in your Zotero library, with authors and abstracts. | API key, User ID | everything the token reads |
+| Work | Asana | Tasks assigned to you in the Asana workspaces you choose. | Personal access token | you choose |
+| Work | ClickUp | Tasks, including closed ones and subtasks, from the workspaces you choose. | Personal API token | you choose |
+| Work | Harvest | Time entries with project, task, client, hours and notes. | Personal access token, Account ID | everything the token reads |
+| Work | monday.com | Items from the monday.com boards you choose, with every column. | Personal API token | you choose |
+| Work | Plane | Work items from the Plane projects you choose. | API key, Workspace slug, API host | you choose |
+| Work | Shortcut | Stories with their type, state, labels and description. | API token | everything the token reads |
+| Work | Todoist | Your open Todoist tasks with due dates, priorities and labels. | API token | everything the token reads |
+| Work | Trello | Cards from the Trello boards you choose, with lists, labels and due dates. | API key, Token | you choose |
+| Work | Wrike | Tasks with their status, importance, dates and description. | Permanent access token, Data center host | everything the token reads |
+| Work | YouTrack | Issues with their project, fields and description. | YouTrack host, Permanent token | everything the token reads |
+| Communication | Close | Leads with their status, contacts and description. | API key | everything the token reads |
+| Communication | Discord | Messages from the text and announcement channels you choose in one server. | Bot token, Server ID | you choose |
+| Communication | Freshdesk | Support tickets with their status, priority, tags and description. | Freshdesk domain, API key | everything the token reads |
+| Communication | Front | Conversations with their status, assignee, tags and latest message. | API token | everything the token reads |
+| Communication | Gong | Recorded calls with their title, time, duration and scope. | API base host, Access key, Access key secret | everything the token reads |
+| Communication | Gorgias | Support tickets with their status, channel, customer and summary. | Gorgias domain, Your email, API key | everything the token reads |
+| Communication | HubSpot | Contacts, companies and deals from your HubSpot CRM. | Private app access token | everything the token reads |
+| Communication | Intercom | Customer conversations with their state, assignee and first message. | Access token, Region | everything the token reads |
+| Communication | Pipedrive | Deals with their value, stage, status, organization and contact. | API token | everything the token reads |
+| Communication | Zendesk | Support tickets with their status, priority, tags and description. | Subdomain, Agent email, API token | everything the token reads |
+
+Dropped from the earlier list because they cannot work with a token today:
+Pocket and Height (shut down), Obsidian Publish (no API), Basecamp and Help
+Scout (OAuth apps only), Railway and GitBook (no stable list API for the
+content), Slite (undocumented response format).
+
 ## Using them (dashboard)
 
 **Integrations → Connect Slack**: approve the Memro app for your workspace,
@@ -43,6 +119,16 @@ then pick channels under **Channels**. Nothing is read until you pick one.
 Public channels are joined automatically. A private channel is listed only
 if you are a member and someone has invited the Memro app to it
 (`/invite @Memro`).
+
+**Linear, Sentry, Notion, Jira, GitLab**: sign in with the provider, then
+choose teams, projects or databases with the button on the connection. As
+with Slack, nothing is read until you choose.
+
+**Token connectors**: fill in the form (the token and, for some, a site or
+account ID; each field says where to find it). Connectors that list sources
+(projects, boards, spaces) show a button to choose them; the others sync
+everything the token can read, so prefer a read-only token scoped to what
+you want in memory.
 
 **Integrations → Connect GitHub**: install the Memro GitHub App on your
 account or organization and choose repositories. Memro syncs the chosen
@@ -217,6 +303,44 @@ syncing for that account.
    | `NOTION_CLIENT_ID` | OAuth Client ID |
    | `NOTION_CLIENT_SECRET` | OAuth Client Secret |
    | `NOTION_WEBHOOK_SECRET` | Webhook verification secret |
+
+### Jira
+
+1. [developer.atlassian.com/console/myapps](https://developer.atlassian.com/console/myapps) → **Create → OAuth 2.0 integration**:
+   - Permissions → Jira API: `read:jira-work`, `read:jira-user`; User identity API: `read:me`
+   - Authorization → Callback URL: `APP/api/connectors/jira/callback`
+2. Set `JIRA_CLIENT_ID` and `JIRA_CLIENT_SECRET`. Access tokens last an
+   hour; Memro refreshes them (Atlassian rotates the refresh token each time).
+3. Webhooks are optional. To use them, register a webhook to
+   `API/connectors/jira/webhook` with a secret and set `JIRA_WEBHOOK_SECRET`;
+   only HMAC-signed deliveries are accepted. Without it the 30-minute sync
+   keeps issues current.
+
+### GitLab
+
+1. GitLab → **Preferences → Applications** (or the group's or instance's):
+   - Redirect URI: `APP/api/connectors/gitlab/callback`
+   - Scopes: `read_api`, `read_user`, `openid`
+2. Set `GITLAB_CLIENT_ID` and `GITLAB_CLIENT_SECRET`. Tokens last two hours
+   and are refreshed.
+3. Webhooks are optional: add a project or group webhook to
+   `API/connectors/gitlab/webhook` with secret token `GITLAB_WEBHOOK_SECRET`
+   (merge request and pipeline events).
+
+### Webhooks and token refresh (all sign-in connectors)
+
+- A webhook endpoint answers `503` until its secret is set, `401` to
+  anything not signed with it, and acts only for connections whose user
+  chose that team, project or database. The item is then re-read with that
+  connection's own token, so a webhook never decides what is stored.
+- Notion sends a one-time verification token when a webhook subscription is
+  created. With `NOTION_WEBHOOK_SECRET` unset, the server logs it once
+  (`notion webhook verification request`); set the secret to it, redeploy,
+  and confirm the subscription in Notion.
+- Expiring tokens (Jira, GitLab, Sentry, newer Linear apps) are refreshed
+  five minutes before they expire and once more after a `401`. A refresh
+  holds a lock on the connection so concurrent workers never spend a
+  rotated refresh token twice. Only a refused refresh disconnects.
 
 ### Other settings
 

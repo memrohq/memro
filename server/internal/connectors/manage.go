@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/memrohq/memro/server/internal/auth"
-	"github.com/memrohq/memro/server/internal/connectors/dce"
 )
 
 // StateCookie holds the OAuth state in the browser that started the flow.
@@ -67,36 +66,6 @@ func (m *Manager) CompleteAuthorization(ctx context.Context, providerName string
 	if err != nil {
 		return nil, err
 	}
-	if err := m.enqueue(ctx, nil, id, jobSources, jobSources, nil, 0); err != nil {
-		return nil, err
-	}
-	c, err := m.connection(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	c.ManageURL = p.manageURL(c)
-	return c, nil
-}
-
-// ConnectToken connects a token-based connector directly for the agent.
-func (m *Manager) ConnectToken(ctx context.Context, providerName, agentID string, tenantID uuid.UUID, token string) (*Connection, error) {
-	p, err := m.provider(providerName)
-	if err != nil {
-		return nil, err
-	}
-	values := url.Values{}
-	values.Set("token", token)
-	a, err := p.complete(ctx, values)
-	if err != nil {
-		return nil, err
-	}
-	id, err := m.saveConnection(ctx, agentID, tenantID, providerName, a)
-	if err != nil {
-		return nil, err
-	}
-	_, _ = m.deps.Pool.Exec(ctx, `INSERT INTO connector_sources (connection_id, external_id, name, is_private, enabled)
-		VALUES ($1, $2, $3, false, true)
-		ON CONFLICT (connection_id, external_id) DO UPDATE SET enabled = true`, id, providerName, dce.FormattedDisplayName(providerName))
 	if err := m.enqueue(ctx, nil, id, jobSources, jobSources, nil, 0); err != nil {
 		return nil, err
 	}

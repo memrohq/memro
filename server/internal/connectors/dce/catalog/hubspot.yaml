@@ -1,43 +1,71 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: hubspot
-  version: 1.0.0
-  description: Sync contacts, companies, deals, and engagements from HubSpot CRM
-
+  version: "1"
+  displayName: HubSpot
+  category: communication
+  description: Contacts, companies and deals from your HubSpot CRM.
+  docsURL: https://developers.hubspot.com/docs/api/private-apps
 spec:
   type: rest
   baseURL: https://api.hubapi.com
-
-  auth:
-    type: bearer
-    secretRef: HUBSPOT_ACCESS_TOKEN
-
+  fields:
+    - {name: token, label: Private app access token, secret: true, help: "Settings → Integrations → Private apps, with crm.objects.contacts.read, companies.read and deals.read."}
+  auth: {type: bearer, secretRef: token}
+  verify: {path: /crm/v3/objects/contacts, queryParams: {limit: "1"}}
   operations:
-    - name: list_contacts
+    - name: contacts
       method: GET
       path: /crm/v3/objects/contacts
-      queryParams:
-        limit: "50"
-      pagination:
-        type: cursor
-        cursorParam: after
-        cursorPath: paging.next.after
-      response:
-        itemsPath: results
-
+      queryParams: {limit: "100", properties: "firstname,lastname,email,company,jobtitle,lifecyclestage,phone"}
+      pagination: {type: cursor, cursorParam: after, cursorPath: paging.next.after}
+      response: {itemsPath: results}
+      mapping:
+        id: "contact-{{id}}"
+        title: "{{properties.firstname}} {{properties.lastname}}"
+        content: |
+          HubSpot contact: {{properties.firstname}} {{properties.lastname}}
+          Email: {{properties.email}}
+          Company: {{properties.company}}
+          Job title: {{properties.jobtitle}}
+          Lifecycle stage: {{properties.lifecyclestage}}
+        eventDate: updatedAt
+    - name: companies
+      method: GET
+      path: /crm/v3/objects/companies
+      queryParams: {limit: "100", properties: "name,domain,industry,city,country,numberofemployees,lifecyclestage"}
+      pagination: {type: cursor, cursorParam: after, cursorPath: paging.next.after}
+      response: {itemsPath: results}
+      mapping:
+        id: "company-{{id}}"
+        title: "{{properties.name}}"
+        content: |
+          HubSpot company: {{properties.name}}
+          Domain: {{properties.domain}}
+          Industry: {{properties.industry}}
+          Location: {{properties.city}} {{properties.country}}
+          Employees: {{properties.numberofemployees}}
+          Lifecycle stage: {{properties.lifecyclestage}}
+        eventDate: updatedAt
+    - name: deals
+      method: GET
+      path: /crm/v3/objects/deals
+      queryParams: {limit: "100", properties: "dealname,amount,dealstage,pipeline,closedate,hubspot_owner_id"}
+      pagination: {type: cursor, cursorParam: after, cursorPath: paging.next.after}
+      response: {itemsPath: results}
+      mapping:
+        id: "deal-{{id}}"
+        title: "{{properties.dealname}}"
+        content: |
+          HubSpot deal: {{properties.dealname}}
+          Amount: {{properties.amount}}
+          Stage: {{properties.dealstage}}
+          Pipeline: {{properties.pipeline}}
+          Close date: {{properties.closedate}}
+        eventDate: updatedAt
   mapping:
-    id: $.id
-    title: $.properties.firstname
-    content: $.properties.email
-    eventDate: $.updatedAt
-
-  sync:
-    mode: incremental
-    checkpoint: updatedAt
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 100
+    id: id
+    content: "{{id}}"
+  sync: {mode: full}
+  policies: {timeout: 30s, maxRetries: 3}

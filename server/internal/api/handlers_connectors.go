@@ -52,7 +52,9 @@ func (s *Server) authorizeConnector(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"url": authURL})
 }
 
-// POST /connectors/{provider}/token — connects a token-based connector
+// POST /connectors/{provider}/token {"fields": {"token": "…", "subdomain": "…"}}
+// connects a catalog connector with the fields of its connect form. The
+// token is checked against the service, sealed and never returned.
 func (s *Server) connectToken(w http.ResponseWriter, r *http.Request) {
 	a := agentFrom(r)
 	if !requireSession(w, a) {
@@ -60,18 +62,24 @@ func (s *Server) connectToken(w http.ResponseWriter, r *http.Request) {
 	}
 	provider := r.PathValue("provider")
 	var req struct {
-		Token string `json:"token"`
+		Fields map[string]string `json:"fields"`
+		Token  string            `json:"token"` // older dashboards: the token alone
 	}
 	if err := decodeJSON(body(r), &req); err != nil {
 		httpError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	token := strings.TrimSpace(req.Token)
-	if token == "" {
-		httpError(w, http.StatusBadRequest, "Token cannot be empty")
+	if len(req.Fields) > 20 {
+		httpError(w, http.StatusBadRequest, "Too many fields")
 		return
 	}
-	conn, err := s.connectors.ConnectToken(r.Context(), provider, a.ID, a.TenantID, token)
+	for k, v := range req.Fields {
+		if len(k) > 64 || len(v) > 4096 {
+			httpError(w, http.StatusBadRequest, "Field too long")
+			return
+		}
+	}
+	conn, err := s.connectors.ConnectToken(r.Context(), provider, a.ID, a.TenantID, req.Fields, strings.TrimSpace(req.Token))
 	if err != nil {
 		connectorError(w, err)
 		return
@@ -264,7 +272,7 @@ func (s *Server) jiraWebhook(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	w.WriteHeader(s.connectors.JiraWebhook(r.Context(), r.Header, r.URL.Query(), raw))
+	w.WriteHeader(s.connectors.JiraWebhook(r.Context(), r.Header, raw))
 }
 
 // POST /connectors/gitlab/webhook — GitLab webhooks (token verified).

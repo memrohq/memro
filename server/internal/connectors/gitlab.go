@@ -5,7 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
-	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -127,45 +127,46 @@ func (p *gitlabProvider) complete(ctx context.Context, q url.Values) (*authorize
 		creds: map[string]any{
 			"access_token":  tResp.AccessToken,
 			"refresh_token": tResp.RefreshToken,
+			"expires_at":    tokenExpiry(p.m.now(), tResp.ExpiresIn),
 			"user_id":       user.ID,
 			"username":      user.Username,
 		},
 	}, nil
 }
 
+func (p *gitlabProvider) tokenEndpoint() tokenEndpoint {
+	return tokenEndpoint{URL: "https://gitlab.com/oauth/token", ClientID: p.m.cfg.GitLabClientID,
+		ClientSecret: p.m.cfg.GitLabClientSecret, RedirectURI: p.m.callbackURL(ProviderGitLab)}
+}
+
 func (p *gitlabProvider) apiGet(ctx context.Context, c *conn, path string, out any) error {
-	token := c.str("access_token")
+	_, err := p.apiGetPage(ctx, c, path, out)
+	return err
+}
+
+// apiGetPage is apiGet that also returns the X-Next-Page header.
+func (p *gitlabProvider) apiGetPage(ctx context.Context, c *conn, path string, out any) (string, error) {
 	base := p.m.cfg.GitLabAPIURL
 	if base == "" {
 		base = "https://gitlab.com/api/v4"
 	}
-	fullURL := base + path
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	resp, err := p.m.oauthDo(ctx, c, p.tokenEndpoint(), func(token string) (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/json")
+		return req, nil
+	})
 	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := p.m.http.Do(req)
-	if err != nil {
-		return err
+		return "", err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return &revokedError{"GitLab authorization revoked or expired."}
+	if err := apiStatus("gitlab", resp); err != nil {
+		return "", err
 	}
-	if resp.StatusCode == http.StatusTooManyRequests {
-		return &rateLimitedError{after: time.Minute}
-	}
-	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("gitlab api status %d: %s", resp.StatusCode, string(b))
-	}
-
-	return json.NewDecoder(resp.Body).Decode(out)
+	return resp.Header.Get("X-Next-Page"), json.NewDecoder(resp.Body).Decode(out)
 }
 
 func (p *gitlabProvider) handle(ctx context.Context, c *conn, j *job) error {
@@ -205,29 +206,68 @@ func (p *gitlabProvider) refreshSources(ctx context.Context, c *conn) error {
 	return p.m.replaceSources(ctx, c.ID, sources, false)
 }
 
+// gitlabMRsPerJob bounds one sync job: each merge request also costs a
+// request for its notes.
+const gitlabMRsPerJob = 20
+
+// syncProject reads one page of merge requests changed since the last pass
+// (oldest first) and queues the next page; the pass ends with the project's
+// recent failed pipelines.
 func (p *gitlabProvider) syncProject(ctx context.Context, c *conn, projectIDStr string) error {
+	src, err := p.m.source(ctx, c.ID, projectIDStr)
+	if err != nil {
+		return err
+	}
+	if src == nil || !src.Enabled {
+		return nil
+	}
+	var st syncState
+	if src.cursor != "" {
+		_ = json.Unmarshal([]byte(src.cursor), &st)
+	}
+	q := url.Values{"order_by": {"updated_at"}, "sort": {"asc"}, "per_page": {strconv.Itoa(gitlabMRsPerJob)}, "scope": {"all"}}
+	if st.Checkpoint != "" {
+		q.Set("updated_after", st.Checkpoint)
+	} else if p.m.cfg.BackfillDays > 0 {
+		q.Set("updated_after", p.m.now().AddDate(0, 0, -p.m.cfg.BackfillDays).UTC().Format(time.RFC3339))
+	}
+	if st.Cursor != "" {
+		q.Set("page", st.Cursor)
+	}
 	var mrs []gitlabMergeRequest
-	path := fmt.Sprintf("/projects/%s/merge_requests?order_by=updated_at&per_page=50", projectIDStr)
-	if err := p.apiGet(ctx, c, path, &mrs); err != nil {
+	next, err := p.apiGetPage(ctx, c, fmt.Sprintf("/projects/%s/merge_requests?%s", url.PathEscape(projectIDStr), q.Encode()), &mrs)
+	if err != nil {
 		return fmt.Errorf("gitlab list mrs: %w", err)
 	}
-
-	for _, mr := range mrs {
-		if err := p.ingestMR(ctx, c, projectIDStr, &mr); err != nil {
+	for i := range mrs {
+		if err := p.ingestMR(ctx, c, projectIDStr, &mrs[i]); err != nil {
 			return err
 		}
+		st.High = laterOf(st.High, mrs[i].UpdatedAt)
+	}
+	if next != "" && len(mrs) > 0 {
+		st.Cursor = next
+		b, _ := json.Marshal(st)
+		if err := p.m.saveCursor(ctx, c.ID, projectIDStr, string(b), false); err != nil {
+			return err
+		}
+		return p.m.enqueue(ctx, nil, c.ID, jobSync, projectIDStr, nil, 0)
 	}
 
-	// Also check for recent failed pipelines
 	var pipelines []gitlabPipeline
-	pipePath := fmt.Sprintf("/projects/%s/pipelines?status=failed&per_page=10", projectIDStr)
-	if err := p.apiGet(ctx, c, pipePath, &pipelines); err == nil {
-		for _, pipe := range pipelines {
-			_ = p.ingestPipelineFailure(ctx, c, projectIDStr, &pipe)
+	pq := url.Values{"status": {"failed"}, "per_page": {"10"}}
+	if st.Checkpoint != "" {
+		pq.Set("updated_after", st.Checkpoint)
+	}
+	if err := p.apiGet(ctx, c, fmt.Sprintf("/projects/%s/pipelines?%s", url.PathEscape(projectIDStr), pq.Encode()), &pipelines); err == nil {
+		for i := range pipelines {
+			if err := p.ingestPipelineFailure(ctx, c, projectIDStr, &pipelines[i]); err != nil {
+				return err
+			}
 		}
 	}
-
-	return p.m.saveCursor(ctx, c.ID, projectIDStr, "", true)
+	b, _ := json.Marshal(syncState{Checkpoint: laterOf(st.Checkpoint, st.High)})
+	return p.m.saveCursor(ctx, c.ID, projectIDStr, string(b), true)
 }
 
 func (p *gitlabProvider) syncMR(ctx context.Context, c *conn, key string) error {
@@ -237,8 +277,11 @@ func (p *gitlabProvider) syncMR(ctx context.Context, c *conn, key string) error 
 		return fmt.Errorf("invalid gitlab mr key %q", key)
 	}
 	projectID, mrIID := parts[0], parts[1]
+	if src, err := p.m.source(ctx, c.ID, projectID); err != nil || src == nil || !src.Enabled {
+		return err // a project the user did not choose
+	}
 
-	path := fmt.Sprintf("/projects/%s/merge_requests/%s", projectID, mrIID)
+	path := fmt.Sprintf("/projects/%s/merge_requests/%s", url.PathEscape(projectID), url.PathEscape(mrIID))
 	var mr gitlabMergeRequest
 	if err := p.apiGet(ctx, c, path, &mr); err != nil {
 		return fmt.Errorf("gitlab get mr %s: %w", key, err)
@@ -352,37 +395,39 @@ type gitlabWebhookPayload struct {
 	} `json:"object_attributes"`
 }
 
-// GitLabWebhook processes incoming GitLab system webhooks.
+// GitLabWebhook processes GitLab project or group webhooks. They must carry
+// GITLAB_WEBHOOK_SECRET as X-Gitlab-Token; without it configured, webhooks
+// are off and the periodic sync keeps data current. Only connections that
+// chose the project are touched, and each re-fetches with its own token.
 func (m *Manager) GitLabWebhook(ctx context.Context, hdr http.Header, body []byte) int {
-	if m.cfg.GitLabWebhookSecret != "" {
-		token := hdr.Get("X-Gitlab-Token")
-		if !VerifyGitLabWebhookToken(m.cfg.GitLabWebhookSecret, token) {
-			metrics.ConnectorWebhooks.WithLabelValues(ProviderGitLab, "bad_token").Inc()
-			return http.StatusUnauthorized
-		}
+	if m.cfg.GitLabWebhookSecret == "" {
+		return http.StatusServiceUnavailable
 	}
-
+	if !VerifyGitLabWebhookToken(m.cfg.GitLabWebhookSecret, hdr.Get("X-Gitlab-Token")) {
+		metrics.ConnectorWebhooks.WithLabelValues(ProviderGitLab, "bad_token").Inc()
+		return http.StatusUnauthorized
+	}
 	var p gitlabWebhookPayload
 	if err := json.Unmarshal(body, &p); err != nil {
 		return http.StatusBadRequest
 	}
-
 	metrics.ConnectorWebhooks.WithLabelValues(ProviderGitLab, p.ObjectKind).Inc()
-
-	projectIDStr := strconv.Itoa(p.Project.ID)
-	conns, err := m.connectionsForAccount(ctx, ProviderGitLab, "", false)
-	if err != nil || len(conns) == 0 {
+	if p.Project.ID == 0 {
 		return http.StatusOK
 	}
-
+	projectIDStr := strconv.Itoa(p.Project.ID)
+	conns, err := m.connectionsWithSource(ctx, ProviderGitLab, "", projectIDStr)
+	if err != nil {
+		slog.Error("gitlab webhook", "err", err)
+		return http.StatusOK
+	}
 	for _, c := range conns {
-		if p.ObjectKind == "merge_request" && p.ObjectAttributes.IID > 0 {
-			key := fmt.Sprintf("%s:%d", projectIDStr, p.ObjectAttributes.IID)
-			_ = m.enqueue(ctx, nil, c.ID, jobItem, key, nil, 5*time.Second)
-		} else if p.ObjectKind == "pipeline" {
+		switch {
+		case p.ObjectKind == "merge_request" && p.ObjectAttributes.IID > 0:
+			_ = m.enqueue(ctx, nil, c.ID, jobItem, fmt.Sprintf("%s:%d", projectIDStr, p.ObjectAttributes.IID), nil, 5*time.Second)
+		case p.ObjectKind == "pipeline":
 			_ = m.enqueue(ctx, nil, c.ID, jobSync, projectIDStr, nil, 5*time.Second)
 		}
 	}
-
 	return http.StatusOK
 }

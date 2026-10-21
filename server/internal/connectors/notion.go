@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -170,15 +171,11 @@ func (p *notionProvider) request(ctx context.Context, token, method, path string
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+	if resp.StatusCode == http.StatusUnauthorized {
 		return &revokedError{"Notion authorization revoked or expired."}
 	}
-	if resp.StatusCode == http.StatusTooManyRequests {
-		return &rateLimitedError{after: time.Minute}
-	}
-	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("notion api status %d: %s", resp.StatusCode, string(b))
+	if err := apiStatus("notion", resp); err != nil {
+		return err
 	}
 
 	if out != nil {
@@ -331,6 +328,11 @@ func (p *notionProvider) syncPage(ctx context.Context, c *conn, pageID string) e
 	if pg.Archived {
 		return p.m.removeItem(ctx, c, "page:"+pg.ID)
 	}
+	// Only pages the user chose to sync: the page itself, or a row of a
+	// chosen database, or a child of a chosen page.
+	if !p.chosen(ctx, c, pg.ID, pg.Parent.DatabaseID, pg.Parent.PageID) {
+		return nil
+	}
 
 	blocks, _ := p.fetchBlocks(ctx, token, pg.ID)
 	it := notionItem(wsName, &pg, blocks)
@@ -338,6 +340,18 @@ func (p *notionProvider) syncPage(ctx context.Context, c *conn, pageID string) e
 		return err
 	}
 	return p.m.saveCursor(ctx, c.ID, pageID, "", true)
+}
+
+func (p *notionProvider) chosen(ctx context.Context, c *conn, ids ...string) bool {
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if src, err := p.m.source(ctx, c.ID, id); err == nil && src != nil && src.Enabled {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *notionProvider) setSources(ctx context.Context, c *conn, enabled map[string]bool) error {
@@ -375,57 +389,75 @@ func (p *notionProvider) manageURL(c *Connection) string {
 	return "https://www.notion.so/profile/integrations"
 }
 
-// VerifyNotionSignature validates Notion webhook HMAC-SHA256 signature if configured.
+// VerifyNotionSignature checks X-Notion-Signature ("sha256=<hex>"), an
+// HMAC-SHA256 of the body keyed with the subscription's verification token.
 func VerifyNotionSignature(secret, sig string, body []byte) bool {
+	sig = strings.TrimPrefix(strings.TrimSpace(sig), "sha256=")
 	if secret == "" || sig == "" {
 		return false
 	}
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(body)
 	expected := hex.EncodeToString(mac.Sum(nil))
-	return subtle.ConstantTimeCompare([]byte(strings.ToLower(sig)), []byte(strings.ToLower(expected))) == 1
+	return subtle.ConstantTimeCompare([]byte(strings.ToLower(sig)), []byte(expected)) == 1
 }
 
+// notionWebhookPayload is a Notion integration webhook event
+// (developers.notion.com/reference/webhooks).
 type notionWebhookPayload struct {
-	Type   string `json:"type"` // e.g. "page_updated", "page_created", "page_deleted"
-	PageID string `json:"page_id"`
-	Data   struct {
-		ID string `json:"id"`
+	Type        string `json:"type"` // page.created, page.content_updated, page.deleted, ...
+	WorkspaceID string `json:"workspace_id"`
+	Entity      struct {
+		ID   string `json:"id"`
+		Type string `json:"type"` // page, database, comment
+	} `json:"entity"`
+	Data struct {
+		PageID string `json:"page_id"` // comment events name their page here
 	} `json:"data"`
+	VerificationToken string `json:"verification_token"`
 }
 
-// NotionWebhook handles incoming webhooks from Notion integrations.
+// NotionWebhook handles Notion integration webhooks. Setting up a
+// subscription sends a one-time verification token; until NOTION_WEBHOOK_SECRET
+// is set to it, that request is logged for the operator and every other
+// request is refused. After that, only signed events are accepted, and only
+// connections to that workspace that chose the page act on them.
 func (m *Manager) NotionWebhook(ctx context.Context, hdr http.Header, body []byte) int {
-	if m.cfg.NotionWebhookSecret != "" {
-		sig := hdr.Get("X-Notion-Signature")
-		if !VerifyNotionSignature(m.cfg.NotionWebhookSecret, sig, body) {
-			metrics.ConnectorWebhooks.WithLabelValues(ProviderNotion, "bad_signature").Inc()
-			return http.StatusUnauthorized
-		}
-	}
-
 	var p notionWebhookPayload
 	if err := json.Unmarshal(body, &p); err != nil {
 		return http.StatusBadRequest
 	}
-
-	pageID := p.PageID
-	if pageID == "" {
-		pageID = p.Data.ID
+	if m.cfg.NotionWebhookSecret == "" {
+		if p.VerificationToken != "" && p.Type == "" {
+			slog.Warn("notion webhook verification request: set NOTION_WEBHOOK_SECRET to this token and redeploy, then verify the subscription in Notion",
+				"verification_token", p.VerificationToken)
+			return http.StatusOK
+		}
+		return http.StatusServiceUnavailable
 	}
-	if pageID == "" {
-		return http.StatusOK
+	if !VerifyNotionSignature(m.cfg.NotionWebhookSecret, hdr.Get("X-Notion-Signature"), body) {
+		metrics.ConnectorWebhooks.WithLabelValues(ProviderNotion, "bad_signature").Inc()
+		return http.StatusUnauthorized
 	}
-
 	metrics.ConnectorWebhooks.WithLabelValues(ProviderNotion, p.Type).Inc()
 
-	conns, err := m.connectionsForAccount(ctx, ProviderNotion, "", true)
-	if err != nil || len(conns) == 0 {
+	pageID := ""
+	switch p.Entity.Type {
+	case "page":
+		pageID = p.Entity.ID
+	case "comment":
+		pageID = p.Data.PageID
+	}
+	if pageID == "" || p.WorkspaceID == "" {
+		return http.StatusOK // database and other events: the periodic sync covers them
+	}
+	conns, err := m.connectionsForAccount(ctx, ProviderNotion, p.WorkspaceID, true)
+	if err != nil {
+		slog.Error("notion webhook", "err", err)
 		return http.StatusOK
 	}
-
 	for _, c := range conns {
-		if p.Type == "page_deleted" {
+		if p.Type == "page.deleted" {
 			if cc, err := m.open(ctx, c); err == nil {
 				_ = m.removeItem(ctx, cc, "page:"+pageID)
 			}
@@ -433,6 +465,5 @@ func (m *Manager) NotionWebhook(ctx context.Context, hdr http.Header, body []byt
 		}
 		_ = m.enqueue(ctx, nil, c.ID, jobItem, pageID, nil, 5*time.Second)
 	}
-
 	return http.StatusOK
 }

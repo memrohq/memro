@@ -1,42 +1,40 @@
 apiVersion: memro.dev/v1
 kind: Connector
-
 metadata:
   name: circleci
-  version: 1.0.0
-  description: Sync pipelines, workflows, and build statuses from CircleCI
-
+  version: "1"
+  displayName: CircleCI
+  category: engineering
+  description: Pipelines with their branch, commit and trigger.
+  docsURL: https://circleci.com/docs/managing-api-tokens/
 spec:
   type: rest
   baseURL: https://circleci.com/api/v2
-
-  auth:
-    type: apiKey
-    header: Circle-Token
-    secretRef: CIRCLECI_TOKEN
-
+  fields:
+    - {name: token, label: Personal API token, secret: true, help: "User settings → Personal API Tokens."}
+    - {name: orgSlug, label: Organization slug, placeholder: gh/acme, pattern: "(gh|bb|github|bitbucket|circleci)/[A-Za-z0-9_.-]+", help: "VCS and organization, e.g. gh/acme (Organization settings → Overview)."}
+  auth: {type: apiKey, secretRef: token, header: Circle-Token}
+  verify: {path: /me, accountId: id, accountName: login}
   operations:
-    - name: list_pipelines
+    - name: pipelines
       method: GET
       path: /pipeline
-      pagination:
-        type: cursor
-        cursorParam: page-token
-        cursorPath: next_page_token
-      response:
-        itemsPath: items
-
+      queryParams: {org-slug: "{{config.orgSlug}}"}
+      pagination: {type: cursor, cursorParam: page-token, cursorPath: next_page_token}
+      response: {itemsPath: items}
   mapping:
-    id: $.id
-    title: $.project_slug
-    content: $.state
-    eventDate: $.updated_at
-
-  sync:
-    mode: incremental
-    checkpoint: updated_at
-
-  policies:
-    timeout: 15s
-    maxRetries: 3
-    rateLimitPerMin: 100
+    id: id
+    title: "{{project_slug}} pipeline #{{number}}"
+    content: |
+      CircleCI pipeline #{{number}} in {{project_slug}}
+      State: {{state}}
+      Branch: {{vcs.branch}}
+      Commit: {{vcs.commit.subject}}
+      Revision: {{vcs.revision}}
+      Triggered by: {{trigger.actor.login}} ({{trigger.type}})
+      Errors: {{errors[].message}}
+    memoryType: episodic
+    eventDate: created_at
+    authorName: trigger.actor.login
+  sync: {mode: incremental, checkpoint: created_at, newestFirst: true, overlap: 6h}
+  policies: {timeout: 30s, maxRetries: 3}
