@@ -48,6 +48,7 @@ type OperationSpec struct {
 	Path        string            `yaml:"path" json:"path"`
 	QueryParams map[string]string `yaml:"queryParams,omitempty" json:"queryParams,omitempty"`
 	Headers     map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	Body        string            `yaml:"body,omitempty" json:"body,omitempty"`
 	Pagination  PaginationSpec    `yaml:"pagination,omitempty" json:"pagination,omitempty"`
 	Response    ResponseSpec      `yaml:"response" json:"response"`
 }

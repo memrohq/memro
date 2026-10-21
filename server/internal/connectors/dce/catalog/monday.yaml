@@ -8,7 +8,7 @@ metadata:
 
 spec:
   type: rest
-  baseURL: https://api.monday.com/v2
+  baseURL: https://api.monday.com
 
   auth:
     type: apiKey
@@ -17,15 +17,15 @@ spec:
 
   operations:
     - name: list_boards
-      method: GET
-      path: /boards
-      queryParams:
-        limit: "50"
+      method: POST
+      path: /v2
+      headers:
+        Content-Type: application/json
+      body: '{"query": "query { boards(limit: 50) { id name description updated_at url } }"}'
       pagination:
-        type: page
-        pageParam: page
+        type: none
       response:
-        itemsPath: boards
+        itemsPath: data.boards
 
   mapping:
     id: $.id

@@ -76,9 +76,21 @@ func (s *connectorItemSink) IngestItem(ctx context.Context, norm *dce.Normalized
 		header = fmt.Sprintf("[%s · %s]", strings.ToUpper(s.manifest.Metadata.Name), norm.ID)
 	}
 
-	body := norm.Content
-	if norm.Title != "" && !strings.Contains(norm.Content, norm.Title) {
-		body = norm.Title + "\n\n" + norm.Content
+	body := strings.TrimSpace(norm.Content)
+	if body == "" && norm.Raw != nil {
+		var b strings.Builder
+		for k, v := range norm.Raw {
+			if v != nil && k != "id" && k != "gid" {
+				b.WriteString(fmt.Sprintf("- **%s**: %v\n", k, v))
+			}
+		}
+		body = strings.TrimSpace(b.String())
+	}
+	if norm.Title != "" && !strings.Contains(body, norm.Title) {
+		body = norm.Title + "\n\n" + body
+	}
+	if body == "" {
+		body = norm.ID
 	}
 
 	evDate := norm.EventDate
@@ -138,6 +150,7 @@ func (p *declarativeProvider) handle(ctx context.Context, c *conn, j *job) error
 		_, _ = p.m.deps.Pool.Exec(ctx, `UPDATE connector_sources SET last_synced_at = NOW() WHERE connection_id = $1 AND external_id = $2`,
 			c.ID, p.manifest.Metadata.Name)
 	}
+	_, _ = p.m.deps.Pool.Exec(ctx, `UPDATE connector_connections SET last_synced_at = NOW() WHERE id = $1`, c.ID)
 
 	return nil
 }

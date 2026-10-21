@@ -241,7 +241,11 @@ func (r *Runtime) Execute(ctx context.Context, m *Manifest, sink Sink, checkpoin
 			return nil, err
 		}
 
-		req, err := http.NewRequestWithContext(ctx, op.Method, reqURL, nil)
+		var bodyReader io.Reader
+		if op.Body != "" {
+			bodyReader = strings.NewReader(op.Body)
+		}
+		req, err := http.NewRequestWithContext(ctx, op.Method, reqURL, bodyReader)
 		if err != nil {
 			return nil, err
 		}
