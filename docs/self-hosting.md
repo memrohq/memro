@@ -52,6 +52,7 @@ All settings are environment variables. The common ones:
 | `IDENTITY_POW_REQUIRED` | `false` | Reject registrations without a proof; turn on once your clients send one |
 | `UNCLAIMED_MAX_MEMORIES`, `UNCLAIMED_MAX_FILE_BYTES` | `0`, `0` (no cap) | Caps for agents with no owner. A quota policy that implements `extension.UnclaimedCapExemption` can lift them per agent |
 | `UNCLAIMED_CAP_HINT` | | Added to the cap message; `{agent_id}` is replaced |
+| `METRICS_TOKEN` | | Protects `GET /metrics` with Bearer auth; open when unset (logs a warning) |
 | `MAX_BODY_BYTES` | `10000000` | |
 | `FILE_STORAGE_PATH` | `./data/files` | Uploaded files; back this up |
 | `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_FROM` | | SMTP for dashboard sign-in codes |
