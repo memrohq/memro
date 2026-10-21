@@ -17,27 +17,22 @@ spec:
     secretRef: SNYK_API_TOKEN
 
   operations:
-    - name: list_issues
+    - name: list_orgs
       method: GET
-      path: /reporting/issues
-      queryParams:
-        perPage: "50"
+      path: /orgs
       pagination:
-        type: page
-        pageParam: page
+        type: none
       response:
-        itemsPath: results
+        itemsPath: orgs
 
   mapping:
     id: $.id
-    title: $.title
-    content: $.issue.severity
-    eventDate: $.introducedDate
+    title: $.name
+    content: $.slug
     url: $.url
 
   sync:
-    mode: incremental
-    checkpoint: introducedDate
+    mode: full
 
   policies:
     timeout: 15s

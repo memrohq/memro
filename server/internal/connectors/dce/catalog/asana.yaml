@@ -29,8 +29,6 @@ spec:
     id: $.gid
     title: $.name
     content: $.name
-    eventDate: $.gid
-    url: $.gid
 
   sync:
     mode: full
