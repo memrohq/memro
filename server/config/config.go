@@ -56,6 +56,9 @@ type Config struct {
 	// suits self-hosting; Memro Cloud sets them.
 	UnclaimedMaxMemories  int
 	UnclaimedMaxFileBytes int64
+	// UnclaimedCapHint is appended to the cap message, with {agent_id}
+	// replaced, e.g. how to pay for a plan.
+	UnclaimedCapHint string
 
 	// Public URLs handed to `memro connect`.
 	AppURL string // dashboard, e.g. https://app.memro.co
@@ -98,6 +101,7 @@ func Load() Config {
 		IdentityPowRequired:   envBool("IDENTITY_POW_REQUIRED", false),
 		UnclaimedMaxMemories:  envInt("UNCLAIMED_MAX_MEMORIES", 0),
 		UnclaimedMaxFileBytes: int64(envInt("UNCLAIMED_MAX_FILE_BYTES", 0)),
+		UnclaimedCapHint:      strings.TrimSpace(os.Getenv("UNCLAIMED_CAP_HINT")),
 		DevLogOTP:             envBool("DEV_LOG_OTP", false),
 		AppURL:                strings.TrimRight(env("APP_URL", "http://localhost:5173"), "/"),
 		MCPURL:                env("MCP_URL", "http://localhost:8080/mcp"),

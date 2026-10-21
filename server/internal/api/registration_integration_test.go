@@ -2,12 +2,16 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"mime/multipart"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/memrohq/memro/server/extension"
 	"github.com/memrohq/memro/server/internal/api"
 	"github.com/memrohq/memro/server/internal/auth"
 )
@@ -92,4 +96,34 @@ func TestUnclaimedAgentCaps(t *testing.T) {
 	e.must(200, code, b, "upload under the file cap")
 	code, b = upload("another twelve")
 	e.must(403, code, b, "upload over the file cap")
+}
+
+// exemptPolicy lifts the unclaimed caps for one agent, as a paid plan would.
+type exemptPolicy struct {
+	extension.PerAgentCap
+	agent string
+}
+
+func (p exemptPolicy) ExemptFromUnclaimedCaps(_ context.Context, _ uuid.UUID, agentID string) bool {
+	return agentID == p.agent
+}
+
+func TestUnclaimedCapExemption(t *testing.T) {
+	paid, unpaid := newAgent(t), newAgent(t)
+	e := setup(t, func(d *api.Deps) {
+		d.Config.UnclaimedMaxMemories = 1
+		d.Config.UnclaimedCapHint = "Buy a plan: /billing/x402/terms?subject=agent:{agent_id}"
+		d.Quota = exemptPolicy{extension.PerAgentCap{Max: 1000}, paid.id}
+	})
+	e.register(paid)
+	e.register(unpaid)
+	for _, a := range []agent{paid, unpaid} {
+		e.remember(a, "first", "")
+	}
+	e.remember(paid, "second, past the unclaimed cap", "")
+	code, b := e.do(&unpaid, "v1", "POST", "/memory", j(map[string]any{"content": "second"}), nil)
+	e.must(403, code, b, "unpaid agent at the cap")
+	if !strings.Contains(string(b), "subject=agent:"+unpaid.id) {
+		t.Fatalf("cap message should carry the hint with the agent id: %s", b)
+	}
 }

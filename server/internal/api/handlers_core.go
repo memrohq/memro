@@ -309,8 +309,8 @@ func (s *Server) allowWrite(w http.ResponseWriter, r *http.Request, a Agent, n i
 		httpError(w, http.StatusInternalServerError, "Failed to store memory")
 		return false
 	}
-	if max := s.cfg.UnclaimedMaxMemories; a.UserID == nil && max > 0 && current+n > max {
-		httpError(w, http.StatusForbidden, fmt.Sprintf("Unclaimed agents can store up to %d memories. Ask your person to claim this agent to lift the limit.", max))
+	if max := s.cfg.UnclaimedMaxMemories; a.UserID == nil && max > 0 && current+n > max && !s.exemptFromUnclaimedCaps(r, a) {
+		httpError(w, http.StatusForbidden, fmt.Sprintf("Unclaimed agents can store up to %d memories. Ask your person to claim this agent to lift the limit.", max)+s.unclaimedCapHint(a))
 		return false
 	}
 	if err := s.quota.AllowMemoryWrite(r.Context(), a.TenantID, a.ID, current, n); err != nil {
@@ -325,6 +325,22 @@ func (s *Server) allowWrite(w http.ResponseWriter, r *http.Request, a Agent, n i
 	return true
 }
 
+// exemptFromUnclaimedCaps asks the quota policy, if it implements
+// extension.UnclaimedCapExemption, whether the agent skips the unclaimed caps.
+func (s *Server) exemptFromUnclaimedCaps(r *http.Request, a Agent) bool {
+	ex, ok := s.quota.(extension.UnclaimedCapExemption)
+	return ok && ex.ExemptFromUnclaimedCaps(r.Context(), a.TenantID, a.ID)
+}
+
+// unclaimedCapHint is UNCLAIMED_CAP_HINT with {agent_id} filled in, for
+// example how to buy a plan on Memro Cloud.
+func (s *Server) unclaimedCapHint(a Agent) string {
+	if s.cfg.UnclaimedCapHint == "" {
+		return ""
+	}
+	return " " + strings.ReplaceAll(s.cfg.UnclaimedCapHint, "{agent_id}", a.ID)
+}
+
 // gate asks the quota policy, if it implements extension.UsageGate, whether
 // the caller may use amount of metric. It writes the error response (403
 // with the policy's message) and returns false when not.
@@ -335,8 +351,8 @@ func (s *Server) gate(w http.ResponseWriter, r *http.Request, a Agent, metric st
 			httpError(w, http.StatusInternalServerError, "Failed to check usage limits")
 			return false
 		}
-		if used+amount > max {
-			httpError(w, http.StatusForbidden, fmt.Sprintf("Unclaimed agents can store up to %d MB of files. Ask your person to claim this agent to lift the limit.", max/1_000_000))
+		if used+amount > max && !s.exemptFromUnclaimedCaps(r, a) {
+			httpError(w, http.StatusForbidden, fmt.Sprintf("Unclaimed agents can store up to %d MB of files. Ask your person to claim this agent to lift the limit.", max/1_000_000)+s.unclaimedCapHint(a))
 			return false
 		}
 	}
