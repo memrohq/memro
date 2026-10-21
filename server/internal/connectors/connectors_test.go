@@ -281,6 +281,35 @@ func TestProvidersDisabledWithoutConfig(t *testing.T) {
 	}
 }
 
+func TestCatalogEmbeddedCount(t *testing.T) {
+	m, err := New(Deps{Config: config.Config{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers := m.Providers()
+	if len(providers) < 50 {
+		t.Fatalf("expected at least 50 providers from embedded catalog, got %d", len(providers))
+	}
+	foundAsana, foundMonday := false, false
+	for _, p := range providers {
+		if p.Name == "asana" {
+			foundAsana = true
+			if p.DisplayName != "Asana" || p.Category != "work" || p.Kind != "token" {
+				t.Fatalf("unexpected asana metadata: %+v", p)
+			}
+		}
+		if p.Name == "monday" {
+			foundMonday = true
+			if p.DisplayName != "Monday.com" || p.Category != "work" || p.Kind != "token" {
+				t.Fatalf("unexpected monday metadata: %+v", p)
+			}
+		}
+	}
+	if !foundAsana || !foundMonday {
+		t.Fatalf("expected asana and monday in providers, got asana=%v monday=%v", foundAsana, foundMonday)
+	}
+}
+
 func TestBackoff(t *testing.T) {
 	if backoff(1) != 30*time.Second || backoff(2) != time.Minute || backoff(20) != time.Hour {
 		t.Fatalf("backoff: %v %v %v", backoff(1), backoff(2), backoff(20))

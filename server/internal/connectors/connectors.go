@@ -89,6 +89,11 @@ type ProviderInfo struct {
 	// SourcesManagedBy is "memro" when channels are picked in the dashboard
 	// and "provider" when they are chosen on the provider's site.
 	SourcesManagedBy string `json:"sources_managed_by"`
+	Kind             string `json:"kind,omitempty"`
+	DisplayName      string `json:"display_name,omitempty"`
+	Category         string `json:"category,omitempty"`
+	Description      string `json:"description,omitempty"`
+	SecretRef        string `json:"secret_ref,omitempty"`
 }
 
 // Errors returned to API handlers.
@@ -253,7 +258,10 @@ func New(d Deps) (*Manager, error) {
 
 	// Initialize Declarative Connector Engine (DCE) registry
 	m.dceRegistry = dce.NewRegistry()
-	_ = m.dceRegistry.LoadFromDir("server/internal/connectors/dce/catalog")
+	if err := m.dceRegistry.LoadFromFS(dce.CatalogFS, "catalog"); err != nil {
+		slog.Warn("failed to load embedded catalog, falling back to disk", "err", err)
+		_ = m.dceRegistry.LoadFromDir("server/internal/connectors/dce/catalog")
+	}
 	for _, manifest := range m.dceRegistry.All() {
 		m.providers[strings.ToLower(manifest.Metadata.Name)] = newDeclarativeProvider(m, manifest)
 	}
@@ -276,8 +284,13 @@ func (m *Manager) RegisterDeclarativeManifest(manifest *dce.Manifest) error {
 // Providers lists every connector and whether it is configured.
 func (m *Manager) Providers() []ProviderInfo {
 	list := []ProviderInfo{
-		m.slack.info(), m.github.info(), m.linear.info(), m.sentry.info(),
-		m.notion.info(), m.jira.info(), m.gitlab.info(),
+		withMetadata(m.slack.info(), "Slack", "oauth", "communication", "Conversations from channels you choose, kept up to date as people post, edit, and delete."),
+		withMetadata(m.github.info(), "GitHub", "oauth", "engineering", "Issues, pull requests, discussions, and commits from the repositories you share."),
+		withMetadata(m.linear.info(), "Linear", "token", "work", "Issues, initiatives, priorities, and discussion from the teams you select."),
+		withMetadata(m.sentry.info(), "Sentry", "token", "engineering", "Production issues, exceptions, stack traces, and culprit files from the projects you choose."),
+		withMetadata(m.notion.info(), "Notion", "token", "knowledge", "Product specs, architectural decisions, RFCs, and engineering knowledge bases."),
+		withMetadata(m.jira.info(), "Jira", "token", "work", "Epics, stories, bugs, comments, and sprint changes from your Atlassian workspace."),
+		withMetadata(m.gitlab.info(), "GitLab", "token", "engineering", "Merge requests, issues, commits, and pipeline logs from your GitLab repositories."),
 	}
 	for _, manifest := range m.dceRegistry.All() {
 		if p, ok := m.providers[strings.ToLower(manifest.Metadata.Name)]; ok {
@@ -285,6 +298,16 @@ func (m *Manager) Providers() []ProviderInfo {
 		}
 	}
 	return list
+}
+
+func withMetadata(info ProviderInfo, displayName, kind, category, description string) ProviderInfo {
+	info.DisplayName = displayName
+	info.Kind = kind
+	info.Category = category
+	if info.Description == "" {
+		info.Description = description
+	}
+	return info
 }
 
 func (m *Manager) provider(name string) (provider, error) {

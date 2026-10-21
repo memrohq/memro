@@ -77,6 +77,33 @@ func (m *Manager) CompleteAuthorization(ctx context.Context, providerName string
 	return c, nil
 }
 
+// ConnectToken connects a token-based connector directly for the agent.
+func (m *Manager) ConnectToken(ctx context.Context, providerName, agentID string, tenantID uuid.UUID, token string) (*Connection, error) {
+	p, err := m.provider(providerName)
+	if err != nil {
+		return nil, err
+	}
+	values := url.Values{}
+	values.Set("token", token)
+	a, err := p.complete(ctx, values)
+	if err != nil {
+		return nil, err
+	}
+	id, err := m.saveConnection(ctx, agentID, tenantID, providerName, a)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.enqueue(ctx, nil, id, jobSources, jobSources, nil, 0); err != nil {
+		return nil, err
+	}
+	c, err := m.connection(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	c.ManageURL = p.manageURL(c)
+	return c, nil
+}
+
 // List returns the agent's connections with sync statistics.
 func (m *Manager) List(ctx context.Context, agentID string) ([]Connection, error) {
 	rows, err := m.deps.Pool.Query(ctx, `SELECT `+connectionColumns+`,

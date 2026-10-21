@@ -52,6 +52,35 @@ func (s *Server) authorizeConnector(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"url": authURL})
 }
 
+// POST /connectors/{provider}/token — connects a token-based connector
+func (s *Server) connectToken(w http.ResponseWriter, r *http.Request) {
+	a := agentFrom(r)
+	if !requireSession(w, a) {
+		return
+	}
+	provider := r.PathValue("provider")
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := decodeJSON(body(r), &req); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	token := strings.TrimSpace(req.Token)
+	if token == "" {
+		httpError(w, http.StatusBadRequest, "Token cannot be empty")
+		return
+	}
+	conn, err := s.connectors.ConnectToken(r.Context(), provider, a.ID, a.TenantID, token)
+	if err != nil {
+		connectorError(w, err)
+		return
+	}
+	cid := conn.ID.String()
+	s.audit(r, a, "connector.connect_token", &cid)
+	writeJSON(w, http.StatusCreated, conn)
+}
+
 // GET /connectors/{provider}/callback — the provider redirects the browser
 // here; it always ends on the dashboard with the outcome in the query.
 func (s *Server) connectorCallback(w http.ResponseWriter, r *http.Request) {

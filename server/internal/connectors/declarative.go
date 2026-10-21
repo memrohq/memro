@@ -29,10 +29,16 @@ func (p *declarativeProvider) enabled() bool {
 }
 
 func (p *declarativeProvider) info() ProviderInfo {
+	name := p.manifest.Metadata.Name
 	return ProviderInfo{
-		Name:             p.manifest.Metadata.Name,
+		Name:             name,
 		Enabled:          p.enabled(),
 		SourcesManagedBy: "token",
+		Kind:             "token",
+		DisplayName:      dce.FormattedDisplayName(name),
+		Category:         dce.CategoryFor(name),
+		Description:      p.manifest.Metadata.Description,
+		SecretRef:        p.manifest.Spec.Auth.SecretRef,
 	}
 }
 
