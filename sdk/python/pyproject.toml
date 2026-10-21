@@ -12,7 +12,7 @@ license = {text = "PolyForm-Noncommercial-1.0.0"}
 authors = [
     {name = "memro Team", email = "sdk@memro.co"}
 ]
-keywords = ["ai", "agents", "memory", "vector-database", "embeddings"]
+keywords = ["agent-memory", "ai-agents", "agentic-memory", "memory", "vector-database", "embeddings", "mcp"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

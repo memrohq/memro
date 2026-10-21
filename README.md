@@ -1,12 +1,14 @@
-# memro.co
+# Memro: Source-Available Agent Memory Infrastructure
 
-**Memro gives AI agents memory that evolves and reasons over time.**
+**Memro gives AI agents persistent memory that evolves and reasons over time.**
 
-Source-available memory infrastructure that gives AI agents continuity of self. Free for non-commercial use; commercial use through Memro Cloud.
+The cognitive runtime and agent memory layer providing autonomous AI agents with continuity of self, reasoning graphs, and verifiable context. Free for non-commercial use; commercial use through Memro Cloud.
 
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](LICENSE)
 [![CI](https://github.com/memrohq/memro/actions/workflows/ci.yml/badge.svg)](https://github.com/memrohq/memro/actions/workflows/ci.yml)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
+[![MCP Ready](https://img.shields.io/badge/MCP-ready-purple.svg)](mcp)
+[![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 ---
 
@@ -140,7 +142,7 @@ curl http://localhost:8081/memory/bc2df9d6...
 
 ---
 
-## SDKs (Coming Soon)
+## SDKs
 
 ### Python
 ```python
@@ -246,7 +248,12 @@ See [PRICING.md](PRICING.md) for managed cloud options.
 
 ## Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md).
+We welcome contributions of all kinds! See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
+
+### 🌟 Easiest Way to Contribute: Add a Connector
+Want to contribute in under 15 minutes without writing Go code? Add a declarative YAML manifest for a REST service you use that isn't in the catalog yet (e.g. Basecamp, Height, Dev.to, Hashnode) in `server/internal/connectors/dce/catalog/`.
+
+👉 Read the [Connector Contribution Guide](docs/contributing/add-a-connector.md) to build your first connector!
 
 ### Development Setup
 
@@ -280,10 +287,10 @@ commercial license from us via [memro.co](https://memro.co).
 
 ---
 
-## Support
+## Support & Community
 
 - **Documentation**: [docs/](docs/README.md)
-- **GitHub Issues**: [github.com/memrohq/memro/issues](https://github.com/memrohq/memro/issues)
+- **Good First Issues**: [GitHub Issues](https://github.com/memrohq/memro/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
 - **Discord**: [discord.gg/memro](https://discord.gg/memro)
 - **Email**: support@memro.co
 
@@ -294,8 +301,13 @@ commercial license from us via [memro.co](https://memro.co).
 - [x] Cryptographic identity (Ed25519)
 - [x] Long-term memory (Postgres)
 - [x] Semantic recall (pgvector)
-- [ ] Python SDK
-- [ ] JavaScript SDK
+- [x] Official Python SDK (`sdk/python`)
+- [x] Official TypeScript/JavaScript SDK (`sdk/js`)
+- [x] Native MCP Server for Cursor, Claude Desktop & Zed (`mcp/`)
+- [x] Connectors: 7 native OAuth (Slack, GitHub, Linear, Sentry, Notion, Jira, GitLab) + 43 declarative
+- [ ] More community-contributed declarative connectors
+- [ ] LangChain & LangGraph Memory Provider
+- [ ] CrewAI & LlamaIndex Integrations
 - [ ] Request signing verification
 - [ ] Encrypted-at-rest memory
 - [ ] Audit logging
