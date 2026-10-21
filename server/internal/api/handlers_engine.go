@@ -69,7 +69,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := s.engine.Search(r.Context(), domain.SearchQuery{
 		AgentID: agentID, Query: query, Limit: intParam(r, "limit", 10, 50),
-		MemoryType: q.Get("memory_type"), Mode: mode,
+		MemoryType: q.Get("memory_type"), Mode: mode, PerSession: perSession(q.Get("max_per_session")),
 	}, a.TenantID)
 	if err != nil {
 		slog.Error("search", "err", err)
@@ -282,4 +282,13 @@ func (s *Server) timeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, tl)
+}
+
+// perSession reads the optional max_per_session (unset or 0: no cap).
+func perSession(v string) int {
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return min(n, 50)
 }

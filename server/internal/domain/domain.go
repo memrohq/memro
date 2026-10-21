@@ -127,6 +127,10 @@ type SearchQuery struct {
 	Limit      int
 	MemoryType string
 	Mode       string // semantic | keyword | hybrid
+	// PerSession, when above 0, caps results per conversation (session or
+	// file) in the first sweep. Off by default: on LongMemEval it found more
+	// of the right conversations but fewer of the exchanges holding answers.
+	PerSession int
 }
 
 type SearchResult struct {

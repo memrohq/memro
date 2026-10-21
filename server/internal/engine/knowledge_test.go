@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -115,5 +116,69 @@ func TestResultCacheInvalidation(t *testing.T) {
 	c.InvalidateAgent("agent")
 	if _, ok := c.Get(q, uuid.Nil); ok {
 		t.Fatal("expected miss after invalidation")
+	}
+}
+
+// Regression (LongMemEval run, 2026-10-21): with keyword hits weighted 0.8
+// and each list cut to the limit before fusing, keyword's best match scored
+// below semantic's 10th and hybrid search never returned keyword-only hits.
+func TestFuseRRFKeepsTheBestOfEachList(t *testing.T) {
+	ids := func(n int) []uuid.UUID {
+		out := make([]uuid.UUID, n)
+		for i := range out {
+			out[i] = uuid.New()
+		}
+		return out
+	}
+	semantic, keyword := ids(50), ids(50)
+
+	top, scores := fuseRRF(semantic, keyword, 10)
+	if len(top) != 10 {
+		t.Fatalf("len = %d, want 10", len(top))
+	}
+	in := func(id uuid.UUID) bool { return slices.Contains(top, id) }
+	if !in(semantic[0]) || !in(keyword[0]) {
+		t.Fatal("the best match of each list must be returned")
+	}
+	if in(semantic[9]) && !in(keyword[1]) {
+		t.Fatal("semantic's 10th outranks keyword's 2nd: lists are not weighted equally")
+	}
+
+	// Found by both: first, with the top score.
+	both := keyword[7]
+	semantic[3] = both
+	top, scores = fuseRRF(semantic, keyword, 10)
+	if top[0] != both || scores[both] <= scores[semantic[0]] {
+		t.Fatalf("an item in both lists should rank first, got %v (score %.3f)", top[0], scores[both])
+	}
+	if s, _ := fuseRRF([]uuid.UUID{both}, []uuid.UUID{both}, 1); scores == nil || len(s) != 1 {
+		t.Fatal("single item")
+	}
+	if _, sc := fuseRRF([]uuid.UUID{both}, []uuid.UUID{both}, 1); sc[both] != 1 {
+		t.Fatalf("first in both lists scores %v, want 1", sc[both])
+	}
+
+	// One side empty (keyword-only or semantic-only mode): order is kept.
+	top, _ = fuseRRF(nil, keyword, 5)
+	if !slices.Equal(top, keyword[:5]) {
+		t.Fatal("a single list keeps its order")
+	}
+}
+
+func TestPickDiverseSpreadsAcrossConversations(t *testing.T) {
+	a1, a2, a3, b1, c1, solo1, solo2 := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	order := []uuid.UUID{a1, a2, a3, b1, solo1, solo2, c1}
+	group := map[uuid.UUID]string{a1: "A", a2: "A", a3: "A", b1: "B", c1: "C"} // solo: no session
+	got := pickDiverse(order, group, 5, 1)
+	want := []uuid.UUID{a1, b1, solo1, solo2, c1}
+	if !slices.Equal(got, want) {
+		t.Fatalf("one per conversation first, ungrouped memories stand alone: %v", got)
+	}
+	got = pickDiverse(order, group, 7, 1)
+	if !slices.Equal(got[5:], []uuid.UUID{a2, a3}) {
+		t.Fatalf("remaining places are filled in rank order: %v", got)
+	}
+	if got := pickDiverse(order, group, 4, 2); !slices.Equal(got, []uuid.UUID{a1, a2, b1, solo1}) {
+		t.Fatalf("cap of two: %v", got)
 	}
 }

@@ -112,7 +112,12 @@ Body `{"chunk": "…"}` → `{"atomic_memories": ["…"], "chunk_preview": "…"
 | `mode` | `hybrid` | `hybrid` · `semantic` · `keyword` ([how they differ](concepts.md#search)) |
 | `limit` | 10 | Max 50 |
 | `memory_type` | | Filter |
+| `max_per_session` | off | Optional: at most this many results per conversation (`session_id`, or source file) before the rest fill in by score. Broadens results across conversations, but on LongMemEval it returned fewer of the exact exchanges holding answers, so it is off by default. |
 | `agent_id` | yours | |
+
+`keyword` mode matches memories containing any of the query's words (ranked by
+how many, and how close together), so a natural-language question finds them.
+`hybrid` combines semantic and keyword candidates with equal weight.
 
 ```json
 { "results": [ { "memory_id": "8d0e…", "content": "Ana leads the platform team", "score": 0.91,

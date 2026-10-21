@@ -60,8 +60,8 @@ func (e *Engine) queryEmbedding(ctx context.Context, q string) []float32 {
 // --- Search -----------------------------------------------------------------
 
 // Search runs hybrid semantic + keyword search over an agent's memories from
-// the last 90 days. Uses Reciprocal Rank Fusion (RRF, k=60) to combine dense
-// embedding ranks and sparse keyword ranks without score calibration skew.
+// the last 90 days. Semantic and keyword candidates are combined with
+// Reciprocal Rank Fusion (fuseRRF).
 func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid.UUID) (*domain.SearchResponse, error) {
 	start := e.now()
 	mode := q.Mode
@@ -74,59 +74,38 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 	}
 	metrics.SearchCacheMisses.Inc()
 
-	scores := map[uuid.UUID]float32{}
-	seen := map[uuid.UUID]bool{}
-	var order []uuid.UUID
+	// Each list contributes more candidates than the caller asked for, so a
+	// strong match from one side can still beat weak matches from the other.
+	depth := min(max(q.Limit*5, 50), 100)
 
-	const (
-		rrfK      = 60.0
-		weightSem = 1.0
-		weightKw  = 0.8
-	)
-
+	var semantic, keyword []uuid.UUID
 	var vec []float32
 	if mode != "keyword" {
 		vec = e.queryEmbedding(ctx, q.Query)
 	}
 	if vec != nil {
-		ids, err := e.semanticIDs(ctx, q, tenantID, vec)
+		ids, err := e.semanticIDs(ctx, q, tenantID, vec, depth)
 		if err != nil {
 			return nil, err
 		}
-		for i, id := range ids {
-			rrf := float32(weightSem / (rrfK + float64(i+1)))
-			scores[id] += rrf
-			if !seen[id] {
-				seen[id] = true
-				order = append(order, id)
-			}
-		}
+		semantic = ids
 	}
 	if mode != "semantic" || vec == nil {
-		kw, err := e.keywordHits(ctx, q, tenantID)
+		// Keyword-only search matches any of the question's words; inside
+		// hybrid, today's all-words match stays (LongMemEval: any-word
+		// matching mixed into hybrid found fewer exact answers).
+		kw, err := e.keywordHits(ctx, q, tenantID, depth, mode == "keyword")
 		if err != nil {
 			return nil, err
 		}
-		for j, h := range kw {
-			rrf := float32(weightKw / (rrfK + float64(j+1)))
-			scores[h.id] += rrf
-			if !seen[h.id] {
-				seen[h.id] = true
-				order = append(order, h.id)
-			}
+		for _, h := range kw {
+			keyword = append(keyword, h.id)
 		}
 	}
-
-	maxPossibleRRF := float32(weightSem/(rrfK+1.0) + weightKw/(rrfK+1.0))
-	if maxPossibleRRF > 0 {
-		for id := range scores {
-			scores[id] = min(1.0, scores[id]/maxPossibleRRF)
-		}
-	}
-
-	sort.SliceStable(order, func(i, j int) bool { return scores[order[i]] > scores[order[j]] })
-	if len(order) > q.Limit {
-		order = order[:q.Limit]
+	order, scores := fuseRRF(semantic, keyword, depth*2)
+	order, err := e.diversify(ctx, order, q.Limit, q.PerSession)
+	if err != nil {
+		return nil, err
 	}
 
 	results, err := e.loadResults(ctx, order, scores)
@@ -143,6 +122,109 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 	return resp, nil
 }
 
+// anyTerms is a full-text query matching memories that contain any of the
+// query's words (stemmed, stop words dropped). It is used for keyword-only
+// search, where plainto_tsquery's all-words match found the answer for ~10%
+// of LongMemEval questions and this finds it for ~83%. Ranking with
+// ts_rank_cd prefers memories with more of the words, close together. Each
+// word is quoted, so punctuation in the query cannot break the syntax.
+func anyTerms(param int) string {
+	return fmt.Sprintf(`to_tsquery('english', COALESCE((SELECT string_agg(quote_literal(w), ' | ')
+		FROM unnest(tsvector_to_array(to_tsvector('english', $%d))) AS w), ''))`, param)
+}
+
+// diversify, when perSession > 0, picks limit results so that one
+// conversation cannot fill them: a first sweep takes at most perSession
+// memories from each session (or source file; memories with neither stand
+// alone), then a second sweep fills any remaining places in rank order.
+// Opt-in: it trades exact answers for breadth (see SearchQuery.PerSession).
+func (e *Engine) diversify(ctx context.Context, order []uuid.UUID, limit, perSession int) ([]uuid.UUID, error) {
+	if perSession <= 0 || len(order) <= limit {
+		if len(order) > limit {
+			order = order[:limit]
+		}
+		return order, nil
+	}
+	group := map[uuid.UUID]string{}
+	rows, err := e.pool.Query(ctx, `SELECT id, COALESCE(session_id::text, 'f:' || file_id::text, '') FROM memories WHERE id = ANY($1)`, order)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id uuid.UUID
+		var g string
+		if err := rows.Scan(&id, &g); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		group[id] = g
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return pickDiverse(order, group, limit, perSession), nil
+}
+
+// pickDiverse is diversify's selection, separate for testing.
+func pickDiverse(order []uuid.UUID, group map[uuid.UUID]string, limit, perSession int) []uuid.UUID {
+	out := make([]uuid.UUID, 0, limit)
+	taken := map[uuid.UUID]bool{}
+	count := map[string]int{}
+	for _, id := range order {
+		if len(out) == limit {
+			return out
+		}
+		g := group[id]
+		if g != "" && count[g] >= perSession {
+			continue
+		}
+		count[g]++
+		taken[id] = true
+		out = append(out, id)
+	}
+	for _, id := range order {
+		if len(out) == limit {
+			break
+		}
+		if !taken[id] {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// rrfK is the usual Reciprocal Rank Fusion constant.
+const rrfK = 60.0
+
+// fuseRRF merges two ranked lists with Reciprocal Rank Fusion, weighting both
+// equally: each item scores the sum of 1/(rrfK+rank) over the lists it is in.
+// It returns the top limit IDs and their scores scaled to 0..1 (1 = first in
+// both lists). With unequal weights, or lists cut to limit before fusing, one
+// side's best match can rank below the other side's weakest and never be
+// returned.
+func fuseRRF(semantic, keyword []uuid.UUID, limit int) ([]uuid.UUID, map[uuid.UUID]float32) {
+	scores := map[uuid.UUID]float32{}
+	var order []uuid.UUID
+	for _, list := range [][]uuid.UUID{semantic, keyword} {
+		for rank, id := range list {
+			if _, ok := scores[id]; !ok {
+				order = append(order, id)
+			}
+			scores[id] += float32(1 / (rrfK + float64(rank+1)))
+		}
+	}
+	best := float32(2 / (rrfK + 1))
+	for id := range scores {
+		scores[id] = min(1, scores[id]/best)
+	}
+	sort.SliceStable(order, func(i, j int) bool { return scores[order[i]] > scores[order[j]] })
+	if len(order) > limit {
+		order = order[:limit]
+	}
+	return order, scores
+}
+
 func typeFilter(q domain.SearchQuery, args *[]any) string {
 	if q.MemoryType == "" {
 		return ""
@@ -151,8 +233,8 @@ func typeFilter(q domain.SearchQuery, args *[]any) string {
 	return fmt.Sprintf(" AND m.memory_type = $%d", len(*args))
 }
 
-func (e *Engine) semanticIDs(ctx context.Context, q domain.SearchQuery, tenantID uuid.UUID, vec []float32) ([]uuid.UUID, error) {
-	args := []any{q.AgentID, tenantID, pgvector.NewVector(vec), len(vec), q.Limit}
+func (e *Engine) semanticIDs(ctx context.Context, q domain.SearchQuery, tenantID uuid.UUID, vec []float32, limit int) ([]uuid.UUID, error) {
+	args := []any{q.AgentID, tenantID, pgvector.NewVector(vec), len(vec), limit}
 	sql := `SELECT m.id FROM memory_embeddings e JOIN memories m ON m.id = e.memory_id
 		WHERE m.agent_id = $1 AND m.tenant_id = $2 AND e.dims = $4
 		  AND m.created_at > NOW() - INTERVAL '90 days'` + typeFilter(q, &args) + `
@@ -178,13 +260,17 @@ type keywordHit struct {
 	rank float32
 }
 
-func (e *Engine) keywordHits(ctx context.Context, q domain.SearchQuery, tenantID uuid.UUID) ([]keywordHit, error) {
-	args := []any{q.AgentID, tenantID, q.Query, q.Limit}
-	sql := `SELECT m.id, ts_rank_cd(to_tsvector('english', m.content), plainto_tsquery('english', $3)) AS rank
+func (e *Engine) keywordHits(ctx context.Context, q domain.SearchQuery, tenantID uuid.UUID, limit int, anyWord bool) ([]keywordHit, error) {
+	args := []any{q.AgentID, tenantID, q.Query, limit}
+	tsq := "plainto_tsquery('english', $3)"
+	if anyWord {
+		tsq = anyTerms(3)
+	}
+	sql := `SELECT m.id, ts_rank_cd(to_tsvector('english', m.content), ` + tsq + `) AS rank
 		FROM memories m
 		WHERE m.agent_id = $1 AND m.tenant_id = $2
 		  AND m.created_at > NOW() - INTERVAL '90 days'
-		  AND to_tsvector('english', m.content) @@ plainto_tsquery('english', $3)` + typeFilter(q, &args) + `
+		  AND to_tsvector('english', m.content) @@ ` + tsq + typeFilter(q, &args) + `
 		ORDER BY rank DESC LIMIT $4`
 	rows, err := e.pool.Query(ctx, sql, args...)
 	if err != nil {
@@ -764,7 +850,7 @@ const (
 func NewResultCache() *ResultCache { return &ResultCache{entries: map[string]cachedResponse{}} }
 
 func cacheKey(q domain.SearchQuery, tenantID uuid.UUID) string {
-	return fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%s\x00%s", tenantID, q.AgentID, q.Query, q.Limit, q.MemoryType, q.Mode)
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%d", tenantID, q.AgentID, q.Query, q.Limit, q.MemoryType, q.Mode, q.PerSession)
 }
 
 func (c *ResultCache) Get(q domain.SearchQuery, tenantID uuid.UUID) (*domain.SearchResponse, bool) {
