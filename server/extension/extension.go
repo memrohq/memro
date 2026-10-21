@@ -86,6 +86,16 @@ type UsageGate interface {
 	AllowUsage(ctx context.Context, tenantID uuid.UUID, agentID, metric string, amount int64) error
 }
 
+// UnclaimedCapExemption is an optional extension of QuotaPolicy. The server
+// caps agents nobody has claimed (UNCLAIMED_MAX_MEMORIES,
+// UNCLAIMED_MAX_FILE_BYTES; memro ADR 0013); when the QuotaPolicy also
+// implements this, agents it exempts skip those caps, for example because
+// they paid for a plan. The policy's own limits still apply. agentID is
+// always the caller's own agent.
+type UnclaimedCapExemption interface {
+	ExemptFromUnclaimedCaps(ctx context.Context, tenantID uuid.UUID, agentID string) bool
+}
+
 // PerAgentCap allows up to Max memories per agent; Max <= 0 means unlimited.
 type PerAgentCap struct{ Max int }
 
