@@ -3,8 +3,10 @@ package memro
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math/bits"
 	"strconv"
 	"time"
 )
@@ -85,4 +87,37 @@ func SignBody(agentID, privateKeyHex string, body []byte) (SignedHeaders, error)
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 	signature := ed25519.Sign(priv, append([]byte(timestamp), body...))
 	return SignedHeaders{AgentID: agentID, Signature: hex.EncodeToString(signature), Timestamp: timestamp, ContentType: "application/json"}, nil
+}
+
+// PowProof is a registration proof-of-work (ADR 0013).
+type PowProof struct {
+	Timestamp int64  `json:"timestamp"`
+	Nonce     string `json:"nonce"`
+}
+
+// SolvePow finds a nonce whose SHA-256 over
+// "memro-identity-v1:<publicKey>:<timestamp>:<nonce>" starts with difficulty
+// zero bits. Difficulty 20 takes a fraction of a second.
+func SolvePow(publicKey string, difficulty int) PowProof {
+	ts := time.Now().Unix()
+	prefix := "memro-identity-v1:" + publicKey + ":" + strconv.FormatInt(ts, 10) + ":"
+	for i := uint64(0); ; i++ {
+		nonce := strconv.FormatUint(i, 16)
+		sum := sha256.Sum256([]byte(prefix + nonce))
+		if leadingZeroBits(sum[:]) >= difficulty {
+			return PowProof{Timestamp: ts, Nonce: nonce}
+		}
+	}
+}
+
+func leadingZeroBits(b []byte) int {
+	n := 0
+	for _, x := range b {
+		if x == 0 {
+			n += 8
+			continue
+		}
+		return n + bits.LeadingZeros8(x)
+	}
+	return n
 }

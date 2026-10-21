@@ -10,6 +10,6 @@
 export { Agent } from './agent.js';
 export { MemroClient, MemroError, RateLimitError, DEFAULT_BASE_URL, API_KEY_PREFIX } from './client.js';
 export type { MemroClientOptions, Signer } from './client.js';
-export { generateKeypair, signRequest } from './crypto.js';
+export { generateKeypair, signRequest, solvePow } from './crypto.js';
 export type { Keypair } from './crypto.js';
 export type * from './types.js';

@@ -522,6 +522,13 @@ type File struct {
 	ExtractedText *string
 }
 
+// FileBytes is the total size of an agent's stored files.
+func (s *Store) FileBytes(ctx context.Context, agentID string) (int64, error) {
+	var n int64
+	err := s.Pool.QueryRow(ctx, `SELECT COALESCE(SUM(file_size), 0) FROM files WHERE agent_id = $1`, agentID).Scan(&n)
+	return n, err
+}
+
 func (s *Store) InsertFile(ctx context.Context, f *File) error {
 	_, err := s.Pool.Exec(ctx, `INSERT INTO files (id, agent_id, tenant_id, file_name, file_type, file_path, file_size, mime_type, extracted_text)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,

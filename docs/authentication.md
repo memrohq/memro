@@ -55,8 +55,10 @@ deterministic, sending the identical request twice within the same second
 gets `401 Request already used`; the SDKs wait for the next second and
 re-sign automatically.
 
-Register a self-owned agent with `POST /identity {"public_key": "<hex>"}`.
-The SDKs do this for you:
+Register a self-owned agent with `POST /identity`: its public key plus a
+small proof-of-work, about a second of CPU, so agents stay free to create
+but costly to create in bulk ([API reference](api-reference.md#post-identity)).
+No person or email is involved. The SDKs do this for you:
 
 ```python
 agent = Agent.create()        # key pair generated locally
@@ -64,7 +66,8 @@ agent.save("identity.json")   # the private key can't be recovered; keep this fi
 ```
 
 A self-owned agent can mint API keys for its own tools with a signed
-`POST /api-keys`.
+`POST /api-keys`. See [Agents that sign themselves up](agents.md) for the
+whole flow and the limits of an agent nobody has claimed.
 
 **Legacy v1 signatures** (timestamp + body only, no `X-Signature-Version`)
 don't cover the method or URL. Servers accept them while

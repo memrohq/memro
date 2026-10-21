@@ -81,6 +81,10 @@ func (s *Server) createIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		PublicKey string `json:"public_key"`
+		Pow       *struct {
+			Timestamp int64  `json:"timestamp"`
+			Nonce     string `json:"nonce"`
+		} `json:"pow"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		httpError(w, http.StatusBadRequest, err.Error())
@@ -88,6 +92,17 @@ func (s *Server) createIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := auth.ParsePublicKey(req.PublicKey); err != nil {
 		httpError(w, http.StatusBadRequest, "public_key must be a hex-encoded 32-byte ed25519 key (64 hex chars)")
+		return
+	}
+	// Proof-of-work (ADR 0013): a proof that is sent is always checked;
+	// registering without one works until IdentityPowRequired is switched on.
+	if req.Pow == nil {
+		if s.cfg.IdentityPowRequired {
+			httpError(w, http.StatusBadRequest, "A proof-of-work is required to register an agent. Update your SDK, or see GET /identity/pow.")
+			return
+		}
+	} else if err := auth.VerifyPow(req.PublicKey, req.Pow.Timestamp, req.Pow.Nonce, s.cfg.IdentityPowBits, time.Now()); err != nil {
+		httpError(w, http.StatusBadRequest, "Invalid proof-of-work: "+err.Error()+". See GET /identity/pow.")
 		return
 	}
 	// A public key belongs to at most one agent (ADR 0013): it cannot become
@@ -107,6 +122,19 @@ func (s *Server) createIdentity(w http.ResponseWriter, r *http.Request) {
 	metrics.IdentitiesCreated.Inc()
 	s.audit(r, Agent{ID: req.PublicKey, TenantID: domain.DefaultTenantID}, "identity.create", nil)
 	writeJSON(w, http.StatusOK, map[string]string{"agent_id": req.PublicKey})
+}
+
+// GET /identity/pow is public: what a registration proof must look like, so
+// SDKs follow the server's difficulty instead of hard-coding it.
+func (s *Server) identityPow(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"algorithm":       "sha256",
+		"message":         auth.PowPrefix + ":<public_key>:<timestamp>:<nonce>",
+		"difficulty":      s.cfg.IdentityPowBits,
+		"required":        s.cfg.IdentityPowRequired,
+		"max_age_seconds": int(auth.PowMaxAge / time.Second),
+		"nonce":           "1-64 letters or digits",
+	})
 }
 
 // GET /identity/{id} is public: it says whether an agent is registered. Who
@@ -281,6 +309,10 @@ func (s *Server) allowWrite(w http.ResponseWriter, r *http.Request, a Agent, n i
 		httpError(w, http.StatusInternalServerError, "Failed to store memory")
 		return false
 	}
+	if max := s.cfg.UnclaimedMaxMemories; a.UserID == nil && max > 0 && current+n > max {
+		httpError(w, http.StatusForbidden, fmt.Sprintf("Unclaimed agents can store up to %d memories. Ask your person to claim this agent to lift the limit.", max))
+		return false
+	}
 	if err := s.quota.AllowMemoryWrite(r.Context(), a.TenantID, a.ID, current, n); err != nil {
 		if errors.Is(err, extension.ErrQuotaExceeded) {
 			httpError(w, http.StatusForbidden, err.Error())
@@ -297,6 +329,17 @@ func (s *Server) allowWrite(w http.ResponseWriter, r *http.Request, a Agent, n i
 // the caller may use amount of metric. It writes the error response (403
 // with the policy's message) and returns false when not.
 func (s *Server) gate(w http.ResponseWriter, r *http.Request, a Agent, metric string, amount int64) bool {
+	if max := s.cfg.UnclaimedMaxFileBytes; metric == extension.MetricIngestBytes && a.UserID == nil && max > 0 && amount > 0 {
+		used, err := s.store.FileBytes(r.Context(), a.ID)
+		if err != nil {
+			httpError(w, http.StatusInternalServerError, "Failed to check usage limits")
+			return false
+		}
+		if used+amount > max {
+			httpError(w, http.StatusForbidden, fmt.Sprintf("Unclaimed agents can store up to %d MB of files. Ask your person to claim this agent to lift the limit.", max/1_000_000))
+			return false
+		}
+	}
 	g, ok := s.quota.(extension.UsageGate)
 	if !ok || amount <= 0 {
 		return true

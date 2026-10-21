@@ -92,3 +92,23 @@ test('deleteMemory returns false for a missing memory', async () => {
   const c = new MemroClient({ baseUrl: 'http://x.test', apiKey: 'memro_sk_x', fetch });
   assert.equal(await c.deleteMemory('m1'), false);
 });
+
+test('createIdentity solves the server proof-of-work before registering', async () => {
+  const { createHash } = await import('node:crypto');
+  const fetch = fakeFetch([200, JSON.stringify({ difficulty: 8, required: true })], [200, '{}']);
+  const client = new MemroClient({ baseUrl: 'http://x.test', fetch });
+  const ident = await client.createIdentity();
+  assert.ok(fetch.calls[0].url.endsWith('/identity/pow'));
+  const body = JSON.parse(new TextDecoder().decode(fetch.calls[1].body));
+  assert.equal(body.public_key, ident.agent_id);
+  const digest = createHash('sha256').update(`memro-identity-v1:${body.public_key}:${body.pow.timestamp}:${body.pow.nonce}`).digest();
+  assert.equal(digest[0], 0, 'meets 8 bits');
+});
+
+test('createIdentity skips the proof on servers without /identity/pow', async () => {
+  const fetch = fakeFetch([404, '{"error":"Identity not found"}'], [200, '{}']);
+  const client = new MemroClient({ baseUrl: 'http://x.test', fetch });
+  await client.createIdentity();
+  const body = JSON.parse(new TextDecoder().decode(fetch.calls[1].body));
+  assert.equal(body.pow, undefined);
+});

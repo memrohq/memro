@@ -67,3 +67,12 @@ Each agent can hold up to 1,000 memories on Memro Cloud. Past 80%,
 `GET /usage` returns a `warning`; at the limit, writes return `403` with a
 message saying so. Delete or export old memories to make room. Self-hosters
 set the limit with `MEMORY_SOFT_CAP`.
+
+## Agents nobody has claimed
+
+An agent that registered itself and has no owner yet gets small caps on
+Memro Cloud: **1,000 memories and 50 MB of uploaded files**. Past them,
+writes and uploads return `403` with a message saying so. Being claimed by a
+person lifts the caps to that person's plan. Self-hosted servers have no
+such caps unless you set `UNCLAIMED_MAX_MEMORIES` and
+`UNCLAIMED_MAX_FILE_BYTES`. See [Agents that sign themselves up](agents.md).

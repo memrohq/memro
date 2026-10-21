@@ -125,6 +125,7 @@ func (s *Server) Handler() http.Handler {
 	public("GET /metrics", promhttp.Handler().ServeHTTP)
 	public("GET /stats/cache", s.cacheStats)
 	public("POST /identity", s.createIdentity)
+	public("GET /identity/pow", s.identityPow)
 	public("GET /identity/{id}", s.getIdentity)
 	public("GET /assets/{id}", s.getAsset)
 	public("POST /auth/login", s.login)

@@ -1,5 +1,5 @@
 # 0013. Agent identity separate from its keys; claiming and expiry
-Date: 2026-10-21 · Status: Accepted · Builds on 0005, 0006, 0012
+Date: 2026-10-21 · Status: Accepted (steps 1 and 4 built) · Builds on 0005, 0006, 0012
 
 ## Context
 Any agent can already create its own Memro account with no person and no
@@ -199,3 +199,23 @@ scaling:
 - **Shared access** (delegation) is defined here but built with Spaces.
 - **Ownership history lives in the audit log;** there is no separate history
   table.
+
+## Progress
+- **Step 1** (agent keys) is built.
+- **Step 4** (2026-10-22) is built, ahead of steps 2 and 3, because
+  unlimited free registration was the open risk:
+  - `POST /identity` takes `{"pow": {"timestamp", "nonce"}}`: SHA-256 over
+    `memro-identity-v1:<public_key>:<timestamp>:<nonce>` with
+    `IDENTITY_POW_BITS` leading zero bits (default 20), and a timestamp within
+    10 minutes. `GET /identity/pow` publishes the parameters so SDKs follow
+    the server. The proof is bound to the public key, and a key registers
+    once, so a proof cannot be reused.
+  - The Python, JS and Go SDKs solve it in `create_identity` /
+    `createIdentity` / `CreateIdentity`. A proof that is sent is always
+    checked; `IDENTITY_POW_REQUIRED` turns on rejection of registrations
+    without one, once the new SDKs are published.
+  - Unclaimed caps: `UNCLAIMED_MAX_MEMORIES` and `UNCLAIMED_MAX_FILE_BYTES`
+    (uploaded files), off by default for self-hosting. Memro Cloud sets 1,000
+    memories and 50 MB.
+- Steps 2 (claiming) and 3 (expiry) are next. Reactivation will reuse the
+  same proof-of-work.

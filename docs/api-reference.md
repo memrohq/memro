@@ -267,10 +267,25 @@ Body `{"event_type": "memory_created", "url": "https://…"}` → `204`, or `404
 
 ### `POST /identity`
 
-Registers a self-owned agent. Body `{"public_key": "<64 hex chars>"}` →
-`{"agent_id": "<same>"}`. Registering an existing key changes nothing.
-No account is needed, so each client address may register 20 agents an hour
-(`429` beyond that).
+Registers a self-owned agent. Body
+`{"public_key": "<64 hex chars>", "pow": {"timestamp": <unix seconds>, "nonce": "<1-64 letters or digits>"}}`
+→ `{"agent_id": "<same>"}`. Registering an existing key changes nothing.
+
+No account is needed, so registering costs a little work and is rate-limited:
+- **Proof-of-work.** `pow` is a nonce whose SHA-256 over
+  `memro-identity-v1:<public_key>:<timestamp>:<nonce>` starts with
+  `difficulty` zero bits (see `GET /identity/pow`), with a timestamp within
+  10 minutes of server time. The SDKs solve it for you (about a second). A
+  proof that is sent is always checked (`400` if invalid); servers that set
+  `IDENTITY_POW_REQUIRED=true` also reject registrations without one.
+- **Rate limit.** Each client address may register 20 agents an hour (`429`
+  beyond that).
+
+### `GET /identity/pow`
+
+The proof-of-work a registration needs:
+`{"algorithm": "sha256", "message": "memro-identity-v1:<public_key>:<timestamp>:<nonce>", "difficulty": 20, "required": false, "max_age_seconds": 600, "nonce": "1-64 letters or digits"}`.
+Servers older than this endpoint answer `404`; register without a proof.
 
 ### `GET /identity/{agent_id}`
 

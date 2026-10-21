@@ -4,6 +4,7 @@
  * not need any of this.
  */
 import nacl from 'tweetnacl';
+import { sha256 } from '@noble/hashes/sha2';
 
 export function toHex(bytes: Uint8Array): string {
   let out = '';
@@ -64,4 +65,32 @@ export function signRequest(
     'X-Signature': toHex(nacl.sign.detached(payload, secretKey(privateKeyHex))),
     'X-Signature-Version': '2',
   };
+}
+
+const POW_PREFIX = 'memro-identity-v1';
+
+function leadingZeroBits(digest: Uint8Array): number {
+  let n = 0;
+  for (const b of digest) {
+    if (b === 0) { n += 8; continue; }
+    return n + Math.clz32(b) - 24;
+  }
+  return n;
+}
+
+/**
+ * Proof-of-work for registering an agent (ADR 0013): a nonce whose SHA-256
+ * over `memro-identity-v1:<publicKey>:<timestamp>:<nonce>` starts with
+ * `difficulty` zero bits. Difficulty 20 takes about a second.
+ */
+export function solvePow(publicKey: string, difficulty: number, timestamp = Math.floor(Date.now() / 1000)): { timestamp: number; nonce: string } {
+  const enc = new TextEncoder();
+  const prefix = enc.encode(`${POW_PREFIX}:${publicKey}:${timestamp}:`);
+  for (let i = 0; ; i++) {
+    const nonce = i.toString(16);
+    const msg = new Uint8Array(prefix.length + nonce.length);
+    msg.set(prefix);
+    for (let k = 0; k < nonce.length; k++) msg[prefix.length + k] = nonce.charCodeAt(k);
+    if (leadingZeroBits(sha256(msg)) >= difficulty) return { timestamp, nonce };
+  }
 }

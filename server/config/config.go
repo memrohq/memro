@@ -45,6 +45,18 @@ type Config struct {
 
 	MemorySoftCap int
 
+	// Agent self-registration (ADR 0013). IdentityPowBits is the
+	// proof-of-work difficulty for POST /identity (leading zero bits of
+	// SHA-256; 20 is about a second of CPU). Proofs that are sent are always
+	// checked; IdentityPowRequired also rejects registrations without one.
+	IdentityPowBits     int
+	IdentityPowRequired bool
+
+	// Caps for agents nobody has claimed (no owner). 0 means no cap, which
+	// suits self-hosting; Memro Cloud sets them.
+	UnclaimedMaxMemories  int
+	UnclaimedMaxFileBytes int64
+
 	// Public URLs handed to `memro connect`.
 	AppURL string // dashboard, e.g. https://app.memro.co
 	MCPURL string // hosted MCP endpoint, e.g. https://mcp.memro.co/mcp
@@ -82,6 +94,10 @@ func Load() Config {
 		EmailUser:             strings.TrimSpace(os.Getenv("EMAIL_HOST_USER")),
 		EmailPass:             strings.TrimSpace(os.Getenv("EMAIL_HOST_PASSWORD")),
 		MemorySoftCap:         envInt("MEMORY_SOFT_CAP", 1000),
+		IdentityPowBits:       envInt("IDENTITY_POW_BITS", 20),
+		IdentityPowRequired:   envBool("IDENTITY_POW_REQUIRED", false),
+		UnclaimedMaxMemories:  envInt("UNCLAIMED_MAX_MEMORIES", 0),
+		UnclaimedMaxFileBytes: int64(envInt("UNCLAIMED_MAX_FILE_BYTES", 0)),
 		DevLogOTP:             envBool("DEV_LOG_OTP", false),
 		AppURL:                strings.TrimRight(env("APP_URL", "http://localhost:5173"), "/"),
 		MCPURL:                env("MCP_URL", "http://localhost:8080/mcp"),
