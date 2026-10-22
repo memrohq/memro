@@ -13,7 +13,7 @@ from typing import Optional
 
 ROOT = pathlib.Path(__file__).resolve().parent
 BENCH = ROOT.parent
-RUNS = BENCH / "runs"
+RUNS = ROOT / "runs"
 RUNS.mkdir(exist_ok=True)
 LEDGER = RUNS / "ledger.json"
 

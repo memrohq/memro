@@ -98,13 +98,13 @@ jobs:
           BENCH_BUDGET_USD: "2.00"
         run: |
           python bench/longmemeval/run.py --subset bench/longmemeval/subset_100.json --name ci-subset
-          python bench/longmemeval/judge.py bench/runs/ci-subset
-          python bench/longmemeval/report.py bench/runs/ci-subset
+          python bench/longmemeval/judge.py bench/longmemeval/runs/ci-subset
+          python bench/longmemeval/report.py bench/longmemeval/runs/ci-subset
 
       - name: Compare Against Baseline & Enforce Quality Gate
         id: compare
         run: |
-          python bench/longmemeval/compare.py bench/runs/baseline-100 bench/runs/ci-subset --ci-gate | tee compare_report.md
+          python bench/longmemeval/compare.py bench/longmemeval/runs/baseline-100 bench/longmemeval/runs/ci-subset --ci-gate | tee compare_report.md
 
       - name: Post PR Comment
         if: github.event_name == 'pull_request' && always()
@@ -115,8 +115,8 @@ jobs:
             let body = "";
             if (fs.existsSync('compare_report.md')) {
               body = fs.readFileSync('compare_report.md', 'utf8');
-            } else if (fs.existsSync('bench/runs/ci-subset/REPORT.md')) {
-              body = fs.readFileSync('bench/runs/ci-subset/REPORT.md', 'utf8');
+            } else if (fs.existsSync('bench/longmemeval/runs/ci-subset/REPORT.md')) {
+              body = fs.readFileSync('bench/longmemeval/runs/ci-subset/REPORT.md', 'utf8');
             } else {
               body = "Benchmark run failed before report generation.";
             }
@@ -133,7 +133,7 @@ jobs:
         with:
           name: bench-ci-subset
           path: |
-            bench/runs/ci-subset/
+            bench/longmemeval/runs/ci-subset/
             compare_report.md
           if-no-files-found: ignore
 

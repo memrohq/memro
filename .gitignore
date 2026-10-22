@@ -54,4 +54,6 @@ identity.json
 
 # Benchmark: scratch runs and venv
 bench/venv/
-bench/runs/
+bench/longmemeval/runs/ledger.json
+bench/longmemeval/runs/ci-*/
+bench/longmemeval/runs/embed_cache.sqlite
