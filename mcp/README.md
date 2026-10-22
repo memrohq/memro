@@ -1,35 +1,20 @@
-# memro MCP Server
+# Memro MCP Server
 
-Gives any MCP-compatible AI (Claude Desktop, Cursor, Zed, etc.) persistent memory via the memro protocol.
+Verified memory infrastructure for AI agents. Gives any Model Context Protocol (MCP) compatible AI tool (Claude Code, Cursor, Codex, Zed, Claude Desktop) persistent memory across sessions.
 
-## Install (Local)
+## Install
 
-hhhhhhhhggg
-
+```bash
+# PyPI (once published via CI):
 pip install memro-mcp
 
-## Install (Docker)
-ojkjdnksdnodk;lka;dljladnaljdnalkdnaldnadnkadnjkadnlkdjwk
-docker build -t memro-mcp .
-# Local Mode (Default)
-docker run -e MEMRO_BASE_URL=http://your-backend-url memro-mcp
-# Cloud Mode (SSE)
-docker run -p 8080:8080 -e MCP_TRANSPORT=sse -e MEMRO_BASE_URL=http://your-backend-url memro-mcp
+# Or install from source:
+pip install .
 ```
 
-## Managed Mode (SaaS)
+## Quick Example (MCP Config)
 
-For multi-tenant or SaaS deployments where you want a single MCP server instance to serve multiple users:
-
-1. Start the server with `MCP_TRANSPORT=sse`.
-2. The agent must call the `initialize_session` tool first to register its `agent_id` and `private_key`.
-3. All subsequent calls in that session will use those credentials.
-
-See [setup_managed.md](setup_managed.md) for a detailed configuration guide.
-
-## Setup with Claude Desktop
-
-Add to `~/.claude/claude_desktop_config.json`:
+Add to your MCP client config (e.g., `~/.claude/claude_desktop_config.json` or `.cursor/mcp.json`):
 
 ```json
 {
@@ -37,67 +22,43 @@ Add to `~/.claude/claude_desktop_config.json`:
     "memro": {
       "command": "memro-mcp",
       "env": {
-        "MEMRO_AGENT_ID": "your_agent_id_here",
-        "MEMRO_PRIVATE_KEY": "your_private_key_here",
-        "MEMRO_BASE_URL": "http://localhost:8081"
+        "MEMRO_API_KEY": "memro_sk_..."
       }
     }
   }
 }
 ```
 
-> First run without `MEMRO_AGENT_ID` set will auto-create a new agent and print the credentials to stderr.
-
-## Available Tools
-
-Once connected, Claude (or any MCP client) can use:
-
-| Tool | What it does |
-|------|-------------|
-| `remember` | Store a new memory (episodic, semantic, procedural, or profile) |
-| `recall` | Semantic search across all memories |
-| `get_recent_memories` | Get most recent memories chronologically |
-| `delete_memory` | Delete a specific memory by ID |
-| `export_memories` | Export a summary of all stored memories |
-
-## Example Usage
-
-Once configured, Claude will automatically use memory:
-
-```
-You: Remember that I prefer TypeScript over JavaScript
-Claude: [calls remember("User prefers TypeScript over JavaScript", type="profile")]
-        Got it, I'll remember that.
-
-You: What's my preferred language?
-Claude: [calls recall("preferred programming language")]
-        Based on what I remember, you prefer TypeScript over JavaScript.
-```
-
-## Self-host the memro backend
-
+Or connect with a single command via the CLI:
 ```bash
-cd memrohq
-docker-compose up -d
-
-# Backend runs at http://localhost:8081
+npx memro-cli connect
 ```
+
+## Available MCP Tools
+
+Once connected, agents have direct access to:
+
+| Tool | Description |
+|------|-------------|
+| `remember` | Store a new memory (`semantic`, `episodic`, `procedural`, or `profile`) |
+| `recall` | Hybrid semantic + keyword retrieval across stored memories |
+| `get_recent_memories` | Retrieve recent memories chronologically |
+| `delete_memory` | Delete a specific memory by ID |
+| `export_memories` | Export agent memory state |
+| `search_temporal` | Query memories with explicit time-range weighting |
 
 ## Environment Variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `MEMRO_AGENT_ID` | No* | auto-created | Your agent's public key |
-| `MEMRO_PRIVATE_KEY` | No* | auto-created | Your agent's private key |
-| `MEMRO_BASE_URL` | No | `http://localhost:8081` | memro backend URL |
-| `MEMRO_API_KEY` | No* | — | A `memro_sk_` API key (stdio only) |
-| `MCP_TRANSPORT` | No | `stdio` | `stdio`, or `sse` to serve `/mcp` and `/sse` over HTTP |
-| `MCP_LOG_LEVEL` | No | `INFO` | Log level; logs go to stderr and never include tool arguments |
-| `MCP_ALLOW_PRIVATE_KEY_AUTH` | No | off | HTTP only: accept `agent_id` + private key on `/sse` (legacy, self-hosting) |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MEMRO_API_KEY` | — | Memro API key (`memro_sk_...`) |
+| `MEMRO_BASE_URL` | `http://localhost:8081` | Memro backend URL (default for local self-hosting) |
+| `MEMRO_AGENT_ID` | auto | Sovereign agent Ed25519 public key |
+| `MEMRO_PRIVATE_KEY` | auto | Sovereign agent Ed25519 private key |
+| `MCP_TRANSPORT` | `stdio` | `stdio` for local CLI tools, or `sse` for HTTP SSE transport |
+| `MCP_LOG_LEVEL` | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 
-*Stdio only. First run will auto-create and print credentials. Save them for future runs.
+---
 
-Over HTTP every connection must authenticate with its own API key:
-`Authorization: Bearer memro_sk_...` (or `?token=memro_sk_...` for SSE
-clients that cannot send headers). The server's own environment
-credentials are never used for HTTP requests. See ADR 0008.
+Repository: [github.com/memrohq/memro](https://github.com/memrohq/memro) · Documentation: [https://memro.co](https://memro.co)
+License: Source available under [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0). Free for non-commercial use; commercial use through Memro Cloud or a commercial license.

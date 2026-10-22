@@ -31,6 +31,12 @@ func TestVerifyV1AndV2(t *testing.T) {
 	if err := Verify(pub, other, sign(t, priv, v2)); err != ErrVerify {
 		t.Fatalf("expected ErrVerify for path change, got %v", err)
 	}
+	if err := Verify(pub, v2, "tooshort"); err != ErrBadSignature {
+		t.Fatalf("expected ErrBadSignature for short sig, got %v", err)
+	}
+	if err := Verify(pub, v2, sign(t, priv, v2)+"aa"); err != ErrBadSignature {
+		t.Fatalf("expected ErrBadSignature for long sig, got %v", err)
+	}
 }
 
 // TestSharedVector pins the signing payload so every SDK can test against
@@ -67,13 +73,22 @@ func TestCheckTimestamp(t *testing.T) {
 func TestReplayCache(t *testing.T) {
 	c := NewReplayCache()
 	now := time.Now()
-	if !c.Use("sig", now) {
+	sig := "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+	if !c.Use(sig, now) {
 		t.Fatal("first use rejected")
 	}
-	if c.Use("sig", now.Add(time.Second)) {
-		t.Fatal("replay accepted")
+	if c.Use(sig, now.Add(time.Second)) {
+		t.Fatal("identical replay accepted")
 	}
-	if !c.Use("sig", now.Add(11*time.Minute)) {
+	sigUpper := "A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4"
+	if c.Use(sigUpper, now.Add(time.Second)) {
+		t.Fatal("uppercase replay accepted")
+	}
+	sigMixed := "A1b2C3d4E5f6A1b2C3d4E5f6A1b2C3d4E5f6A1b2C3d4E5f6A1b2C3d4E5f6A1b2C3d4E5f6A1b2C3d4E5f6A1b2C3d4E5f6A1b2C3d4E5f6A1b2C3d4E5f6A1b2C3d4"
+	if c.Use(sigMixed, now.Add(time.Second)) {
+		t.Fatal("mixed-case replay accepted")
+	}
+	if !c.Use(sig, now.Add(11*time.Minute)) {
 		t.Fatal("expired entry should be reusable")
 	}
 }

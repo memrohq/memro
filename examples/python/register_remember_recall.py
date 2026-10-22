@@ -17,20 +17,26 @@ def main():
     base_url = os.environ.get("MEMRO_BASE_URL", "https://api.memro.co")
     api_key = os.environ.get("MEMRO_API_KEY")
 
+    # Kept outside the repo: it holds the agent's private key.
+    identity_file = os.path.expanduser("~/.config/memro/identity.json")
     if api_key:
         print(f"Connecting to Memro ({base_url}) using MEMRO_API_KEY...")
         agent = Agent.from_api_key(api_key, client=MemroClient(base_url=base_url))
+    elif os.path.exists(identity_file):
+        print(f"Connecting to Memro ({base_url}) using {identity_file}...")
+        agent = Agent.from_file(identity_file, client=MemroClient(base_url=base_url))
+    elif os.environ.get("MEMRO_AGENT_ID") and os.environ.get("MEMRO_PRIVATE_KEY"):
+        print(f"Connecting to Memro ({base_url}) using agent environment credentials...")
+        agent = Agent.from_env(client=MemroClient(base_url=base_url))
     else:
         print(f"Registering autonomous sovereign agent on {base_url} (proof-of-work)...")
         agent = Agent.create(client=MemroClient(base_url=base_url))
-        config_dir = os.path.expanduser("~/.config/memro")
         try:
-            os.makedirs(config_dir, mode=0o700, exist_ok=True)
-            identity_path = os.path.join(config_dir, "identity.json")
-            agent.save(identity_path)
-            print(f"Agent identity saved to {identity_path} (mode 0600).")
+            os.makedirs(os.path.dirname(identity_file), mode=0o700, exist_ok=True)
+            agent.save(identity_file)
+            print(f"Agent identity saved to {identity_file} (mode 0600).")
         except Exception as err:
-            print(f"Warning: could not save identity to {config_dir}/identity.json: {err}")
+            print(f"Warning: could not save identity to {identity_file}: {err}")
 
     print(f"Agent ID (Ed25519 Public Key): {agent.agent_id[:16]}...{agent.agent_id[-8:]}")
 

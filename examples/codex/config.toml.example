@@ -1,0 +1,6 @@
+[mcp.servers.memro]
+command = "npx"
+args = ["-y", "memro-cli", "mcp"]
+
+[mcp.servers.memro.env]
+MEMRO_API_KEY = "memro_sk_your_api_key_here"

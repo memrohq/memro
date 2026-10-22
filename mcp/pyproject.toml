@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "memro-mcp"
 version = "0.2.1"
-description = "MCP server for memro — gives AI agents persistent memory via Claude, Cursor, and any MCP client"
+description = "Memro — verified memory infrastructure for AI agents"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "PolyForm-Noncommercial-1.0.0"}
+license = {text = "LicenseRef-PolyForm-Noncommercial-1.0.0"}
 authors = [
     {name = "memro Team", email = "sdk@memro.co"}
 ]
-keywords = ["ai", "agents", "memory", "mcp", "claude", "cursor", "memro"]
+keywords = ["ai-agents", "agent-memory", "mcp", "llm"]
 
 dependencies = [
     "mcp>=1.9,<2",
@@ -32,4 +32,4 @@ where = ["src"]
 
 [project.urls]
 Homepage = "https://memro.co"
-Repository = "https://github.com/memrohq/memro/tree/main/mcp"
+Repository = "https://github.com/memrohq/memro"

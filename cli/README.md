@@ -99,3 +99,8 @@ npx memro-cli disconnect [--project] [--client ...]
 
 Streamable HTTP at `https://mcp.memro.co/mcp` with the header
 `Authorization: Bearer <memro_sk_ key>`.
+
+---
+
+Repository: [github.com/memrohq/memro](https://github.com/memrohq/memro) · Documentation: [https://memro.co](https://memro.co)
+License: Source available under [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0). Free for non-commercial use; commercial use through Memro Cloud or a commercial license.

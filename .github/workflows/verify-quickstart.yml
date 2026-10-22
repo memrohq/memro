@@ -1,0 +1,71 @@
+name: Quickstart Verification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-clean-quickstart:
+    name: Verify Quickstart (Clean Environment)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: memro
+          POSTGRES_PASSWORD: memro
+          POSTGRES_DB: memro
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U memro"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build and Start Memro Server
+        working-directory: server
+        run: |
+          go build -o /tmp/memro-api ./cmd/memro-api
+          DATABASE_URL=postgres://memro:memro@localhost:5432/memro \
+          ALLOW_LEGACY_SIGNATURES=true RATE_LIMIT_MAX=5000 \
+          FILE_STORAGE_PATH=/tmp/memro-files /tmp/memro-api > /tmp/api.log 2>&1 &
+          for i in $(seq 30); do curl -sf localhost:8081/health && exit 0; sleep 1; done
+          cat /tmp/api.log; exit 1
+
+      - name: Prepare Python Environment
+        run: |
+          python -m venv sdk/python/.venv
+          sdk/python/.venv/bin/pip install -e sdk/python -e mcp
+
+      - name: Prepare JS Environment
+        working-directory: sdk/js
+        run: |
+          npm ci
+          npm run build
+
+      - name: Run Quickstart Verification Script
+        env:
+          MEMRO_BASE_URL: http://localhost:8081
+        run: |
+          ./scripts/verify_quickstart.sh
+
+      - name: Show Server Log on Failure
+        if: failure()
+        run: cat /tmp/api.log

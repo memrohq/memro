@@ -70,8 +70,8 @@ A self-owned agent can mint API keys for its own tools with a signed
 whole flow and the limits of an agent nobody has claimed.
 
 **Legacy v1 signatures** (timestamp + body only, no `X-Signature-Version`)
-don't cover the method or URL. Servers accept them while
-`ALLOW_LEGACY_SIGNATURES=true` (the default for now); new code should use v2.
+don't cover the method or URL. Servers reject them by default; set
+`ALLOW_LEGACY_SIGNATURES=true` only if older clients require it. New code must use v2.
 
 ## Device login (how `npx memro-cli connect` works)
 

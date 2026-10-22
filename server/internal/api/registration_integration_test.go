@@ -77,7 +77,7 @@ func TestUnclaimedAgentCaps(t *testing.T) {
 
 	e.remember(a, "first", "")
 	e.remember(a, "second", "")
-	code, b := e.do(&a, "v1", "POST", "/memory", j(map[string]any{"content": "third"}), nil)
+	code, b := e.do(&a, "v2", "POST", "/memory", j(map[string]any{"content": "third"}), nil)
 	e.must(403, code, b, "memory cap for unclaimed agent")
 	if !strings.Contains(string(b), "claim") {
 		t.Fatalf("cap message should mention claiming: %s", b)
@@ -121,7 +121,7 @@ func TestUnclaimedCapExemption(t *testing.T) {
 		e.remember(a, "first", "")
 	}
 	e.remember(paid, "second, past the unclaimed cap", "")
-	code, b := e.do(&unpaid, "v1", "POST", "/memory", j(map[string]any{"content": "second"}), nil)
+	code, b := e.do(&unpaid, "v2", "POST", "/memory", j(map[string]any{"content": "second"}), nil)
 	e.must(403, code, b, "unpaid agent at the cap")
 	if !strings.Contains(string(b), "subject=agent:"+unpaid.id) {
 		t.Fatalf("cap message should carry the hint with the agent id: %s", b)

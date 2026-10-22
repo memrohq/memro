@@ -9,21 +9,25 @@ async function main() {
   const baseUrl = process.env.MEMRO_BASE_URL || 'https://api.memro.co';
   const apiKey = process.env.MEMRO_API_KEY;
 
+  // Kept outside the repo: it holds the agent's private key.
+  const identityFile = path.join(os.homedir(), '.config', 'memro', 'identity.json');
+
   let agent: Agent;
   if (apiKey) {
     console.log(`Connecting to Memro (${baseUrl}) using MEMRO_API_KEY...`);
     agent = await Agent.fromApiKey(apiKey, { baseUrl });
+  } else if (fs.existsSync(identityFile)) {
+    console.log(`Connecting to Memro (${baseUrl}) using ${identityFile}...`);
+    agent = await Agent.fromFile(identityFile, { baseUrl });
   } else {
     console.log(`Registering autonomous sovereign agent on ${baseUrl} (proof-of-work)...`);
     agent = await Agent.create({ baseUrl });
     try {
-      const configDir = path.join(os.homedir(), '.config', 'memro');
-      fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
-      const identityPath = path.join(configDir, 'identity.json');
-      await agent.save(identityPath);
-      console.log(`Agent identity saved to ${identityPath} (mode 0600).`);
+      fs.mkdirSync(path.dirname(identityFile), { recursive: true, mode: 0o700 });
+      await agent.save(identityFile);
+      console.log(`Agent identity saved to ${identityFile} (mode 0600).`);
     } catch (err) {
-      console.warn(`Warning: could not save identity to ~/.config/memro/identity.json:`, err);
+      console.warn(`Warning: could not save identity to ${identityFile}:`, err);
     }
   }
 

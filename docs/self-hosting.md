@@ -45,7 +45,7 @@ All settings are environment variables. The common ones:
 | `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_BASE_URL` | `openai` | Any OpenAI-compatible endpoint works |
 | `ALLOWED_ORIGINS` | all | Comma-separated CORS origins for browsers |
 | `TRUST_PROXY_HEADERS` | `false` | Set behind a proxy that sets `X-Real-IP` |
-| `ALLOW_LEGACY_SIGNATURES` | `true` | Accept v1 signatures; set `false` once your clients use v2 |
+| `ALLOW_LEGACY_SIGNATURES` | `false` | Accept legacy v1 signatures (disabled by default; set `true` only if older clients require it) |
 | `RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_SECONDS` | `200`, `60` | |
 | `MEMORY_SOFT_CAP` | `1000` | Memories per agent |
 | `IDENTITY_POW_BITS` | `20` | Proof-of-work difficulty for agent registration (about a second of CPU) |

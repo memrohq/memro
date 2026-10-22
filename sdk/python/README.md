@@ -1,7 +1,26 @@
-# Python SDK
+# Memro Python SDK
+
+Verified memory infrastructure for AI agents.
+
+## Install
 
 ```bash
-pip install memro    # Python 3.8+
+# PyPI (once published via CI):
+pip install memro
+
+# Install from source:
+pip install .
+```
+
+## Quick Example
+
+```python
+from memro import Agent
+
+agent = Agent.create()  # Generates sovereign Ed25519 identity
+mem = agent.remember("The billing service was rewritten in Go")
+results = agent.recall("billing service language")
+print(results[0].content)
 ```
 
 ## Connect
@@ -114,4 +133,5 @@ See the [API reference](https://github.com/memrohq/memro/blob/main/docs/api-refe
 
 ---
 
-Full documentation: https://github.com/memrohq/memro/tree/main/docs · License: PolyForm Noncommercial 1.0.0
+Repository: [github.com/memrohq/memro](https://github.com/memrohq/memro) · Documentation: [https://memro.co](https://memro.co)
+License: Source available under [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0). Free for non-commercial use; commercial use through Memro Cloud or a commercial license.

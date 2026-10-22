@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -72,8 +73,19 @@ func PayloadV2(ts, method, pathAndQuery string, body []byte) []byte {
 }
 
 func Verify(pub ed25519.PublicKey, payload []byte, sigHex string) error {
+	if len(sigHex) != 2*ed25519.SignatureSize {
+		return ErrBadSignature
+	}
 	sig, err := hex.DecodeString(sigHex)
 	if err != nil || len(sig) != ed25519.SignatureSize {
+		return ErrBadSignature
+	}
+	return VerifyBytes(pub, payload, sig)
+}
+
+// VerifyBytes verifies a decoded ed25519 signature directly.
+func VerifyBytes(pub ed25519.PublicKey, payload []byte, sig []byte) error {
+	if len(sig) != ed25519.SignatureSize {
 		return ErrBadSignature
 	}
 	if !ed25519.Verify(pub, payload, sig) {
@@ -94,13 +106,16 @@ func NewReplayCache() *ReplayCache {
 }
 
 // Use records sig and reports false if it was already used.
+// It normalizes sig to canonical lowercase hex so case variations cannot
+// bypass replay protection.
 func (c *ReplayCache) Use(sig string, now time.Time) bool {
+	key := strings.ToLower(sig)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if exp, ok := c.seen[sig]; ok && now.Before(exp) {
+	if exp, ok := c.seen[key]; ok && now.Before(exp) {
 		return false
 	}
-	c.seen[sig] = now.Add(2 * MaxClockSkew)
+	c.seen[key] = now.Add(2 * MaxClockSkew)
 	if len(c.seen) > 100_000 {
 		for k, exp := range c.seen {
 			if now.After(exp) {
@@ -109,6 +124,11 @@ func (c *ReplayCache) Use(sig string, now time.Time) bool {
 		}
 	}
 	return true
+}
+
+// UseBytes records the raw signature bytes, keyed on lowercase hex.
+func (c *ReplayCache) UseBytes(sig []byte, now time.Time) bool {
+	return c.Use(hex.EncodeToString(sig), now)
 }
 
 // --- Session tokens & OTP codes ------------------------------------------------

@@ -165,5 +165,44 @@ export class Agent {
   /** Permanently delete this agent and everything it stored. Needs the agent's private key: API keys get 403. */
   deleteAgent(): Promise<void> { return this.client.deleteIdentity(this.agentId, this.signer); }
 
+  // ── Coordination ────────────────────────────────────────────────────────
+
+  claim(resource: string, options?: { intent?: string; sessionId?: string; ttlSeconds?: number }): Promise<Record<string, unknown>> {
+    return this.client.coordinationClaim({
+      resource,
+      intent: options?.intent ?? '',
+      session_id: options?.sessionId,
+      ttl_seconds: options?.ttlSeconds,
+    }, this.signer);
+  }
+
+  heartbeat(options: { resource?: string; leaseId?: string; ttlSeconds?: number }): Promise<Record<string, unknown>> {
+    return this.client.coordinationHeartbeat({
+      resource: options.resource,
+      lease_id: options.leaseId,
+      ttl_seconds: options.ttlSeconds,
+    }, this.signer);
+  }
+
+  release(resource: string, status = 'completed'): Promise<Record<string, unknown>> {
+    return this.client.coordinationRelease({ resource, status }, this.signer);
+  }
+
+  handoff(resource: string, summary: string, nextAgentId?: string): Promise<Record<string, unknown>> {
+    return this.client.coordinationHandoff({ resource, summary, next_agent_id: nextAgentId }, this.signer);
+  }
+
+  check(resource: string, intent = ''): Promise<Record<string, unknown>> {
+    return this.client.coordinationCheck({ resource, intent }, this.signer);
+  }
+
+  active(prefix?: string): Promise<Record<string, unknown>> {
+    return this.client.coordinationActive(prefix ? { resource: prefix } : undefined, this.signer);
+  }
+
+  logIntent(resource: string, intent: string, ttlSeconds?: number): Promise<Record<string, unknown>> {
+    return this.client.coordinationIntent({ resource, intent, ttl_seconds: ttlSeconds }, this.signer);
+  }
+
   toString(): string { return `Agent(${this.agentId.slice(0, 16)}…)`; }
 }
