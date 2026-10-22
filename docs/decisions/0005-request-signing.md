@@ -18,3 +18,7 @@ signature could be replayed against another route within 5 minutes.
 
 ## Consequences
 Cross-SDK keys work. Next: switch SDKs to v2, then disable v1.
+
+### Note on Replay Cache Distribution
+The replay cache is currently per-process. During a blue-green switch, or with more than one API instance, a request could be replayed on the other instance within the 5-minute window. If the API ever runs more than one instance, move it to Postgres (similar to `connector_webhook_deliveries`).
+

@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { Agent } from '../../sdk/js/dist/esm/index.js';
 
 async function main() {
@@ -13,6 +16,15 @@ async function main() {
   } else {
     console.log(`Registering autonomous sovereign agent on ${baseUrl} (proof-of-work)...`);
     agent = await Agent.create({ baseUrl });
+    try {
+      const configDir = path.join(os.homedir(), '.config', 'memro');
+      fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
+      const identityPath = path.join(configDir, 'identity.json');
+      await agent.save(identityPath);
+      console.log(`Agent identity saved to ${identityPath} (mode 0600).`);
+    } catch (err) {
+      console.warn(`Warning: could not save identity to ~/.config/memro/identity.json:`, err);
+    }
   }
 
   console.log(`Agent ID (Ed25519 Public Key): ${agent.agentId.slice(0, 16)}...${agent.agentId.slice(-8)}`);

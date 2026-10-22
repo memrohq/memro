@@ -135,7 +135,7 @@ func (s *Server) deviceInfo(w http.ResponseWriter, r *http.Request) {
 	case time.Now().After(d.ExpiresAt):
 		status = "expired"
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"client_name": d.ClientName, "expires_at": d.ExpiresAt, "status": status})
+	writeJSON(w, http.StatusOK, map[string]any{"client_name": d.ClientName, "created_at": d.CreatedAt, "expires_at": d.ExpiresAt, "status": status})
 }
 
 // POST /auth/device/approve {"user_code": "…"} — connect the waiting CLI to

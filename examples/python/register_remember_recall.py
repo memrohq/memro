@@ -23,6 +23,14 @@ def main():
     else:
         print(f"Registering autonomous sovereign agent on {base_url} (proof-of-work)...")
         agent = Agent.create(client=MemroClient(base_url=base_url))
+        config_dir = os.path.expanduser("~/.config/memro")
+        try:
+            os.makedirs(config_dir, mode=0o700, exist_ok=True)
+            identity_path = os.path.join(config_dir, "identity.json")
+            agent.save(identity_path)
+            print(f"Agent identity saved to {identity_path} (mode 0600).")
+        except Exception as err:
+            print(f"Warning: could not save identity to {config_dir}/identity.json: {err}")
 
     print(f"Agent ID (Ed25519 Public Key): {agent.agent_id[:16]}...{agent.agent_id[-8:]}")
 

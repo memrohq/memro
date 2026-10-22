@@ -311,6 +311,7 @@ func (s *Store) RevokeAPIKey(ctx context.Context, id uuid.UUID, agentID string) 
 type DeviceCode struct {
 	UserCode   string
 	ClientName string
+	CreatedAt  time.Time
 	ExpiresAt  time.Time
 	ApprovedAt *time.Time
 	ConsumedAt *time.Time
@@ -330,9 +331,9 @@ func (s *Store) CreateDeviceCode(ctx context.Context, deviceHash, userCode, clie
 
 func (s *Store) DeviceCodeByUserCode(ctx context.Context, userCode string) (*DeviceCode, error) {
 	var d DeviceCode
-	err := s.Pool.QueryRow(ctx, `SELECT user_code, client_name, expires_at, approved_at, consumed_at, agent_id, tenant_id
+	err := s.Pool.QueryRow(ctx, `SELECT user_code, client_name, created_at, expires_at, approved_at, consumed_at, agent_id, tenant_id
 		FROM device_codes WHERE user_code = $1`, userCode).
-		Scan(&d.UserCode, &d.ClientName, &d.ExpiresAt, &d.ApprovedAt, &d.ConsumedAt, &d.AgentID, &d.TenantID)
+		Scan(&d.UserCode, &d.ClientName, &d.CreatedAt, &d.ExpiresAt, &d.ApprovedAt, &d.ConsumedAt, &d.AgentID, &d.TenantID)
 	return nilIfNoRows(&d, err)
 }
 

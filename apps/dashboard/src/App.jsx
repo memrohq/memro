@@ -43,9 +43,12 @@ const DOCS_URL = "https://github.com/memrohq/memro/tree/main/docs#readme";
 const IMAGE_TYPES = /^image\//;
 const DOC_EXT = /\.(pdf|docx|pptx|xlsx|txt|md|markdown|csv|json|ya?ml|html?)$/i;
 
-// `npx memro-cli connect` opens /connect?code=XXXX-XXXX.
-const initialConnectCode = () =>
-  window.location.pathname.startsWith("/connect") ? new URLSearchParams(window.location.search).get("code") : null;
+// `npx memro-cli connect` opens /connect?code=XXXX-XXXX or /connect?user_code=XXXX-XXXX.
+const initialConnectCode = () => {
+  if (!window.location.pathname.startsWith("/connect")) return null;
+  const p = new URLSearchParams(window.location.search);
+  return p.get("code") || p.get("user_code");
+};
 
 function useTheme() {
   const [theme, setTheme] = useState(() => store.get("memro_theme") || "system");
