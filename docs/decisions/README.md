@@ -23,6 +23,7 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0015](0015-verified-code-memory.md) | Verified memory for coding agents: anchors, validity and provenance | 2026-10-21 | Proposed |
 | [0018](0018-tenant-agent-scoping-audit.md) | Tenant and agent scoping audit & cross-agent isolation | 2026-10-22 | Accepted |
 
+
 Template:
 
 ```markdown

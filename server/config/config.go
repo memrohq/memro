@@ -60,6 +60,10 @@ type Config struct {
 	// replaced, e.g. how to pay for a plan.
 	UnclaimedCapHint string
 
+	// MetricsToken protects GET /metrics with Bearer auth. When empty, /metrics
+	// is served without auth (for self-hosters) and a warning is logged.
+	MetricsToken string
+
 	// Public URLs handed to `memro connect`.
 	AppURL string // dashboard, e.g. https://app.memro.co
 	MCPURL string // hosted MCP endpoint, e.g. https://mcp.memro.co/mcp
@@ -102,6 +106,7 @@ func Load() Config {
 		UnclaimedMaxMemories:  envInt("UNCLAIMED_MAX_MEMORIES", 0),
 		UnclaimedMaxFileBytes: int64(envInt("UNCLAIMED_MAX_FILE_BYTES", 0)),
 		UnclaimedCapHint:      strings.TrimSpace(os.Getenv("UNCLAIMED_CAP_HINT")),
+		MetricsToken:          strings.TrimSpace(os.Getenv("METRICS_TOKEN")),
 		DevLogOTP:             envBool("DEV_LOG_OTP", false),
 		AppURL:                strings.TrimRight(env("APP_URL", "http://localhost:5173"), "/"),
 		MCPURL:                env("MCP_URL", "http://localhost:8080/mcp"),

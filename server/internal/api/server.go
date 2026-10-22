@@ -4,6 +4,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -97,7 +98,7 @@ func NewServer(d Deps) *Server {
 			panic(err) // misconfiguration; app.Run validates this before building the server
 		}
 	}
-	return &Server{
+	s := &Server{
 		connectors: conns,
 		cfg:        d.Config, store: d.Store, engine: d.Engine, embed: d.Embed, indexer: d.Indexer,
 		files: d.Files, email: d.Email, replay: auth.NewReplayCache(),
@@ -113,6 +114,10 @@ func NewServer(d Deps) *Server {
 			"/mee/resolve": NewRateLimiter(10, time.Minute),
 		},
 	}
+	if d.Config.MetricsToken == "" {
+		slog.Warn("METRICS_TOKEN is not set; /metrics is open without authentication")
+	}
+	return s
 }
 
 // Handler returns the full HTTP handler with middleware applied.
@@ -122,7 +127,7 @@ func (s *Server) Handler() http.Handler {
 	protected := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.requireAgent(h)) }
 
 	public("GET /health", s.health)
-	public("GET /metrics", promhttp.Handler().ServeHTTP)
+	public("GET /metrics", s.metrics)
 	public("GET /stats/cache", s.cacheStats)
 	public("POST /identity", s.createIdentity)
 	public("GET /identity/pow", s.identityPow)
@@ -543,6 +548,19 @@ func (l *RateLimiter) Allow(key string) bool {
 	}
 	w.count++
 	return true
+}
+
+func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.MetricsToken != "" {
+		authHeader := r.Header.Get("Authorization")
+		expected := "Bearer " + s.cfg.MetricsToken
+		if subtle.ConstantTimeCompare([]byte(authHeader), []byte(expected)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="metrics"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+	promhttp.Handler().ServeHTTP(w, r)
 }
 
 // --- Responses ------------------------------------------------------------------
