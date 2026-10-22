@@ -57,3 +57,6 @@ bench/venv/
 bench/longmemeval/runs/ledger.json
 bench/longmemeval/runs/ci-*/
 bench/longmemeval/runs/embed_cache.sqlite
+bench/cf/.env
+bench/cf/cache/
+bench/cf/.bin/
