@@ -16,6 +16,7 @@ Credentials: CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN (Workers AI read),
 from the environment, bench/cf/.env or bench/.env (both gitignored).
 """
 import argparse
+import concurrent.futures as cf
 import hashlib
 import json
 import os
@@ -44,7 +45,28 @@ MODELS = {
     "@cf/baai/bge-base-en-v1.5": {"max_tokens": 512, "usd_per_m": 0.0666},
     "@cf/baai/bge-small-en-v1.5": {"max_tokens": 512, "usd_per_m": None},
 }
-BATCH = 50  # texts per upstream call
+BATCH = 50  # most texts per upstream call
+# Workers AI applies a model's token limit to the whole request, not to each
+# text (bge-m3 rejected a 50-text batch at 69,500 tokens). Requests are capped
+# at half the limit, counting a token as 2.5 characters to be safe; a single
+# text over that goes alone (512-token models truncate it themselves).
+CHARS_PER_TOKEN = 2.5
+PARALLEL = 8  # concurrent upstream calls per incoming request
+
+
+def batches(texts_by_index: list, max_tokens: int):
+    """Split [(i, text)] into requests under max_tokens/2 and BATCH texts."""
+    budget = max_tokens / 2 * CHARS_PER_TOKEN
+    cur, size = [], 0
+    for item in texts_by_index:
+        n = len(item[1])
+        if cur and (len(cur) >= BATCH or size + n > budget):
+            yield cur
+            cur, size = [], 0
+        cur.append(item)
+        size += n
+    if cur:
+        yield cur
 
 
 def credentials():
@@ -71,7 +93,7 @@ class Relay:
         self.db.execute("CREATE TABLE IF NOT EXISTS emb (k TEXT PRIMARY KEY, v BLOB)")
         self.db.commit()
         self.lock = threading.Lock()
-        self.stats = {"hits": 0, "misses": 0, "upstream_calls": 0, "prompt_tokens": 0}
+        self.stats = {"hits": 0, "misses": 0, "upstream_calls": 0, "prompt_tokens": 0, "est_tokens": 0}
 
     @staticmethod
     def key(model, text):
@@ -110,25 +132,36 @@ class Relay:
         todo = [i for i, k in enumerate(keys) if k not in found]
         self.stats["hits"] += len(texts) - len(todo)
         self.stats["misses"] += len(todo)
-        for start in range(0, len(todo), BATCH):
-            chunk = todo[start:start + BATCH]
+        groups = list(batches([(i, texts[i]) for i in todo], MODELS.get(model, {}).get("max_tokens", 512)))
+
+        def fetch(group):
+            chunk = [i for i, _ in group]
             out = self._post({"model": model, "input": [texts[i] for i in chunk]})
             data = sorted(out.get("data", []), key=lambda d: d.get("index", 0))
             if len(data) != len(chunk):
                 raise RuntimeError(f"Workers AI returned {len(data)} embeddings for {len(chunk)} inputs")
+            vecs = [d["embedding"] for d in data]
+            if not all(vecs):
+                raise RuntimeError("Workers AI returned an empty embedding")
+            return chunk, vecs, int((out.get("usage") or {}).get("prompt_tokens") or 0)
+
+        # Upstream calls run in parallel: a server batch of 100 long texts can be
+        # many requests for small-context models, and the server waits 30 s.
+        with cf.ThreadPoolExecutor(PARALLEL) as ex:
+            results = list(ex.map(fetch, groups))
+        rows = []
+        for chunk, vecs, tokens in results:
             self.stats["upstream_calls"] += 1
-            self.stats["prompt_tokens"] += int((out.get("usage") or {}).get("prompt_tokens") or 0)
-            rows = []
-            for i, d in zip(chunk, data):
-                vec = d["embedding"]
-                if not vec:
-                    raise RuntimeError("Workers AI returned an empty embedding")
+            self.stats["prompt_tokens"] += tokens
+            # Workers AI's OpenAI-compatible endpoint reports no usage; estimate at 4 chars/token.
+            self.stats["est_tokens"] += sum(len(texts[i]) for i in chunk) // 4
+            for i, vec in zip(chunk, vecs):
                 blob = struct.pack(f"{len(vec)}f", *vec)
                 found[keys[i]] = blob
                 rows.append((keys[i], blob))
-            with self.lock:  # only real vectors are ever cached
-                self.db.executemany("INSERT OR REPLACE INTO emb VALUES (?, ?)", rows)
-                self.db.commit()
+        with self.lock:  # only real vectors are ever cached, and only once all succeeded
+            self.db.executemany("INSERT OR REPLACE INTO emb VALUES (?, ?)", rows)
+            self.db.commit()
         return [list(struct.unpack(f"{len(found[k]) // 4}f", found[k])) for k in keys]
 
 

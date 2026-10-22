@@ -26,6 +26,7 @@ import statistics
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 
 CF = pathlib.Path(__file__).resolve().parent
@@ -86,6 +87,21 @@ def stop(*procs):
                 p.kill()
 
 
+def fresh_database(admin_url, name):
+    """Create an empty database for one model's run. Each memory keeps a single
+    embedding, and a server re-embeds every memory lacking one for its model,
+    so models must never share a database."""
+    subprocess.run(["psql", admin_url, "-qc", f"DROP DATABASE IF EXISTS {name}", "-c", f"CREATE DATABASE {name}"],
+                   check=True, capture_output=True)
+    url = urllib.parse.urlparse(admin_url)._replace(path="/" + name).geturl()
+    subprocess.run(["psql", url, "-qc", "CREATE EXTENSION IF NOT EXISTS vector"], check=True, capture_output=True)
+    return url
+
+
+def drop_database(admin_url, name):
+    subprocess.run(["psql", admin_url, "-qc", f"DROP DATABASE IF EXISTS {name} WITH (FORCE)"], capture_output=True)
+
+
 def run_model(model, args, server_bin):
     name = f"emb-{slug(model)}{args.suffix}"
     run_dir = RUNS / name
@@ -98,13 +114,15 @@ def run_model(model, args, server_bin):
     embed_cmd = ([sys.executable, str(CF / "workers_ai_relay.py"), "--port", str(EMBED_PORT)] if cloudflare
                  else [sys.executable, str(LME / "embed_proxy.py"), str(EMBED_PORT)])
     embed = api = None
+    db_name = "memro_emb_" + re.sub(r"[^a-z0-9]+", "_", slug(model))
+    db_url = fresh_database(args.db_url, db_name)
     try:
         embed = start(embed_cmd, run_dir / "embed.log", cwd=LME)
         time.sleep(1.5)
         if embed.poll() is not None:
             raise SystemExit(f"embedding service exited:\n{(run_dir / 'embed.log').read_text()[-500:]}")
         env = {**os.environ,
-               "DATABASE_URL": args.db_url + ("&" if "?" in args.db_url else "?") + "sslmode=disable",
+               "DATABASE_URL": db_url + ("&" if "?" in db_url else "?") + "sslmode=disable",
                "PORT": str(API_PORT), "RATE_LIMIT_MAX": "50000",
                "FILE_STORAGE_PATH": str(CF / ".bin" / "files"),
                "EMBEDDING_PROVIDER": "openai", "EMBEDDING_BASE_URL": f"http://127.0.0.1:{EMBED_PORT}",
@@ -114,7 +132,7 @@ def run_model(model, args, server_bin):
         wait_http(f"http://127.0.0.1:{API_PORT}/health")
 
         run_env = {**os.environ, "MEMRO_API": f"http://127.0.0.1:{API_PORT}",
-                   "MEMRO_DATABASE_URL": args.db_url, "BENCH_EMBEDDING_MODEL": model}
+                   "MEMRO_DATABASE_URL": db_url, "BENCH_EMBEDDING_MODEL": model}
         if args.retrieval_only:
             run_env["BENCH_NO_LLM"] = "1"
         subprocess.run([sys.executable, str(LME / "run.py"), "--subset", str(args.subset), "--name", name,
@@ -126,6 +144,11 @@ def run_model(model, args, server_bin):
             (run_dir / "embed_stats.json").write_text(json.dumps(stats, indent=2) + "\n")
     finally:
         stop(api, embed)
+        drop_database(args.db_url, db_name)
+    # The server retries failed embedding batches, so a run can finish with
+    # errors along the way; count them so the report can't look clean.
+    errors = (run_dir / "api.log").read_text().count("embedding batch failed")
+    (run_dir / "server_embed_errors.txt").write_text(f"{errors}\n")
     if not args.retrieval_only:
         subprocess.run([sys.executable, str(LME / "judge.py"), str(run_dir)], cwd=LME, check=True)
     return run_dir
@@ -154,6 +177,7 @@ def metrics(run_dir):
         "p50_ms": statistics.median(r["search_ms"] for r in rows),
         "embed_wait_s": statistics.mean(r["embed_wait_s"] for r in rows),
         "embed_stats": json.loads(stats_file.read_text()) if stats_file.exists() else None,
+        "embed_errors": int((run_dir / "server_embed_errors.txt").read_text()) if (run_dir / "server_embed_errors.txt").exists() else 0,
     }
 
 
@@ -165,18 +189,18 @@ def report(results, args):
              "Evidence recall counts the exact exchanges LongMemEval marks as holding the answer "
              "(session-level recall is ~99% for every model and doesn't separate them).", "",
              "| Embedding model | n | QA accuracy | Evidence R@5 | Evidence R@15 | All evidence in top 15 "
-             "| All evidence in prompt | Session R@5 | Session MRR | Search p50 | Embed wait |",
-             "|---|---|---|---|---|---|---|---|---|---|---|"]
+             "| All evidence in prompt | Session R@5 | Session MRR | Search p50 | Embed wait | Embed errors |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for model, m in results.items():
         lines.append(f"| `{model}` | {m['n']} | {pct(m['accuracy'])} | {pct(m['ev_r5'])} | {pct(m['ev_r15'])} | "
                      f"{pct(m['all_ev_15'])} | {pct(m['all_ev_ctx'])} | {pct(m['sess_r5'])} | {m['mrr']:.3f} | "
-                     f"{m['p50_ms']:.0f} ms | {m['embed_wait_s']:.1f} s |")
+                     f"{m['p50_ms']:.0f} ms | {m['embed_wait_s']:.1f} s | {m['embed_errors']} |")
     lines += ["", "Workers AI usage (embeddings not already cached):", ""]
     for model, m in results.items():
         if m["embed_stats"]:
             s = m["embed_stats"]
             lines.append(f"- `{model}`: {s['upstream_calls']} calls, {s['misses']} texts embedded, "
-                         f"{s['hits']} from cache, {s['prompt_tokens']:,} tokens reported")
+                         f"{s['hits']} from cache, about {s.get('est_tokens', 0):,} tokens (estimated)")
     lines += ["", "With 100 questions, one question is 1 point of accuracy: confirm a winner on all 500 "
               "(`--subset` with the full ID list) before acting on it."]
     return "\n".join(lines) + "\n"
@@ -189,7 +213,8 @@ def main():
     ap.add_argument("--retrieval-only", action="store_true", help="skip answering and judging (no OpenAI chat cost)")
     ap.add_argument("--suffix", default="", help="appended to run names, e.g. -r2 for a repeat")
     ap.add_argument("--db-url", default=os.environ.get("MEMRO_DATABASE_URL",
-                                                       "postgres://memro:memro@127.0.0.1:55434/memro"))
+                                                       "postgres://memro:memro@127.0.0.1:55434/memro"),
+                    help="admin connection; each model gets its own fresh database next to it")
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--build", action="store_true", help="rebuild the server binary")
     args = ap.parse_args()

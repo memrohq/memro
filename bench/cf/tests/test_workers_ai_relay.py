@@ -119,3 +119,13 @@ def test_reads_bench_env(monkeypatch, tmp_path):
     (tmp_path / ".env").write_text('export CLOUDFLARE_ACCOUNT_ID="acc"\nCLOUDFLARE_API_TOKEN=tok\n')
     monkeypatch.setattr(relay_mod, "ROOT", tmp_path / "cf")
     assert relay_mod.credentials() == ("acc", "tok")
+
+
+def test_requests_stay_under_the_model_token_limit():
+    # bge-small: 512 tokens -> 640-char budget per request.
+    items = [(0, "a" * 300), (1, "b" * 300), (2, "c" * 300), (3, "d" * 2000), (4, "e" * 10)]
+    groups = [[i for i, _ in g] for g in relay_mod.batches(items, 512)]
+    assert groups == [[0, 1], [2], [3], [4]]
+    # bge-m3: 60k tokens -> 75k chars; 50 texts of 2,000 chars split by size, not only count.
+    many = [(i, "x" * 2000) for i in range(50)]
+    assert [len(g) for g in relay_mod.batches(many, 60000)] == [37, 13]
