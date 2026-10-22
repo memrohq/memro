@@ -105,8 +105,17 @@ def test_upstream_problems_fail_and_cache_nothing(tmp_path, kw):
 def test_refuses_to_start_without_credentials(monkeypatch, tmp_path):
     monkeypatch.delenv("CLOUDFLARE_ACCOUNT_ID", raising=False)
     monkeypatch.delenv("CLOUDFLARE_API_TOKEN", raising=False)
-    monkeypatch.setattr(relay_mod, "ROOT", tmp_path)
+    monkeypatch.setattr(relay_mod, "ROOT", tmp_path / "cf")
     monkeypatch.setattr(sys, "argv", ["relay"])
     with pytest.raises(SystemExit) as e:
         relay_mod.main()
     assert "required" in str(e.value)
+
+
+def test_reads_bench_env(monkeypatch, tmp_path):
+    monkeypatch.delenv("CLOUDFLARE_ACCOUNT_ID", raising=False)
+    monkeypatch.delenv("CLOUDFLARE_API_TOKEN", raising=False)
+    (tmp_path / "cf").mkdir()
+    (tmp_path / ".env").write_text('export CLOUDFLARE_ACCOUNT_ID="acc"\nCLOUDFLARE_API_TOKEN=tok\n')
+    monkeypatch.setattr(relay_mod, "ROOT", tmp_path / "cf")
+    assert relay_mod.credentials() == ("acc", "tok")

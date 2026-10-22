@@ -13,7 +13,7 @@ vector: without Cloudflare credentials it refuses to start, an unknown model
 is a 400, and an upstream error is passed back so the run fails visibly.
 
 Credentials: CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN (Workers AI read),
-from the environment or bench/cf/.env (gitignored).
+from the environment, bench/cf/.env or bench/.env (both gitignored).
 """
 import argparse
 import hashlib
@@ -49,10 +49,11 @@ BATCH = 50  # texts per upstream call
 
 def credentials():
     acc, token = os.environ.get("CLOUDFLARE_ACCOUNT_ID"), os.environ.get("CLOUDFLARE_API_TOKEN")
-    env = ROOT / ".env"
-    if env.exists():
+    for env in (ROOT / ".env", ROOT.parent / ".env"):  # bench/cf/.env, then bench/.env
+        if not env.exists():
+            continue
         for line in env.read_text().splitlines():
-            k, _, v = line.strip().partition("=")
+            k, _, v = line.strip().removeprefix("export ").partition("=")
             v = v.strip().strip('"').strip("'")
             if k == "CLOUDFLARE_ACCOUNT_ID" and not acc:
                 acc = v
@@ -172,7 +173,7 @@ def main():
     args = ap.parse_args()
     acc, token = credentials()
     if not (acc and token):
-        sys.exit("CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are required (env or bench/cf/.env)")
+        sys.exit("CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are required (env, bench/cf/.env or bench/.env)")
     relay = Relay(f"https://api.cloudflare.com/client/v4/accounts/{acc}/ai/v1", token)
     print(f"Workers AI relay on 127.0.0.1:{args.port}, cache {CACHE}", flush=True)
     ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(relay)).serve_forever()

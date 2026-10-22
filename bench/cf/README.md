@@ -14,7 +14,7 @@ Workers AI calls.
 2. Go, to build the server once (`--build`).
 3. `OPENAI_API_KEY` in `memro-benchmark/.env` or the environment (answers, judge,
    and the OpenAI baseline).
-4. `bench/cf/.env` (gitignored) with a Cloudflare API token that has Workers AI
+4. `bench/.env` or `bench/cf/.env` (both gitignored) with a Cloudflare API token that has Workers AI
    Read:
    ```
    CLOUDFLARE_ACCOUNT_ID=...
