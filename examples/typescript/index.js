@@ -1,24 +1,22 @@
-import { Agent } from '../../sdk/js/dist/esm/index.js';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { Agent } from '../../sdk/js/dist/esm/index.js';
 
 async function main() {
   console.log('=== Memro JavaScript/TypeScript SDK: Register -> Remember -> Recall ===');
 
   const baseUrl = process.env.MEMRO_BASE_URL || 'https://api.memro.co';
   const apiKey = process.env.MEMRO_API_KEY;
-  const identityFile = path.join(__dirname, 'identity.json');
+  // Kept outside the repo: it holds the agent's private key.
+  const identityFile = path.join(os.homedir(), '.config', 'memro', 'identity.json');
 
   let agent;
   if (apiKey) {
     console.log(`Connecting to Memro (${baseUrl}) using MEMRO_API_KEY...`);
     agent = await Agent.fromApiKey(apiKey, { baseUrl });
   } else if (fs.existsSync(identityFile)) {
-    console.log(`Connecting to Memro (${baseUrl}) using saved identity.json...`);
+    console.log(`Connecting to Memro (${baseUrl}) using ${identityFile}...`);
     agent = await Agent.fromFile(identityFile, { baseUrl });
   } else if (process.env.MEMRO_AGENT_ID && process.env.MEMRO_PRIVATE_KEY) {
     console.log(`Connecting to Memro (${baseUrl}) using agent environment credentials...`);
@@ -27,9 +25,11 @@ async function main() {
     console.log(`Registering autonomous sovereign agent on ${baseUrl} (proof-of-work)...`);
     agent = await Agent.create({ baseUrl });
     try {
+      fs.mkdirSync(path.dirname(identityFile), { recursive: true, mode: 0o700 });
       await agent.save(identityFile);
-    } catch {
-      // non-fatal if identity saving fails
+      console.log(`Agent identity saved to ${identityFile} (mode 0600).`);
+    } catch (err) {
+      console.warn(`Warning: could not save identity to ${identityFile}:`, err);
     }
   }
 

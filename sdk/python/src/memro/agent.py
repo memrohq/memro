@@ -105,13 +105,16 @@ class Agent:
     # ── Persistence ─────────────────────────────────────────────────────────
 
     def save(self, path: str) -> None:
-        """Save agent identity to a JSON file. Keep this file secret."""
-        with open(path, "w") as f:
+        """Save agent identity to a JSON file (mode 0600). Keep this file secret."""
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        fd = os.open(path, flags, 0o600)
+        with open(fd, "w") as f:
             json.dump(
                 {"agent_id": self.agent_id, "private_key": self._private_key},
                 f,
                 indent=2,
             )
+            f.write("\n")
 
     def to_dict(self) -> Dict[str, str]:
         return {"agent_id": self.agent_id, "private_key": self._private_key}

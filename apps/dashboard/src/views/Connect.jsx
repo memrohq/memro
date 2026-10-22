@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Panel, Icon, PageHeader } from "../components/ui";
+import { Panel, Icon, PageHeader, formatDate } from "../components/ui";
 import { api, connectFlags, mcpUrl } from "../lib/api";
 
 const KEY = "<your API key>";
@@ -31,6 +31,7 @@ function Approve({ apiBase, auth, code, onDone, notify }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [approved, setApproved] = useState(false);
+  const [confirmCode, setConfirmCode] = useState("");
 
   useEffect(() => {
     api(apiBase, `/auth/device?user_code=${encodeURIComponent(code)}`, { auth })
@@ -53,6 +54,8 @@ function Approve({ apiBase, auth, code, onDone, notify }) {
   };
 
   const status = approved ? "approved" : info?.status;
+  const isConfirmed = confirmCode.trim().toUpperCase() === (code || "").trim().toUpperCase();
+
   return (
     <Panel title="Connect a device" bodyClass="p-5">
       {error ? (
@@ -72,13 +75,66 @@ function Approve({ apiBase, auth, code, onDone, notify }) {
         <p className="text-[13px] text-danger">This code has expired. Run the command again to get a new one.</p>
       ) : (
         <div className="space-y-4">
-          <div>
-            <p className="text-[14px] font-medium">{info.client_name} wants to use your Memro memory</p>
-            <p className="text-[13px] text-muted mt-1">Check the code matches the one in your terminal. A new API key will be created for it; you can revoke it anytime in API keys.</p>
+          <div className="p-3.5 rounded-xl border border-warn/30 bg-warn/10 text-[13px] flex items-start gap-2.5">
+            <Icon name="warning" className="text-warn text-[18px] shrink-0 mt-0.5" />
+            <div className="space-y-0.5">
+              <p className="font-semibold text-ink">Security notice</p>
+              <p className="text-muted leading-relaxed">
+                Only approve a code you just started yourself. Approving connects that tool to YOUR account.
+              </p>
+            </div>
           </div>
-          <code className="block w-fit font-mono text-[22px] tracking-[0.2em] bg-panel border border-line rounded-lg px-4 py-2">{code}</code>
-          <div className="flex gap-2">
-            <button className="btn-primary" onClick={approve} disabled={busy}>{busy ? "Connecting…" : "Connect"}</button>
+
+          <div>
+            <p className="text-[15px] font-medium text-ink">{info.client_name} wants to use your Memro memory</p>
+            <p className="text-[13px] text-muted mt-1">A new API key will be created for this tool; you can revoke it anytime in API keys.</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-panel border border-line rounded-xl text-[12.5px]">
+            <div>
+              <span className="text-subtle block text-[11px] uppercase tracking-wider font-medium">Created</span>
+              <span className="text-ink font-mono mt-0.5 block">{info.created_at ? formatDate(info.created_at) : "Just now"}</span>
+            </div>
+            <div>
+              <span className="text-subtle block text-[11px] uppercase tracking-wider font-medium">Expires</span>
+              <span className="text-ink font-mono mt-0.5 block">{info.expires_at ? formatDate(info.expires_at) : "—"}</span>
+            </div>
+          </div>
+
+          <div>
+            <span className="text-subtle block text-[11px] uppercase tracking-wider font-medium mb-1.5">Code to approve</span>
+            <code className="block w-fit font-mono text-[22px] font-semibold tracking-[0.2em] bg-panel border border-line rounded-lg px-4 py-2 text-ink select-all">
+              {code}
+            </code>
+          </div>
+
+          <div className="space-y-1.5 max-w-sm">
+            <label htmlFor="confirm-user-code" className="text-subtle block text-[11px] uppercase tracking-wider font-medium">
+              Confirm code
+            </label>
+            <input
+              id="confirm-user-code"
+              type="text"
+              placeholder={`Type ${code} to confirm`}
+              value={confirmCode}
+              onChange={(e) => setConfirmCode(e.target.value)}
+              className="input font-mono tracking-widest text-[14px] uppercase"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <p className="text-[11.5px] text-subtle">
+              Type the code above to confirm you started this connection in your terminal.
+            </p>
+          </div>
+
+          <div className="flex gap-2 pt-1">
+            <button
+              className="btn-primary"
+              onClick={approve}
+              disabled={busy || !isConfirmed}
+            >
+              {busy ? "Connecting…" : "Approve"}
+            </button>
             <button className="btn-ghost" onClick={onDone}>Cancel</button>
           </div>
         </div>
