@@ -1,0 +1,142 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+env:
+  # LongMemEval_S (cleaned), pinned to a dataset revision and checksum.
+  LME_REVISION: 98d7416c24c778c2fee6e6f3006e7a073259d48f
+  LME_SHA256: d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  longmemeval:
+    name: LongMemEval (100-Question Subset)
+    # Never run on forks; only run on workflow_dispatch or when 'bench' label is added
+    if: |
+      (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.label.name == 'bench')) &&
+      github.event.pull_request.head.repo.fork == false
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: memro
+          POSTGRES_PASSWORD: memro
+          POSTGRES_DB: memro
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U memro"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache LongMemEval dataset
+        uses: actions/cache@v4
+        with:
+          path: bench/data
+          key: longmemeval-s-cleaned-${{ env.LME_REVISION }}
+
+      - name: Download LongMemEval dataset
+        run: |
+          mkdir -p bench/data
+          f=bench/data/longmemeval_s_cleaned.json
+          if [ ! -f "$f" ]; then
+            curl -fsSL -o "$f" \
+              "https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/${LME_REVISION}/longmemeval_s_cleaned.json"
+          fi
+          echo "${LME_SHA256}  $f" | sha256sum -c -
+
+      - name: Install dependencies
+        run: |
+          pip install requests
+          pip install -e "sdk/python"
+
+      - name: Start Memro API Server
+        working-directory: server
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          go build -o /tmp/memro-api ./cmd/memro-api
+          DATABASE_URL="postgres://memro:memro@localhost:5432/memro?sslmode=disable" \
+            PORT=18090 \
+            RATE_LIMIT_MAX=50000 \
+            FILE_STORAGE_PATH=/tmp/memro-files \
+            OPENAI_API_KEY="${OPENAI_API_KEY}" \
+            /tmp/memro-api > /tmp/api.log 2>&1 &
+          for i in $(seq 30); do
+            curl -sf http://127.0.0.1:18090/health && exit 0
+            sleep 1
+          done
+          echo "Server failed to start:"
+          cat /tmp/api.log
+          exit 1
+
+      - name: Run Benchmark (100-Question Subset)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          MEMRO_DATABASE_URL: postgres://memro:memro@localhost:5432/memro
+          MEMRO_API: http://127.0.0.1:18090
+          BENCH_BUDGET_USD: "2.00"
+        run: |
+          python bench/longmemeval/run.py --subset bench/longmemeval/subset_100.json --name ci-subset
+          python bench/longmemeval/judge.py bench/runs/ci-subset
+          python bench/longmemeval/report.py bench/runs/ci-subset
+
+      - name: Compare Against Baseline & Enforce Quality Gate
+        id: compare
+        run: |
+          python bench/longmemeval/compare.py bench/runs/baseline-100 bench/runs/ci-subset --ci-gate | tee compare_report.md
+
+      - name: Post PR Comment
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = "";
+            if (fs.existsSync('compare_report.md')) {
+              body = fs.readFileSync('compare_report.md', 'utf8');
+            } else if (fs.existsSync('bench/runs/ci-subset/REPORT.md')) {
+              body = fs.readFileSync('bench/runs/ci-subset/REPORT.md', 'utf8');
+            } else {
+              body = "Benchmark run failed before report generation.";
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `### 📊 LongMemEval Benchmark Results (100-Question Subset)\n\n${body}`
+            });
+
+      - name: Upload run outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-ci-subset
+          path: |
+            bench/runs/ci-subset/
+            compare_report.md
+          if-no-files-found: ignore
+
+      - name: API log on failure
+        if: failure()
+        run: cat /tmp/api.log

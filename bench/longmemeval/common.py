@@ -5,9 +5,11 @@ import fcntl
 import json
 import os
 import pathlib
+import threading
 import time
 import urllib.error
 import urllib.request
+from typing import Optional
 
 ROOT = pathlib.Path(__file__).resolve().parent
 BENCH = ROOT.parent
@@ -22,17 +24,22 @@ PRICES = {
     "gpt-4o": (2.50, 10.00),
 }
 
-BUDGET_USD = float(os.environ.get("BENCH_BUDGET_USD", "2.00"))
+BUDGET_USD = float(os.environ.get("BENCH_BUDGET_USD", "10.00"))
 
 
 def openai_key() -> str:
     """Read OPENAI_API_KEY from the environment or memro-benchmark/.env."""
     key = os.environ.get("OPENAI_API_KEY")
-    env = BENCH / ".env"
-    if not key and env.exists():
-        for line in env.read_text().splitlines():
-            if line.startswith("OPENAI_API_KEY="):
-                key = line.split("=", 1)[1].strip().strip('"').strip("'")
+    for env in [
+        BENCH / ".env",
+        BENCH.parent / ".env",
+        pathlib.Path.home() / "Documents/work/memro/memro-benchmark/.env",
+        pathlib.Path.home() / "Documents/work/memro/memro/.env",
+    ]:
+        if not key and env.exists():
+            for line in env.read_text().splitlines():
+                if line.startswith("OPENAI_API_KEY="):
+                    key = line.split("=", 1)[1].strip().strip('"').strip("'")
     if not key:
         raise SystemExit("OPENAI_API_KEY not found (set it or create memro-benchmark/.env)")
     return key
@@ -40,6 +47,57 @@ def openai_key() -> str:
 
 class BudgetExceeded(RuntimeError):
     pass
+
+
+class RunTracker:
+    """Tracks token usage and cost for a single run, stored in meta.json."""
+    def __init__(self, run_dir: pathlib.Path):
+        self.run_dir = pathlib.Path(run_dir)
+        self.meta_file = self.run_dir / "meta.json"
+        self._lock = threading.Lock()
+        self.data = self._load()
+
+    def _load(self) -> dict:
+        if self.meta_file.exists():
+            try:
+                return json.loads(self.meta_file.read_text())
+            except Exception:
+                pass
+        return {"cost_usd": 0.0, "token_usage": {}}
+
+    def record(self, model: str, prompt_tokens: int, completion_tokens: int, cost: float):
+        with self._lock:
+            self.data["cost_usd"] = round(self.data.get("cost_usd", 0.0) + cost, 6)
+            tu = self.data.setdefault("token_usage", {})
+            m = tu.setdefault(model, {"usd": 0.0, "prompt_tokens": 0, "completion_tokens": 0, "calls": 0})
+            m["usd"] = round(m["usd"] + cost, 6)
+            m["prompt_tokens"] += prompt_tokens
+            m["completion_tokens"] += completion_tokens
+            m["calls"] += 1
+            self.save()
+
+    def update_metadata(self, **kwargs):
+        with self._lock:
+            for k, v in kwargs.items():
+                if v is not None:
+                    self.data[k] = v
+            self.save()
+
+    def save(self):
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.meta_file.write_text(json.dumps(self.data, indent=2) + "\n")
+
+
+_active_run_tracker: Optional[RunTracker] = None
+
+
+def set_run_tracker(tracker: Optional[RunTracker]):
+    global _active_run_tracker
+    _active_run_tracker = tracker
+
+
+def get_run_tracker() -> Optional[RunTracker]:
+    return _active_run_tracker
 
 
 def _ledger_update(fn):
@@ -78,6 +136,10 @@ def record(model: str, prompt_tokens: int, completion_tokens: int = 0) -> float:
         m["completion_tokens"] += completion_tokens
         m["calls"] += 1
     _ledger_update(add)
+
+    if _active_run_tracker:
+        _active_run_tracker.record(model, prompt_tokens, completion_tokens, cost)
+
     return cost
 
 

@@ -51,3 +51,7 @@ identity.json
 # Python build output
 *.egg-info/
 .pytest_cache/
+
+# Benchmark: scratch runs and venv
+bench/venv/
+bench/runs/
