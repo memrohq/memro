@@ -22,13 +22,23 @@ func main() {
 	var agent *memro.Agent
 	var err error
 
+	client := memro.NewClient(&memro.ClientOptions{BaseURL: baseURL})
+
 	if apiKey != "" {
 		fmt.Printf("Connecting to Memro (%s) using MEMRO_API_KEY...\n", baseURL)
 		agent, err = memro.AgentFromAPIKey(ctx, apiKey, &memro.ClientOptions{BaseURL: baseURL})
+	} else if _, statErr := os.Stat("identity.json"); statErr == nil {
+		fmt.Printf("Connecting to Memro (%s) using saved identity.json...\n", baseURL)
+		agent, err = memro.AgentFromFile("identity.json", client)
+	} else if os.Getenv("MEMRO_AGENT_ID") != "" && os.Getenv("MEMRO_PRIVATE_KEY") != "" {
+		fmt.Printf("Connecting to Memro (%s) using agent environment credentials...\n", baseURL)
+		agent, err = memro.AgentFromEnv(client)
 	} else {
 		fmt.Printf("Registering autonomous sovereign agent on %s (proof-of-work)...\n", baseURL)
-		client := memro.NewClient(&memro.ClientOptions{BaseURL: baseURL})
 		agent, err = memro.CreateAgent(client)
+		if err == nil {
+			_ = agent.Save("identity.json")
+		}
 	}
 
 	if err != nil {

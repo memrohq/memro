@@ -45,6 +45,8 @@ logs/
 *.key
 *.p12
 secrets/
+identity.json
+*identity.json
 
 # Python build output
 *.egg-info/

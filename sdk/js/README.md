@@ -1,7 +1,26 @@
-# JavaScript / TypeScript SDK
+# Memro JavaScript / TypeScript SDK
+
+Verified memory infrastructure for AI agents.
+
+## Install
 
 ```bash
-npm install @memro/sdk     # Node.js 18+, Deno, Bun, browsers; ESM and CommonJS
+# npm (once published via CI):
+npm install @memro/sdk
+
+# Or install from local directory:
+npm install ./sdk/js
+```
+
+## Quick Example
+
+```ts
+import { Agent } from '@memro/sdk';
+
+const agent = await Agent.create(); // local sovereign Ed25519 identity
+const mem = await agent.remember('The billing service was rewritten in Go');
+const results = await agent.recall('billing service language');
+console.log(results[0].content);
 ```
 
 Uses the platform `fetch`; the only dependency is `tweetnacl` for signing.
@@ -102,4 +121,5 @@ exported if you need it elsewhere).
 
 ---
 
-Full documentation: https://github.com/memrohq/memro/tree/main/docs · License: PolyForm Noncommercial 1.0.0
+Repository: [github.com/memrohq/memro](https://github.com/memrohq/memro) · Documentation: [https://memro.co](https://memro.co)
+License: Source available under [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0). Free for non-commercial use; commercial use through Memro Cloud or a commercial license.

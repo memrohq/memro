@@ -5,7 +5,8 @@ services:
     ports:
       - "8081:8081"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - DATABASE_URL=postgres://${POSTGRES_USER:-memro}:${POSTGRES_PASSWORD:-memro}@db:5432/${POSTGRES_DB:-memro}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:5174,http://localhost:3000,http://localhost:5173}
@@ -22,13 +23,13 @@ services:
     restart: unless-stopped
 
   db:
-    image: pgvector/pgvector:pg15
+    image: pgvector/pgvector:pg16
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-memro}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-memro}
       - POSTGRES_DB=${POSTGRES_DB:-memro}
     ports:
-      - "127.0.0.1:5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

@@ -1,0 +1,46 @@
+{
+  "timestamp": "2026-10-22T10:46:45Z",
+  "base_url": "https://api.memro.co",
+  "total_tests": 4,
+  "passed": 1,
+  "failed": 3,
+  "pass_rate_pct": 25.0,
+  "results": [
+    {
+      "suite": "Identity Boundaries",
+      "case_name": "Cross-Agent Private Isolation",
+      "passed": true,
+      "expected": "Agent A can recall secret; Agent B receives 0 results",
+      "actual": "Agent A found: 1, Agent B found: 0",
+      "latency_ms": 3887.66,
+      "details": "Cryptographic identity separation between distinct Ed25519 public keys."
+    },
+    {
+      "suite": "Contradictory Facts",
+      "case_name": "Branch Setting Update",
+      "passed": false,
+      "expected": "Top result contains 'release-v2'",
+      "actual": "Top result: 'The project deployment branch is set to release-v1'",
+      "latency_ms": 1773.64,
+      "details": "Reciprocal Rank Fusion with temporal decay ranks the latest state highest."
+    },
+    {
+      "suite": "Stale/Updated Facts",
+      "case_name": "Database Endpoint Migration",
+      "passed": false,
+      "expected": "Top result points to postgres-aurora-v2",
+      "actual": "Top result: 'Staging database cluster endpoint is postgres-legacy.internal:5432'",
+      "latency_ms": 2210.64,
+      "details": "Verifies newer procedural memory outranks legacy procedural record."
+    },
+    {
+      "suite": "Distractor Rejection",
+      "case_name": "Precision & Out-of-Domain Threshold Rejection",
+      "passed": false,
+      "expected": "Target memory is #1 rank; unrelated query returns 0 results at min_score 0.4",
+      "actual": "Target #1: False, Irrelevant count: 5",
+      "latency_ms": 2048.22,
+      "details": "Tests dense/sparse RRF fusion score cutoff against unrelated corpus."
+    }
+  ]
+}
