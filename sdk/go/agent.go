@@ -299,6 +299,86 @@ func (a *Agent) DeleteAgent(ctx context.Context) error {
 	return a.Client.DeleteIdentity(ctx, a.AgentID, a.signer)
 }
 
+// ── Coordination ──────────────────────────────────────────────────────────
+
+type ClaimOptions struct {
+	Intent     string
+	SessionID  string
+	TTLSeconds int
+}
+
+type HeartbeatOptions struct {
+	LeaseID    string
+	TTLSeconds int
+}
+
+func (a *Agent) Claim(ctx context.Context, resource string, opts *ClaimOptions) (map[string]any, error) {
+	body := map[string]any{"resource": resource}
+	if opts != nil {
+		if opts.Intent != "" {
+			body["intent"] = opts.Intent
+		}
+		if opts.SessionID != "" {
+			body["session_id"] = opts.SessionID
+		}
+		if opts.TTLSeconds > 0 {
+			body["ttl_seconds"] = opts.TTLSeconds
+		}
+	}
+	return a.Client.CoordinationClaim(ctx, body, a.signer)
+}
+
+func (a *Agent) Heartbeat(ctx context.Context, resource string, opts *HeartbeatOptions) (map[string]any, error) {
+	body := map[string]any{}
+	if resource != "" {
+		body["resource"] = resource
+	}
+	if opts != nil {
+		if opts.LeaseID != "" {
+			body["lease_id"] = opts.LeaseID
+		}
+		if opts.TTLSeconds > 0 {
+			body["ttl_seconds"] = opts.TTLSeconds
+		}
+	}
+	return a.Client.CoordinationHeartbeat(ctx, body, a.signer)
+}
+
+func (a *Agent) Release(ctx context.Context, resource, status string) error {
+	if status == "" {
+		status = "completed"
+	}
+	return a.Client.CoordinationRelease(ctx, map[string]any{"resource": resource, "status": status}, a.signer)
+}
+
+func (a *Agent) Handoff(ctx context.Context, resource, summary, nextAgentID string) error {
+	body := map[string]any{"resource": resource, "summary": summary}
+	if nextAgentID != "" {
+		body["next_agent_id"] = nextAgentID
+	}
+	return a.Client.CoordinationHandoff(ctx, body, a.signer)
+}
+
+func (a *Agent) Check(ctx context.Context, resource, intent string) (map[string]any, error) {
+	return a.Client.CoordinationCheck(ctx, map[string]any{"resource": resource, "intent": intent}, a.signer)
+}
+
+func (a *Agent) Active(ctx context.Context, prefix string) (map[string]any, error) {
+	q := url.Values{}
+	if prefix != "" {
+		q.Set("resource", prefix)
+	}
+	return a.Client.CoordinationActive(ctx, q, a.signer)
+}
+
+func (a *Agent) LogIntent(ctx context.Context, resource, intent string, ttlSeconds int) (map[string]any, error) {
+	body := map[string]any{"resource": resource, "intent": intent}
+	if ttlSeconds > 0 {
+		body["ttl_seconds"] = ttlSeconds
+	}
+	return a.Client.CoordinationIntent(ctx, body, a.signer)
+}
+
 func (a *Agent) String() string {
 	if len(a.AgentID) > 16 {
 		return "Agent(" + a.AgentID[:16] + "…)"

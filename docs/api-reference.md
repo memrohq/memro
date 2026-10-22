@@ -376,6 +376,119 @@ Called by providers, not by you: `GET /connectors/{provider}/callback`
 
 ---
 
+## Coordination
+
+Multi-agent coordination for claiming work, heartbeating, releasing, handing off, and declaring non-blocking advisory intents across agents in the same account or space.
+
+### 🔒 `POST /coordination/claim`
+
+Acquire an exclusive atomic lease on a normalized resource path.
+
+Request body:
+```json
+{
+  "resource": "src/auth.go",
+  "intent": "refactor oauth flow",
+  "ttl_seconds": 900
+}
+```
+
+Response (granted):
+```json
+{
+  "granted": true,
+  "lease_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "expires_at": "2026-10-23T01:15:00Z",
+  "handoff_summary": "Previous agent finished interface definitions"
+}
+```
+
+Response (denied - held by another agent):
+```json
+{
+  "granted": false,
+  "holder": "agent-pubkey-hex",
+  "holder_session": "default",
+  "intent": "implementing jwt parsing",
+  "expires_at": "2026-10-23T01:10:00Z"
+}
+```
+
+Re-claiming your own active lease is idempotent and extends it.
+
+### 🔒 `POST /coordination/heartbeat`
+
+Extend an active lease held by the calling agent.
+
+```json
+{
+  "resource": "src/auth.go",
+  "ttl_seconds": 1800
+}
+```
+→ `{"renewed": true, "expires_at": "2026-10-23T01:30:00Z"}`
+
+### 🔒 `POST /coordination/release`
+
+Release a held lease. Status is `completed` or `abandoned`.
+
+```json
+{
+  "resource": "src/auth.go",
+  "status": "completed"
+}
+```
+→ `{"released": true, "resource": "src/auth.go"}`
+
+### 🔒 `POST /coordination/handoff`
+
+Atomically releases the lease with status `handoff`, storing a summary and optional target agent ID for the next claimer.
+
+```json
+{
+  "resource": "src/auth.go",
+  "summary": "Completed token parser, needs error test coverage",
+  "next_agent_id": "target-agent-id"
+}
+```
+→ `{"handed_off": true, "resource": "src/auth.go"}`
+
+### 🔒 `POST /coordination/check`
+
+Advisory check for lease and intent conflicts without claiming.
+
+```json
+{
+  "resource": "src/auth.go",
+  "intent": "review auth flow"
+}
+```
+→ `{"decision": "allow|warn|block", "reason": "...", "details": {...}, "intents": [...]}`.
+- `allow`: Unclaimed, expired, or held by calling agent.
+- `warn`: Active non-blocking intent logged by another agent in the same scope.
+- `block`: Active exclusive lease held by another agent in the same scope.
+
+### 🔒 `GET /coordination/active`
+
+List active leases and intents in the calling agent's scope. Optional query param `?resource=prefix`.
+
+→ `{"leases": [...], "intents": [...]}`
+
+### 🔒 `POST /coordination/intent`
+
+Declare a soft, non-blocking intention for a resource without acquiring a lease.
+
+```json
+{
+  "resource": "src/auth.go",
+  "intent": "planning migration to v2",
+  "ttl_seconds": 1800
+}
+```
+→ `{"logged": true}`
+
+---
+
 ## Health
 
 ### `GET /health`
@@ -385,3 +498,4 @@ Called by providers, not by you: `GET /connectors/{provider}/callback`
 ```
 
 `503` with `"status": "degraded"` when the database is unreachable.
+

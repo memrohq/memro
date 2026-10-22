@@ -241,6 +241,30 @@ export class MemroClient {
     }
   }
   listWebhooks(eventType = 'memory_created', signer?: Signer) { return this.request<string[]>('GET', `/hooks/${eventType}`, { signer }); }
+
+  // ── Coordination ────────────────────────────────────────────────────────
+
+  coordinationClaim(body: Record<string, unknown>, signer?: Signer) {
+    return this.request<Record<string, unknown>>('POST', '/coordination/claim', { json: body, signer });
+  }
+  coordinationHeartbeat(body: Record<string, unknown>, signer?: Signer) {
+    return this.request<Record<string, unknown>>('POST', '/coordination/heartbeat', { json: body, signer });
+  }
+  coordinationRelease(body: Record<string, unknown>, signer?: Signer) {
+    return this.request<Record<string, unknown>>('POST', '/coordination/release', { json: body, signer });
+  }
+  coordinationHandoff(body: Record<string, unknown>, signer?: Signer) {
+    return this.request<Record<string, unknown>>('POST', '/coordination/handoff', { json: body, signer });
+  }
+  coordinationCheck(body: Record<string, unknown>, signer?: Signer) {
+    return this.request<Record<string, unknown>>('POST', '/coordination/check', { json: body, signer });
+  }
+  coordinationActive(query?: Record<string, string>, signer?: Signer) {
+    return this.request<Record<string, unknown>>('GET', '/coordination/active', { query, signer });
+  }
+  coordinationIntent(body: Record<string, unknown>, signer?: Signer) {
+    return this.request<Record<string, unknown>>('POST', '/coordination/intent', { json: body, signer });
+  }
 }
 
 function formWith(field: string, file: FileInput): FormData {

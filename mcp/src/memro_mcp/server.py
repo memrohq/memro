@@ -145,86 +145,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("memro_mcp")
 
-# --- Coordination Engine (The Brain) ---
+# --- Coordination ---
 
 class Decision:
     ALLOW = "allow"
     WARN = "warn"
     BLOCK = "block"
-
-class CoordinationEngine:
-    def __init__(self, agent: Agent, session_id: str):
-        self.agent = agent
-        self.session_id = session_id
-
-    def _get_active_claims(self, resource: str = None):
-        """Active claims and intents in this session. Memories arrive newest
-        first; a release (or handoff) settles every older claim and intent on
-        that resource, and only the newest claim per resource counts."""
-        results = self.agent.get_recent(limit=100, type="procedural")
-        active_claims = []
-        active_intents = []
-        settled = set()
-
-        for m in results:
-            meta = m.metadata or {}
-
-            # SESSION ISOLATION: Skip memories from other sessions
-            if meta.get("session_id") != self.session_id:
-                continue
-
-            action = meta.get("action")
-            res = meta.get("resource")
-            agent_owner = meta.get("agent_id", "Unknown")
-            if res in settled:
-                continue
-            if action in ("release", "handoff"):
-                settled.add(res)
-                continue
-
-            if action == "claim" and meta.get("status") == "active":
-                settled.add(res)
-                if not resource or res == resource:
-                    active_claims.append({
-                        "agent": agent_owner, 
-                        "resource": res, 
-                        "reason": m.content,
-                        "timestamp": getattr(m, 'event_date', 'just now')
-                    })
-            elif action == "intent":
-                if not resource or res == resource:
-                    active_intents.append({
-                        "agent": agent_owner,
-                        "intent": m.content,
-                        "resource": res
-                    })
-        
-        return active_claims, active_intents
-
-    def can_act(self, resource: str, intent: str) -> dict:
-        claims, intents = self._get_active_claims(resource)
-        
-        # 1. Check for hard blocks (Claims)
-        if claims:
-            return {
-                "decision": Decision.BLOCK,
-                "reason": f"Resource '{resource}' is currently claimed.",
-                "details": claims[0]
-            }
-        
-        # 2. Check for soft overlaps (Intent)
-        # MVP: Simple keyword matching
-        words = set(intent.lower().split())
-        for existing_intent in intents:
-            overlap = words.intersection(set(existing_intent.lower().split()))
-            if len(overlap) > 2: # Threshold for "possible overlap"
-                return {
-                    "decision": Decision.WARN,
-                    "reason": f"Potential intent overlap detected with: '{existing_intent}'",
-                    "suggestions": ["Coordinate via chat", "Check related files"]
-                }
-        
-        return {"decision": Decision.ALLOW}
 
 # --- Helper Functions ---
 
@@ -335,61 +261,78 @@ def _all_tools() -> list[Tool]:
         ),
         Tool(
             name="claim_task",
-            description="Claim a file or task with intent to work on it.",
+            description=(
+                "Claim a file or task with intent to work on it. Claims are shared with "
+                "agents in the same account/space and expire after the TTL."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "resource": {"type": "string", "description": "File path or module"},
-                    "intent": {"type": "string", "description": "What you plan to do"}
+                    "intent": {"type": "string", "description": "What you plan to do"},
+                    "ttl": {"type": "integer", "description": "Lease duration in seconds (default 900, max 7200)"},
                 },
                 "required": ["resource", "intent"],
             },
         ),
         Tool(
+            name="heartbeat_task",
+            description="Extend an active lease on a resource so it does not expire.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "resource": {"type": "string", "description": "Resource to heartbeat"},
+                    "ttl": {"type": "integer", "description": "New TTL in seconds from now (default 900, max 7200)"},
+                },
+                "required": ["resource"],
+            },
+        ),
+        Tool(
             name="release_task",
-            description="Release a claimed resource and log outcome.",
+            description="Release a claimed resource and log outcome. Releases the lease in the shared account/space.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "resource": {"type": "string"},
-                    "status": {"type": "string", "enum": ["completed", "cancelled", "handoff"], "default": "completed"}
+                    "status": {"type": "string", "enum": ["completed", "abandoned", "cancelled", "handoff"], "default": "completed"},
                 },
                 "required": ["resource"],
             },
         ),
         Tool(
             name="log_intent",
-            description="Declare your intention for a resource.",
+            description="Declare your non-blocking intention for a resource (shared with agents in the same account/space).",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "resource": {"type": "string"},
-                    "intent": {"type": "string"}
+                    "intent": {"type": "string"},
+                    "ttl": {"type": "integer", "description": "Intent duration in seconds (default 900, max 7200)"},
                 },
                 "required": ["resource", "intent"],
             },
         ),
         Tool(
             name="handoff_task",
-            description="Atomically summarizes work and releases a resource claim.",
+            description="Atomically summarizes work and releases a resource claim for the next agent.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "resource": {"type": "string"},
                     "summary": {"type": "string"},
-                    "next_agent_id": {"type": "string"}
+                    "next_agent_id": {"type": "string"},
                 },
                 "required": ["resource", "summary"],
             },
         ),
         Tool(
             name="pre_action_check",
-            description="Check for conflicts or overlaps before performing an action.",
+            description="Check for conflicts or overlaps before performing an action against shared leases and intents.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "resource": {"type": "string"},
-                    "intent": {"type": "string"}
+                    "intent": {"type": "string"},
                 },
                 "required": ["resource", "intent"],
             },
@@ -438,16 +381,16 @@ def _all_tools() -> list[Tool]:
         ),
         Tool(
             name="get_active_work",
-            description="Get ALL active claims and intents for the current session.",
+            description="Get ALL active claims and intents for the shared account/space.",
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
             name="get_active_context",
-            description="Get coordination context (claims/intents) for a specific resource.",
+            description="Get coordination context (claims/intents) for a specific resource in the shared account/space.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "resource": {"type": "string", "description": "File or resource to check"}
+                    "resource": {"type": "string", "description": "File or resource to check"},
                 },
                 "required": ["resource"],
             },
@@ -553,39 +496,66 @@ def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolR
         return _text(_dump(agent.timeline(args.get("memory_id"))))
 
     if name == "pre_action_check":
-        return _text(CoordinationEngine(agent, session_id).can_act(args.get("resource"), args.get("intent")))
+        return _text(agent.check(resource=args.get("resource"), intent=args.get("intent", ""), session_id=session_id))
 
     if name == "claim_task":
         resource, intent = args.get("resource"), args.get("intent")
-        check = CoordinationEngine(agent, session_id).can_act(resource, intent)
-        if check["decision"] == Decision.BLOCK:
-            return CallToolResult(isError=True, content=[TextContent(type="text", text=f"Block: {check['reason']}")])
-        agent.remember(content=f"[CLAIMED] {resource}: {intent}", type="procedural", metadata={
-            "action": "claim", "resource": resource, "status": "active", "session_id": session_id, "agent_id": agent.agent_id})
-        return _text(f"Resource '{resource}' claimed in session '{session_id}'.")
+        ttl = args.get("ttl")
+        if ttl is not None:
+            try:
+                ttl = int(ttl)
+            except (ValueError, TypeError):
+                ttl = None
+        res = agent.claim(resource=resource, intent=intent, session_id=session_id, ttl_seconds=ttl)
+        if not res.get("granted"):
+            holder = res.get("holder", "unknown")
+            msg = f"Block: Resource '{resource}' is currently claimed by agent {holder}."
+            if res.get("intent"):
+                msg += f" Intent: {res.get('intent')}."
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=msg)])
+        msg = f"Resource '{resource}' claimed."
+        if res.get("handoff_summary"):
+            msg += f" Handoff summary from previous agent: {res.get('handoff_summary')}"
+        return _text(msg)
+
+    if name == "heartbeat_task":
+        resource = args.get("resource")
+        ttl = args.get("ttl")
+        if ttl is not None:
+            try:
+                ttl = int(ttl)
+            except (ValueError, TypeError):
+                ttl = None
+        res = agent.heartbeat(resource=resource, ttl_seconds=ttl, session_id=session_id)
+        return _text(f"Resource '{resource}' heartbeat renewed until {res.get('expires_at')}.")
 
     if name == "release_task":
-        resource, status = args.get("resource"), args.get("status", "completed")
-        agent.remember(content=f"[RELEASED] {resource} ({status})", type="procedural", metadata={
-            "action": "release", "resource": resource, "status": status, "session_id": session_id, "agent_id": agent.agent_id})
+        resource = args.get("resource")
+        status = args.get("status", "completed")
+        if status == "cancelled":
+            status = "abandoned"
+        agent.release(resource=resource, status=status, session_id=session_id)
         return _text(f"Resource '{resource}' released.")
 
     if name == "log_intent":
         intent, resource = args.get("intent"), args.get("resource")
-        agent.remember(content=f"[INTENT] {resource}: {intent}", type="procedural", metadata={
-            "action": "intent", "resource": resource, "session_id": session_id, "agent_id": agent.agent_id})
+        ttl = args.get("ttl")
+        if ttl is not None:
+            try:
+                ttl = int(ttl)
+            except (ValueError, TypeError):
+                ttl = None
+        agent.log_intent(resource=resource, intent=intent, ttl_seconds=ttl, session_id=session_id)
         return _text(f"Intent for {resource} logged.")
 
     if name in ("get_active_work", "get_active_context"):
-        claims, intents = CoordinationEngine(agent, session_id)._get_active_claims(args.get("resource"))
-        return _text({"claims": claims, "intents": intents})
+        resource = args.get("resource")
+        active = agent.active(prefix=resource)
+        return _text({"claims": active.get("leases", []), "intents": active.get("intents", [])})
 
     if name == "handoff_task":
         resource, summary, nxt = args.get("resource"), args.get("summary"), args.get("next_agent_id")
-        agent.remember(content=f"[HANDOFF] from {agent.agent_id}: {summary}", type="procedural", metadata={
-            "action": "handoff", "resource": resource, "from": agent.agent_id, "to": nxt or "Anyone", "session_id": session_id})
-        agent.remember(content=f"[RELEASED] {resource} (handoff)", type="procedural", metadata={
-            "action": "release", "resource": resource, "status": "handoff", "session_id": session_id, "agent_id": agent.agent_id})
+        agent.handoff(resource=resource, summary=summary, next_agent_id=nxt, session_id=session_id)
         return _text(f"Handoff completed for {resource}.")
 
     if name == "get_system_status":
@@ -629,7 +599,13 @@ class AuthMiddleware:
         query_string = scope.get("query_string", b"").decode()
         params = parse_qs(query_string)
         
+        # The coordination session: an explicit ?session_id=, else the MCP
+        # transport's per-connection Mcp-Session-Id, so each connected tool
+        # (Claude Code, Cursor, ...) is its own holder even on one account.
         session_id = params.get("session_id", [None])[0]
+        if not session_id:
+            sid = dict(scope.get("headers") or []).get(b"mcp-session-id", b"").decode().strip()
+            session_id = f"mcp:{sid}" if sid else None
         agent_id = token = None
         # Only the legacy SSE transport takes credentials in the URL, where
         # they end up in proxy logs; everything else needs the header.

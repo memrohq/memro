@@ -195,6 +195,13 @@ func (s *Server) Handler() http.Handler {
 	protected("PUT /connectors/{id}/sources", s.updateConnectorSources)
 	protected("POST /connectors/{id}/sync", s.syncConnector)
 	protected("DELETE /connectors/{id}", s.deleteConnector)
+	protected("POST /coordination/claim", s.coordinationClaim)
+	protected("POST /coordination/heartbeat", s.coordinationHeartbeat)
+	protected("POST /coordination/release", s.coordinationRelease)
+	protected("POST /coordination/handoff", s.coordinationHandoff)
+	protected("POST /coordination/check", s.coordinationCheck)
+	protected("GET /coordination/active", s.coordinationActive)
+	protected("POST /coordination/intent", s.coordinationIntent)
 
 	for pattern, h := range s.extra {
 		mux.Handle(pattern, h)
