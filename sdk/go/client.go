@@ -439,3 +439,38 @@ func (c *Client) CreateAPIKey(ctx context.Context, name string, signer *Signer) 
 	}
 	return out.Key, c.call(ctx, http.MethodPost, "/api-keys", nil, map[string]string{"name": name}, signer, &out)
 }
+
+// ── Coordination ──────────────────────────────────────────────────────────
+
+func (c *Client) CoordinationClaim(ctx context.Context, body map[string]any, signer *Signer) (map[string]any, error) {
+	var out map[string]any
+	return out, c.call(ctx, http.MethodPost, "/coordination/claim", nil, body, signer, &out)
+}
+
+func (c *Client) CoordinationHeartbeat(ctx context.Context, body map[string]any, signer *Signer) (map[string]any, error) {
+	var out map[string]any
+	return out, c.call(ctx, http.MethodPost, "/coordination/heartbeat", nil, body, signer, &out)
+}
+
+func (c *Client) CoordinationRelease(ctx context.Context, body map[string]any, signer *Signer) error {
+	return c.call(ctx, http.MethodPost, "/coordination/release", nil, body, signer, nil)
+}
+
+func (c *Client) CoordinationHandoff(ctx context.Context, body map[string]any, signer *Signer) error {
+	return c.call(ctx, http.MethodPost, "/coordination/handoff", nil, body, signer, nil)
+}
+
+func (c *Client) CoordinationCheck(ctx context.Context, body map[string]any, signer *Signer) (map[string]any, error) {
+	var out map[string]any
+	return out, c.call(ctx, http.MethodPost, "/coordination/check", nil, body, signer, &out)
+}
+
+func (c *Client) CoordinationActive(ctx context.Context, q url.Values, signer *Signer) (map[string]any, error) {
+	var out map[string]any
+	return out, c.call(ctx, http.MethodGet, "/coordination/active", q, nil, signer, &out)
+}
+
+func (c *Client) CoordinationIntent(ctx context.Context, body map[string]any, signer *Signer) (map[string]any, error) {
+	var out map[string]any
+	return out, c.call(ctx, http.MethodPost, "/coordination/intent", nil, body, signer, &out)
+}

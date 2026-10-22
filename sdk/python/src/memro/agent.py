@@ -301,5 +301,112 @@ class Agent:
         """
         self.client.delete_identity(self.agent_id, self._private_key)
 
+    # ── Coordination ────────────────────────────────────────────────────────
+
+    def claim(
+        self,
+        resource: str,
+        intent: str = "",
+        session_id: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
+    ) -> "ClaimContext":
+        """Claim a resource for multi-agent coordination.
+        Can be used as a context manager:
+            with agent.claim("src/auth.go", intent="refactor") as lease:
+                ...
+        Or accessed as a dict:
+            res = agent.claim("src/auth.go")
+            if res["granted"]: ...
+        """
+        raw = self.client.coordination_claim(
+            self.agent_id, self._private_key, resource, intent=intent, session_id=session_id, ttl_seconds=ttl_seconds
+        )
+        return ClaimContext(self, resource, raw, ttl_seconds)
+
+    def heartbeat(
+        self,
+        resource: Optional[str] = None,
+        lease_id: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
+    ) -> dict:
+        return self.client.coordination_heartbeat(
+            self.agent_id, self._private_key, resource=resource, lease_id=lease_id, ttl_seconds=ttl_seconds
+        )
+
+    def release(
+        self,
+        resource: Optional[str] = None,
+        lease_id: Optional[str] = None,
+        status: str = "completed",
+    ) -> dict:
+        return self.client.coordination_release(
+            self.agent_id, self._private_key, resource=resource, lease_id=lease_id, status=status
+        )
+
+    def handoff(
+        self,
+        resource: Optional[str] = None,
+        lease_id: Optional[str] = None,
+        summary: str = "",
+        next_agent_id: Optional[str] = None,
+    ) -> dict:
+        return self.client.coordination_handoff(
+            self.agent_id, self._private_key, resource=resource, lease_id=lease_id, summary=summary, next_agent_id=next_agent_id
+        )
+
+    def check(self, resource: str, intent: str = "") -> dict:
+        return self.client.coordination_check(self.agent_id, self._private_key, resource=resource, intent=intent)
+
+    def active(self, prefix: Optional[str] = None) -> dict:
+        return self.client.coordination_active(self.agent_id, self._private_key, resource=prefix)
+
+    def log_intent(self, resource: str, intent: str, ttl_seconds: Optional[int] = None) -> dict:
+        return self.client.coordination_intent(self.agent_id, self._private_key, resource=resource, intent=intent, ttl_seconds=ttl_seconds)
+
     def __repr__(self) -> str:
         return f"Agent(id={self.agent_id[:16]}...)"
+
+
+class ClaimContext(dict):
+    """Result of agent.claim(...). Behaves as a dictionary, and supports context management:
+    with agent.claim('src/auth.go'):
+        # auto-heartbeats in background, auto-releases on exit
+    """
+
+    def __init__(self, agent: "Agent", resource: str, result: dict, ttl_seconds: Optional[int] = None):
+        super().__init__(result)
+        self.agent = agent
+        self.resource = resource
+        self.ttl_seconds = ttl_seconds or 900
+        self._stop_heartbeat = None
+        self._thread = None
+
+    def __enter__(self):
+        if not self.get("granted"):
+            raise RuntimeError(f"Resource '{self.resource}' could not be claimed: held by {self.get('holder')}")
+        import threading
+
+        self._stop_heartbeat = threading.Event()
+
+        def _beat():
+            interval = max(5, self.ttl_seconds // 3)
+            while not self._stop_heartbeat.wait(interval):
+                try:
+                    self.agent.heartbeat(resource=self.resource, ttl_seconds=self.ttl_seconds)
+                except Exception:
+                    pass
+
+        self._thread = threading.Thread(target=_beat, daemon=True)
+        self._thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._stop_heartbeat:
+            self._stop_heartbeat.set()
+        status = "abandoned" if exc_type is not None else "completed"
+        try:
+            self.agent.release(resource=self.resource, status=status)
+        except Exception:
+            pass
+        return False
+
