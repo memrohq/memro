@@ -163,8 +163,8 @@ func (s *Server) memoryFromFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	f, err := s.store.GetFile(r.Context(), fileID)
-	if err != nil || f == nil || f.AgentID != a.ID || f.TenantID != a.TenantID {
+	f, err := s.store.GetFileForAgent(r.Context(), fileID, a.ID, a.TenantID)
+	if err != nil || f == nil {
 		httpError(w, http.StatusNotFound, "File not found")
 		return
 	}

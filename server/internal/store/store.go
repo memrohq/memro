@@ -575,6 +575,14 @@ func (s *Store) GetFile(ctx context.Context, id uuid.UUID) (*File, error) {
 	return nilIfNoRows(&f, err)
 }
 
+func (s *Store) GetFileForAgent(ctx context.Context, id uuid.UUID, agentID string, tenantID uuid.UUID) (*File, error) {
+	var f File
+	err := s.Pool.QueryRow(ctx, `SELECT id, agent_id, tenant_id, file_name, file_type, file_path, file_size, mime_type, extracted_text
+		FROM files WHERE id = $1 AND agent_id = $2 AND tenant_id = $3`, id, agentID, tenantID).
+		Scan(&f.ID, &f.AgentID, &f.TenantID, &f.FileName, &f.FileType, &f.FilePath, &f.FileSize, &f.MimeType, &f.ExtractedText)
+	return nilIfNoRows(&f, err)
+}
+
 // --- Tenants ----------------------------------------------------------------------
 
 // IsPlatformAdmin reports whether a user is Memro staff (platform_admins).

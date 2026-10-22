@@ -699,7 +699,7 @@ func (e *Engine) Timeline(ctx context.Context, agentID string, tenantID uuid.UUI
 		return nil, ErrNotFound
 	}
 	rows, err := e.pool.Query(ctx, `SELECT created_at, action, COALESCE(resource_id, '') FROM audit_log
-		WHERE resource_id = $1 AND tenant_id = $2 ORDER BY created_at ASC`, memoryID.String(), tenantID)
+		WHERE resource_id = $1 AND tenant_id = $2 AND agent_id = $3 ORDER BY created_at ASC`, memoryID.String(), tenantID, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -744,8 +744,8 @@ func (e *Engine) MemoryChain(ctx context.Context, agentID string, tenantID uuid.
 	rows, err := e.pool.Query(ctx, `SELECT m.id::TEXT, m.content, r.relation_type, COALESCE(r.confidence, 1.0)::REAL
 		FROM memory_relations r
 		JOIN memories m ON m.id = CASE WHEN r.source_memory_id = $1 THEN r.target_memory_id ELSE r.source_memory_id END
-		WHERE (r.source_memory_id = $1 OR r.target_memory_id = $1) AND r.tenant_id = $2
-		ORDER BY r.created_at`, id, tenantID)
+		WHERE (r.source_memory_id = $1 OR r.target_memory_id = $1) AND r.tenant_id = $2 AND m.agent_id = $3
+		ORDER BY r.created_at`, id, tenantID, agentID)
 	if err != nil {
 		return nil, err
 	}
