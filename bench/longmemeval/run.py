@@ -73,6 +73,29 @@ def rounds(session):
     return pieces
 
 
+def answer_texts(q):
+    """Exchange texts holding an answer turn, split exactly like run.rounds."""
+    out = set()
+    for session in q["haystack_sessions"]:
+        i = 0
+        while i < len(session):
+            t = session[i]
+            has = bool(t.get("has_answer"))
+            if t["role"] == "user":
+                text = "User: " + t["content"]
+                if i + 1 < len(session) and session[i + 1]["role"] == "assistant":
+                    text += "\nAssistant: " + session[i + 1]["content"]
+                    has = has or bool(session[i + 1].get("has_answer"))
+                    i += 1
+            else:
+                text = "Assistant: " + t["content"]
+            if has:
+                for start in range(0, len(text), MAX_MEMORY_CHARS):
+                    out.add(text[start:start + MAX_MEMORY_CHARS])
+            i += 1
+    return out
+
+
 def psql(sql):
     db_url = os.environ.get("MEMRO_DATABASE_URL")
     if db_url:
@@ -149,6 +172,8 @@ def get_engine_options():
         "format": os.environ.get("RECALL_FORMAT", "standard"),
         "write_time_supersession": os.environ.get("MEMRO_WRITE_TIME_SUPERSESSION", "false"),
         "per_item_chars": PER_ITEM_CHARS,
+        # Set by whoever started the server (bench/cf/eval_embeddings.py does).
+        "embedding_model": os.environ.get("BENCH_EMBEDDING_MODEL", "text-embedding-3-small"),
     }
 
 
@@ -268,11 +293,17 @@ def run_one(q):
     try:
         hits, meta, session_memories, timings = retrieve(q, client, agent)
         hyp = "(no LLM: dry run)" if os.environ.get("BENCH_NO_LLM") else answer(q, hits, meta, session_memories)
+        # Exchange-level evidence: which hits are exchanges LongMemEval marks
+        # as holding the answer, and how many of those reached the prompt.
+        gold = answer_texts(q)
+        shown = {meta[i]["content"] for i in context_ids(hits, meta, session_memories)}
         return {
             "question_id": q["question_id"], "question_type": q["question_type"], "question": q["question"],
             "answer": q["answer"], "hypothesis": hyp,
             "retrieved_sessions": [meta[h["memory_id"]]["session"] for h in hits],
             "answer_session_ids": q["answer_session_ids"], "memories": len(meta),
+            "hit_evidence": [meta[h["memory_id"]]["content"] in gold for h in hits],
+            "evidence_total": len(gold), "evidence_in_context": len(gold & shown),
             **timings,
         }
     finally:
