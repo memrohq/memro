@@ -276,6 +276,78 @@ func TestAuthRejections(t *testing.T) {
 	e.must(401, code, b, "v2 signature reused on another route")
 }
 
+func TestSignatureHexCaseReplay(t *testing.T) {
+	e := setup(t)
+	a := newAgent(t)
+	e.register(a)
+
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	payload := []byte(ts + "\nGET\n/usage\n")
+	sig := hex.EncodeToString(ed25519.Sign(a.priv, payload))
+
+	// 1. A valid v2 request -> 200
+	h := map[string]string{
+		"X-Agent-Id":          a.id,
+		"X-Timestamp":         ts,
+		"X-Signature":         sig,
+		"X-Signature-Version": "2",
+	}
+	code, b := e.do(nil, "", "GET", "/usage", nil, h)
+	e.must(200, code, b, "valid v2 request")
+
+	// 2. The identical request again -> 401 "Request already used"
+	code, b = e.do(nil, "", "GET", "/usage", nil, h)
+	e.must(401, code, b, "identical request replay")
+	if !strings.Contains(string(b), "Request already used") {
+		t.Fatalf("expected 'Request already used', got %s", b)
+	}
+
+	// 3. The same signature uppercased -> 401 "Request already used"
+	hUpper := map[string]string{
+		"X-Agent-Id":          a.id,
+		"X-Timestamp":         ts,
+		"X-Signature":         strings.ToUpper(sig),
+		"X-Signature-Version": "2",
+	}
+	code, b = e.do(nil, "", "GET", "/usage", nil, hUpper)
+	e.must(401, code, b, "uppercased signature replay")
+	if !strings.Contains(string(b), "Request already used") {
+		t.Fatalf("expected 'Request already used', got %s", b)
+	}
+
+	// 4. Mixed case -> 401 "Request already used"
+	mixed := make([]byte, len(sig))
+	for i := 0; i < len(sig); i++ {
+		c := sig[i]
+		if i%2 == 0 && c >= 'a' && c <= 'f' {
+			mixed[i] = c - 'a' + 'A'
+		} else {
+			mixed[i] = c
+		}
+	}
+	hMixed := map[string]string{
+		"X-Agent-Id":          a.id,
+		"X-Timestamp":         ts,
+		"X-Signature":         string(mixed),
+		"X-Signature-Version": "2",
+	}
+	code, b = e.do(nil, "", "GET", "/usage", nil, hMixed)
+	e.must(401, code, b, "mixed-case signature replay")
+	if !strings.Contains(string(b), "Request already used") {
+		t.Fatalf("expected 'Request already used', got %s", b)
+	}
+
+	// 5. Non-128 hex chars -> 401
+	hShort := map[string]string{
+		"X-Agent-Id":          a.id,
+		"X-Timestamp":         ts,
+		"X-Signature":         sig[:126],
+		"X-Signature-Version": "2",
+	}
+	code, b = e.do(nil, "", "GET", "/usage", nil, hShort)
+	e.must(401, code, b, "short signature rejected")
+}
+
 func TestMemoryLifecycleAndSearch(t *testing.T) {
 	e := setup(t)
 	a, b := newAgent(t), newAgent(t)

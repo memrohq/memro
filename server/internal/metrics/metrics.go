@@ -27,6 +27,9 @@ var (
 	HTTPRequestSeconds      = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "memro_http_request_duration_seconds", Help: "HTTP request latency", Buckets: prometheus.DefBuckets,
 	}, []string{"route", "status"})
+	CoordinationClaims      = promauto.NewCounterVec(prometheus.CounterOpts{Name: "memro_coordination_claims_total", Help: "Total coordination claims by outcome"}, []string{"outcome"})
+	CoordinationExpirations = counter("memro_coordination_expirations_total", "Total expired coordination leases reaped")
+	CoordinationHandoffs    = counter("memro_coordination_handoffs_total", "Total coordination task handoffs")
 )
 
 func counter(name, help string) prometheus.Counter {

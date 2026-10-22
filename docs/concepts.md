@@ -122,3 +122,33 @@ Uploaded files are served at `GET /assets/{file_id}`. The random file ID
 works as a capability URL (usable in `<img>` tags), so treat it as a secret
 if the file is. A file is deleted with the last memory made from it, and all
 of an agent's files are deleted with the agent.
+
+## Multi-agent coordination
+
+When multiple agents (or multiple tools) work across a shared codebase or project,
+Memro provides server-side atomic leases and non-blocking intents so agents do
+not work over each other:
+
+- **Atomic Leases (`/coordination/claim`)**: Acquire exclusive working rights on a
+  normalized resource path with a configurable TTL (default 15 minutes, max 2 hours).
+  Claims are atomic, eliminating check-then-claim races. Re-claiming your own lease is
+  idempotent and extends the lease.
+- **Heartbeats (`/coordination/heartbeat`)**: The active lease holder can extend the
+  lease duration before it expires. If an agent crashes or stops heartbeating, the
+  lease automatically expires and is reaped on the next claim.
+- **Releases and Handoffs (`/coordination/release`, `/coordination/handoff`)**: The
+  holder can release a completed or abandoned lease. Alternatively, an agent can
+  perform a handoff, storing a summary (and optional next agent ID); the next agent
+  to claim the resource automatically receives the handoff summary in their claim response.
+- **Advisory Intents (`/coordination/intent`)**: Soft, non-blocking declarations of
+  intended work that warn other agents before conflicts happen.
+- **Pre-action Checks (`/coordination/check`)**: Returns `allow` (unclaimed or held
+  by caller), `warn` (active intent by another agent), or `block` (active lease held
+  by another agent).
+- **Scope Rule**: Claims are shared with agents in the same account or space
+  (`tenant:<id>` for tenant spaces, `user:<id>` for agents owned by the same user,
+  and `agent:<id>` for unclaimed standalone agents). Leases never leak across scopes.
+- **Clean Memory**: Coordination records are stored in dedicated coordination tables
+  rather than procedural memories, keeping memory search and recall completely free
+  of coordination noise.
+
