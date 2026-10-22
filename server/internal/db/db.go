@@ -47,7 +47,24 @@ func Open(ctx context.Context, url string, maxConns, minConns int32) (*pgxpool.P
 // Migrate applies every embedded NNNN_name.sql file that has not run yet,
 // each in its own transaction. Databases previously migrated by the Rust
 // backend (sqlx) are detected and their applied versions are carried over.
+// migrateLockKey is the advisory lock that serialises Migrate across processes
+// (server instances starting together, test packages sharing a database).
+const migrateLockKey = 0x6d656d726f // "memro"
+
 func Migrate(ctx context.Context, pool *pgxpool.Pool, migrations fs.FS) error {
+	// Two migrators running at once both see a migration as unapplied and race
+	// on CREATE TABLE IF NOT EXISTS (duplicate pg_type rows). Hold a session
+	// advisory lock on one connection for the whole run.
+	lockConn, err := pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer lockConn.Release()
+	if _, err := lockConn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrateLockKey); err != nil {
+		return fmt.Errorf("migration lock: %w", err)
+	}
+	defer lockConn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrateLockKey)
+
 	if _, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version BIGINT PRIMARY KEY,
 		name TEXT NOT NULL,
