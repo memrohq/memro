@@ -11,6 +11,7 @@ import argparse
 import concurrent.futures as cf
 import datetime as dt
 import json
+import re
 import os
 import pathlib
 import subprocess
@@ -43,6 +44,13 @@ TOP_K = int(os.environ.get("TOP_K", "15"))
 PER_ITEM_CHARS = int(os.environ.get("PER_ITEM_CHARS", "4000"))   # each retrieved memory, as shown to the answering model
 MAX_MEMORY_CHARS = 9500  # Memro accepts up to 10,000 characters per memory
 ANSWER_MODEL = os.environ.get("ANSWER_MODEL", "gpt-4o-mini")
+# Experiment switches for session-diverse retrieval (the server's
+# max_per_session cap). PER_SESSION_SCOPE "aggregate" applies it only to
+# questions that ask to count, total or list things across conversations.
+PER_SESSION = int(os.environ.get("PER_SESSION", "0"))
+PER_SESSION_SCOPE = os.environ.get("PER_SESSION_SCOPE", "all")
+AGGREGATE = re.compile(r"\b(how many|how much|in total|total|altogether|combined|sum of|number of|list|"
+                       r"all the|each of|every|both)\b", re.I)
 SESSION_EXPANSION = 3  # answer() adds every exchange from the top N retrieved sessions
 NS_SESSION = uuid.UUID("6f1c2a8e-5b8f-4c4e-9d55-0a4f7d1c3b21")
 
@@ -169,6 +177,7 @@ def get_engine_options():
         "mode": "hybrid",
         "answer_model": ANSWER_MODEL,
         "session_expansion": SESSION_EXPANSION,
+        "per_session": PER_SESSION, "per_session_scope": PER_SESSION_SCOPE,
         "format": os.environ.get("RECALL_FORMAT", "standard"),
         "write_time_supersession": os.environ.get("MEMRO_WRITE_TIME_SUPERSESSION", "false"),
         "per_item_chars": PER_ITEM_CHARS,
@@ -281,7 +290,11 @@ def retrieve(q, client, agent):
         raise RuntimeError(f"{left} memories still not embedded")
     embed_s = time.time() - t0 - ingest_s
     t1 = time.time()
-    hits = client.search(agent.agent_id, q["question"][:500], limit=TOP_K, private_key=agent._private_key, mode="hybrid")
+    params = {"agent_id": agent.agent_id, "query": q["question"][:500], "limit": TOP_K, "mode": "hybrid"}
+    if PER_SESSION and (PER_SESSION_SCOPE == "all" or AGGREGATE.search(q["question"])):
+        params["max_per_session"] = PER_SESSION
+    hits = client._json("GET", "/search", params=params, agent_id=agent.agent_id,
+                        private_key=agent._private_key).get("results", [])
     search_ms = (time.time() - t1) * 1000
     return hits, meta, session_memories, {"ingest_s": round(ingest_s, 1), "embed_wait_s": round(embed_s, 1),
                                           "search_ms": round(search_ms, 1)}

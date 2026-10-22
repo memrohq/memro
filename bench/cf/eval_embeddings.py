@@ -250,10 +250,11 @@ def main():
                     help="admin connection; each model gets its own fresh database next to it")
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--build", action="store_true", help="rebuild the server binary")
+    ap.add_argument("--server-bin", help="use this memro-api binary (e.g. built from another branch)")
     ap.add_argument("--prefill", action="store_true", help="embed everything into the Workers AI cache before each run")
     args = ap.parse_args()
 
-    server_bin = build_server(args.build)
+    server_bin = pathlib.Path(args.server_bin) if args.server_bin else build_server(args.build)
     results = {}
     for model in args.models:
         print(f"== {model}", flush=True)
