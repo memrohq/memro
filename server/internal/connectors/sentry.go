@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -366,6 +367,29 @@ func (m *Manager) SentryWebhook(ctx context.Context, hdr http.Header, body []byt
 		return http.StatusUnauthorized
 	}
 
+	if tsHeader := hdr.Get("Sentry-Hook-Timestamp"); tsHeader != "" {
+		sec, err := strconv.ParseInt(tsHeader, 10, 64)
+		if err != nil || !VerifyWebhookTimestamp(time.Unix(sec, 0), m.now()) {
+			metrics.ConnectorWebhooks.WithLabelValues(ProviderSentry, "stale_timestamp").Inc()
+			return http.StatusUnauthorized
+		}
+	}
+
+	deliveryID := hdr.Get("Request-ID")
+	if deliveryID == "" {
+		deliveryID = hdr.Get("Request-Id")
+	}
+	if deliveryID != "" {
+		claimed, err := m.ClaimWebhookDelivery(ctx, ProviderSentry, deliveryID)
+		if err != nil {
+			return http.StatusInternalServerError
+		}
+		if !claimed {
+			metrics.ConnectorWebhooks.WithLabelValues(ProviderSentry, "duplicate").Inc()
+			return http.StatusOK
+		}
+	}
+
 	var p sentryWebhookPayload
 	if err := json.Unmarshal(body, &p); err != nil {
 		return http.StatusBadRequest
@@ -384,6 +408,11 @@ func (m *Manager) SentryWebhook(ctx context.Context, hdr http.Header, body []byt
 	if slug == "" {
 		return http.StatusOK
 	}
+
+	if m.deps.Pool == nil {
+		return http.StatusOK
+	}
+
 	conns, err := m.connectionsWithSource(ctx, ProviderSentry, "", slug)
 	if err != nil {
 		return http.StatusOK
