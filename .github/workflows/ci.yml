@@ -176,3 +176,5 @@ jobs:
           node-version: "20"
       - run: npm ci && npm run build
         working-directory: apps/dashboard
+      - name: Build Docker image
+        run: docker build -t memro-dashboard:ci apps/dashboard

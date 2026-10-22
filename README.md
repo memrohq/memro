@@ -28,21 +28,35 @@ Your coding assistants will immediately have access to persistent project and de
 
 ### Option B: Self-Host with Docker Compose (Source Available)
 
-Run the full Memro API server and PostgreSQL with pgvector locally on your own infrastructure:
+Run the full Memro API server and PostgreSQL with pgvector on your own infrastructure:
 
+#### Option 1: Clone the repository (works today)
 ```bash
-# 1. Download the Docker Compose manifest
-curl -fsSL https://raw.githubusercontent.com/memrohq/memro/main/docker-compose.yml -o docker-compose.yml
-
-# 2. Start PostgreSQL + Memro
-docker compose up -d
-
-# 3. Verify health
+git clone https://github.com/memrohq/memro && cd memro
+cp .env.example .env              # add OPENAI_API_KEY for hybrid search; set METRICS_TOKEN
+docker compose up -d              # API on :8081, dashboard on :5173, Postgres on 127.0.0.1:55432
 curl http://localhost:8081/health
 ```
 
+#### Option 2: Prebuilt images (no clone required, after v0.1.0 release)
+```bash
+curl -fsSL https://raw.githubusercontent.com/memrohq/memro/v0.1.0/docker-compose.release.yml -o docker-compose.yml && docker compose up -d
+curl http://localhost:8081/health
+```
+*(Note: The prebuilt image one-liner downloads `docker-compose.release.yml` with pinned `ghcr.io/memrohq/memro:0.1.0` and `ghcr.io/memrohq/memro-dashboard:0.1.0` images, available once `v0.1.0` is published.)*
+
 - **Backend API**: `http://localhost:8081`
-- **Dashboard**: `http://localhost:5173` (optional local UI)
+- **Dashboard**: `http://localhost:5173`
+- **Postgres Database**: Port `55432` on localhost (Option 1 clone) to avoid port 5432 collisions with existing local Postgres setups.
+- **Metrics Token**: Set `METRICS_TOKEN` (min 32 characters) in `.env` to protect `GET /metrics` and `GET /stats/cache`; the server logs a warning if unset.
+- **Verify Signatures**: Verify published container images keylessly using Cosign:
+  ```bash
+  cosign verify ghcr.io/memrohq/memro:0.1.0 \
+    --certificate-identity-regexp 'https://github.com/memrohq/memro/' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  ```
+
+For complete deployment options, production topologies, and configuration tables, see [docs/self-hosting.md](docs/self-hosting.md).
 
 ---
 

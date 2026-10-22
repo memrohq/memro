@@ -7,28 +7,43 @@ Cloud.
 
 ## Run it
 
+### Option 1: Clone the repository (works today)
+
 ```bash
 git clone https://github.com/memrohq/memro && cd memro
-cp .env.example .env              # add OPENAI_API_KEY or VOYAGE_API_KEY for semantic search
-docker compose up -d              # API on :8081, dashboard on :5173, Postgres on 127.0.0.1:5432
+cp .env.example .env              # add OPENAI_API_KEY for hybrid search; set METRICS_TOKEN
+docker compose up -d              # API on :8081, dashboard on :5173, Postgres on 127.0.0.1:55432
 curl localhost:8081/health
 ```
 
-The MCP server isn't in the compose file. Run it next to the API:
+The database host port is published on `127.0.0.1:55432` to avoid clashes with existing local Postgres instances on port 5432.
+
+### Option 2: Prebuilt images (no clone required, after v0.1.0 release)
+
+Run Memro in any empty directory without cloning the source tree:
 
 ```bash
-pip install -e sdk/python -e mcp
-MEMRO_BASE_URL=http://localhost:8081 MCP_TRANSPORT=sse memro-mcp     # :8080/mcp
+curl -fsSL https://raw.githubusercontent.com/memrohq/memro/v0.1.0/docker-compose.release.yml -o docker-compose.yml && docker compose up -d
+curl localhost:8081/health
 ```
 
-Connect your tools to it:
+> **Note:** The prebuilt one-liner downloads `docker-compose.release.yml` with pinned `ghcr.io/memrohq/memro:0.1.0` and `ghcr.io/memrohq/memro-dashboard:0.1.0` images, which become available once tag `v0.1.0` is published to GitHub Container Registry. All environment variables have sensible defaults and `.env` is optional. If `OPENAI_API_KEY` is not provided, the server starts normally and falls back to PostgreSQL keyword full-text search.
+
+### Verifying Container Signatures
+
+Memro releases sign both server and dashboard container images keylessly using Sigstore Cosign during GitHub Actions. Verify image integrity and provenance:
 
 ```bash
-node cli/bin/memro.js connect --api http://localhost:8081
-```
+# Verify the Memro API server image
+cosign verify ghcr.io/memrohq/memro:0.1.0 \
+  --certificate-identity-regexp 'https://github.com/memrohq/memro/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
-For production hosting (Render, Railway, AWS, GCP, DigitalOcean), backups and
-reverse-proxy settings, see [deploy/README.md](../deploy/README.md).
+# Verify the Memro Dashboard image
+cosign verify ghcr.io/memrohq/memro-dashboard:0.1.0 \
+  --certificate-identity-regexp 'https://github.com/memrohq/memro/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
 
 ## Configuration
 
