@@ -1,0 +1,78 @@
+# Memro Self-Host Compose Manifest (Prebuilt Images)
+#
+# Quickstart (run without cloning):
+#   curl -fsSL https://raw.githubusercontent.com/memrohq/memro/v0.1.0/docker-compose.release.yml -o docker-compose.yml
+#   docker compose up -d
+#
+# OPENAI_API_KEY is optional. Without an embedding API key, Memro starts normally
+# and falls back to PostgreSQL full-text keyword search (tsvector/ts_rank_cd) with RRF.
+# Add OPENAI_API_KEY (or VOYAGE_API_KEY / ANTHROPIC_API_KEY) to enable hybrid semantic search.
+#
+# METRICS_TOKEN is optional but recommended; if unset, /metrics endpoints log a warning.
+
+services:
+  backend:
+    image: ghcr.io/memrohq/memro:${MEMRO_VERSION:-0.1.0}
+    ports:
+      - "8081:8081"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - DATABASE_URL=postgres://${POSTGRES_USER:-memro}:${POSTGRES_PASSWORD:-memro}@db:5432/${POSTGRES_DB:-memro}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:5174,http://localhost:3000,http://localhost:5173}
+      - DB_MAX_CONNECTIONS=${DB_MAX_CONNECTIONS:-20}
+      - DB_MIN_CONNECTIONS=${DB_MIN_CONNECTIONS:-2}
+      - RATE_LIMIT_MAX=${RATE_LIMIT_MAX:-200}
+      - RATE_LIMIT_WINDOW_SECONDS=${RATE_LIMIT_WINDOW_SECONDS:-60}
+      - MIGRATE_ON_STARTUP=${MIGRATE_ON_STARTUP:-true}
+      - FILE_STORAGE_PATH=/data/files
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - METRICS_TOKEN=${METRICS_TOKEN:-}
+      - APP_URL=${APP_URL:-http://localhost:5173}
+    volumes:
+      - backend_files:/data/files
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-memro}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-memro}
+      - POSTGRES_DB=${POSTGRES_DB:-memro}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-memro}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  frontend:
+    image: ghcr.io/memrohq/memro-dashboard:${MEMRO_VERSION:-0.1.0}
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  backend_files:

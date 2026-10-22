@@ -33,19 +33,37 @@ npx memro-cli status
 In your assistant, say: *"Remember that our primary database is PostgreSQL 16 with pgvector."*  
 Restart your session and ask: *"What database and extensions do we use?"*
 
-### Option B: Self-Host with Docker (< 10 lines)
+### Option B: Self-Host with Docker Compose (Source Available)
 
+Run the full Memro API server and PostgreSQL with pgvector on your own infrastructure:
+
+#### Option 1: Clone the repository (works today)
 ```bash
-git clone https://github.com/memrohq/memro.git && cd memro
-cp .env.example .env
-docker compose up -d
+git clone https://github.com/memrohq/memro && cd memro
+cp .env.example .env              # add OPENAI_API_KEY for hybrid search; set METRICS_TOKEN
+docker compose up -d              # API on :8081, dashboard on :5173, Postgres on 127.0.0.1:55432
 curl http://localhost:8081/health
-
-# Remember and recall via REST API:
-curl -s -X POST http://localhost:8081/memories -H "Content-Type: application/json" \
-  -d '{"content": "Database migrated to Postgres 16", "type": "procedural"}'
-curl -s "http://localhost:8081/search?q=database+migration"
 ```
+
+#### Option 2: Prebuilt images (no clone required, after v0.1.0 release)
+```bash
+curl -fsSL https://raw.githubusercontent.com/memrohq/memro/v0.1.0/docker-compose.release.yml -o docker-compose.yml && docker compose up -d
+curl http://localhost:8081/health
+```
+*(Note: The prebuilt image one-liner downloads `docker-compose.release.yml` with pinned `ghcr.io/memrohq/memro:0.1.0` and `ghcr.io/memrohq/memro-dashboard:0.1.0` images, available once `v0.1.0` is published.)*
+
+- **Backend API**: `http://localhost:8081`
+- **Dashboard**: `http://localhost:5173`
+- **Postgres Database**: Port `55432` on localhost (Option 1 clone) to avoid port 5432 collisions with existing local Postgres setups.
+- **Metrics Token**: Set `METRICS_TOKEN` (min 32 characters) in `.env` to protect `GET /metrics` and `GET /stats/cache`; the server logs a warning if unset.
+- **Verify Signatures**: Verify published container images keylessly using Cosign:
+  ```bash
+  cosign verify ghcr.io/memrohq/memro:0.1.0 \
+    --certificate-identity-regexp 'https://github.com/memrohq/memro/' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  ```
+
+For complete deployment options, production topologies, and configuration tables, see [docs/self-hosting.md](docs/self-hosting.md).
 
 ---
 
@@ -183,10 +201,10 @@ docker compose up -d db
 
 # 2. Run backend API server
 cd server
-DATABASE_URL=postgres://memro:memro@localhost:5432/memro go run ./cmd/memro-api
+DATABASE_URL=postgres://memro:memro@localhost:55432/memro go run ./cmd/memro-api
 
 # 3. Run tests
-MEMRO_TEST_DATABASE_URL=postgres://memro:memro@localhost:5432/memro go test -race ./...
+MEMRO_TEST_DATABASE_URL=postgres://memro:memro@localhost:55432/memro go test -race ./...
 ```
 
 Please review [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) before submitting pull requests.
