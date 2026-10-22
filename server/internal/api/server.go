@@ -55,6 +55,9 @@ type Server struct {
 	identityLimiter *RateLimiter // agents registered per client address
 	meeLimiters     map[string]*RateLimiter
 	promHandler     http.Handler
+
+	v1LogMu  sync.Mutex
+	v1Logged map[string]time.Time
 }
 
 type Deps struct {
@@ -391,11 +394,36 @@ func (s *Server) authenticate(r *http.Request) (Agent, []byte, int, string) {
 		if auth.VerifyBytes(pub, auth.PayloadV1(ts, raw), sigBytes) != nil {
 			return Agent{}, nil, http.StatusUnauthorized, "Invalid signature"
 		}
+		if !s.replay.Use(sig, time.Now()) {
+			return Agent{}, nil, http.StatusUnauthorized, "Request already used"
+		}
+		metrics.LegacySignatureRequests.Inc()
+		s.logLegacyV1(agentID)
 	default:
 		return Agent{}, nil, http.StatusUnauthorized, "Unsupported X-Signature-Version"
 	}
 	return Agent{ID: identity.ID, UserID: identity.UserID, TenantID: identity.TenantID, Via: "signature",
 		SigningKey: keyHex, KeyRole: role}, raw, 0, ""
+}
+
+func (s *Server) logLegacyV1(agentID string) {
+	s.v1LogMu.Lock()
+	defer s.v1LogMu.Unlock()
+	if s.v1Logged == nil {
+		s.v1Logged = make(map[string]time.Time)
+	}
+	now := time.Now()
+	if last, ok := s.v1Logged[agentID]; !ok || now.Sub(last) >= time.Hour {
+		s.v1Logged[agentID] = now
+		slog.Info("accepted request with legacy v1 signature", "agent_id", agentID)
+	}
+	if len(s.v1Logged) > 10_000 {
+		for k, exp := range s.v1Logged {
+			if now.Sub(exp) >= 2*time.Hour {
+				delete(s.v1Logged, k)
+			}
+		}
+	}
 }
 
 // signedWebhooks are authenticated by the sender's HMAC signature and
