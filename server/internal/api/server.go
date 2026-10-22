@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -322,6 +323,14 @@ func (s *Server) authenticate(r *http.Request) (Agent, []byte, int, string) {
 	if sig == "" {
 		return Agent{}, nil, http.StatusUnauthorized, "Missing X-Signature header"
 	}
+	if len(sig) != 128 {
+		return Agent{}, nil, http.StatusUnauthorized, "Invalid signature"
+	}
+	sigBytes, err := hex.DecodeString(sig)
+	if err != nil {
+		return Agent{}, nil, http.StatusUnauthorized, "Invalid signature"
+	}
+	canonicalSig := hex.EncodeToString(sigBytes)
 	if ts == "" {
 		return Agent{}, nil, http.StatusUnauthorized, "Missing X-Timestamp header"
 	}
@@ -362,17 +371,17 @@ func (s *Server) authenticate(r *http.Request) (Agent, []byte, int, string) {
 	switch r.Header.Get("X-Signature-Version") {
 	case "2":
 		payload := auth.PayloadV2(ts, r.Method, r.URL.RequestURI(), raw)
-		if auth.Verify(pub, payload, sig) != nil {
+		if auth.VerifyBytes(pub, payload, sigBytes) != nil {
 			return Agent{}, nil, http.StatusUnauthorized, "Invalid signature"
 		}
-		if !s.replay.Use(sig, time.Now()) {
+		if !s.replay.Use(canonicalSig, time.Now()) {
 			return Agent{}, nil, http.StatusUnauthorized, "Request already used"
 		}
 	case "", "1":
 		if !s.cfg.AllowLegacySignatures {
 			return Agent{}, nil, http.StatusUnauthorized, "Legacy signatures are disabled; send X-Signature-Version: 2"
 		}
-		if auth.Verify(pub, auth.PayloadV1(ts, raw), sig) != nil {
+		if auth.VerifyBytes(pub, auth.PayloadV1(ts, raw), sigBytes) != nil {
 			return Agent{}, nil, http.StatusUnauthorized, "Invalid signature"
 		}
 	default:

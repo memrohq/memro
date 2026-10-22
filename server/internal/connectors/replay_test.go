@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/memrohq/memro/server/config"
 	"github.com/memrohq/memro/server/internal/db"
+	"github.com/memrohq/memro/server/migrations"
 )
 
 func TestVerifyWebhookTimestamp(t *testing.T) {
@@ -262,6 +263,9 @@ func TestPostgresWebhookDeduplicationAndTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
+	if err := db.Migrate(ctx, pool, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
 
 	m, err := New(Deps{
 		Pool: pool,
