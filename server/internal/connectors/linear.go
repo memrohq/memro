@@ -398,10 +398,12 @@ func VerifyLinearSignature(secret, sig string, body []byte) bool {
 }
 
 type linearWebhookPayload struct {
-	Action         string `json:"action"` // create, update, remove
-	Type           string `json:"type"`   // Issue, Comment, Project
-	OrganizationID string `json:"organizationId"`
-	Data           struct {
+	WebhookID        string `json:"webhookId"`
+	WebhookTimestamp int64  `json:"webhookTimestamp"`
+	Action           string `json:"action"` // create, update, remove
+	Type             string `json:"type"`   // Issue, Comment, Project
+	OrganizationID   string `json:"organizationId"`
+	Data             struct {
 		ID      string `json:"id"`
 		TeamID  string `json:"teamId"`
 		IssueID string `json:"issueId"` // present on comment events
@@ -425,7 +427,30 @@ func (m *Manager) LinearWebhook(ctx context.Context, hdr http.Header, body []byt
 		return http.StatusBadRequest
 	}
 
+	if p.WebhookTimestamp > 0 {
+		ts := time.UnixMilli(p.WebhookTimestamp)
+		if !VerifyWebhookTimestamp(ts, m.now()) {
+			metrics.ConnectorWebhooks.WithLabelValues(ProviderLinear, "stale_timestamp").Inc()
+			return http.StatusUnauthorized
+		}
+	}
+
+	if p.WebhookID != "" {
+		claimed, err := m.ClaimWebhookDelivery(ctx, ProviderLinear, p.WebhookID)
+		if err != nil {
+			return http.StatusInternalServerError
+		}
+		if !claimed {
+			metrics.ConnectorWebhooks.WithLabelValues(ProviderLinear, "duplicate").Inc()
+			return http.StatusOK
+		}
+	}
+
 	metrics.ConnectorWebhooks.WithLabelValues(ProviderLinear, p.Type).Inc()
+
+	if m.deps.Pool == nil {
+		return http.StatusOK
+	}
 
 	// Find active connections for this Linear organization
 	conns, err := m.connectionsForAccount(ctx, ProviderLinear, p.OrganizationID, true)

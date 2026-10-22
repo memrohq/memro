@@ -656,6 +656,16 @@ func (m *Manager) GitHubWebhook(ctx context.Context, h http.Header, body []byte)
 		metrics.ConnectorWebhooks.WithLabelValues(ProviderGitHub, "bad_signature").Inc()
 		return http.StatusUnauthorized
 	}
+	if deliveryID := h.Get("X-GitHub-Delivery"); deliveryID != "" {
+		claimed, err := m.ClaimWebhookDelivery(ctx, ProviderGitHub, deliveryID)
+		if err != nil {
+			return http.StatusInternalServerError
+		}
+		if !claimed {
+			metrics.ConnectorWebhooks.WithLabelValues(ProviderGitHub, "duplicate").Inc()
+			return http.StatusOK
+		}
+	}
 	var ev struct {
 		Action       string `json:"action"`
 		Installation struct {
@@ -671,6 +681,9 @@ func (m *Manager) GitHubWebhook(ctx context.Context, h http.Header, body []byte)
 	}
 	if err := json.Unmarshal(body, &ev); err != nil {
 		return http.StatusBadRequest
+	}
+	if m.deps.Pool == nil {
+		return http.StatusOK
 	}
 	event := h.Get("X-GitHub-Event")
 	inst := strconv.FormatInt(ev.Installation.ID, 10)

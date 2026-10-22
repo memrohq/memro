@@ -197,6 +197,9 @@ type Manager struct {
 
 	namesMu sync.Mutex
 	names   map[string]cachedName // Slack user names, by team/user
+
+	deliveriesMu sync.Mutex
+	deliveries   map[string]time.Time
 }
 
 // New builds the manager. Connectors whose credentials are missing stay
@@ -247,7 +250,7 @@ func New(d Deps) (*Manager, error) {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	m := &Manager{deps: d, cfg: cfg, http: client, wake: make(chan struct{}, 1), now: time.Now,
-		providers: map[string]provider{}, names: map[string]cachedName{}}
+		providers: map[string]provider{}, names: map[string]cachedName{}, deliveries: map[string]time.Time{}}
 	if cfg.EncryptionKey != "" {
 		s, err := newSealer(cfg.EncryptionKey, cfg.PreviousEncryptionKey)
 		if err != nil {
@@ -385,4 +388,62 @@ func (m *Manager) open(ctx context.Context, c *Connection) (*conn, error) {
 		}
 	}
 	return cc, nil
+}
+
+const (
+	webhookMaxSkew     = 5 * time.Minute
+	webhookDeliveryTTL = 24 * time.Hour
+)
+
+// VerifyWebhookTimestamp checks if a timestamp is within the accepted clock skew window (5 minutes).
+func VerifyWebhookTimestamp(ts, now time.Time) bool {
+	d := now.Sub(ts)
+	return d <= webhookMaxSkew && d >= -webhookMaxSkew
+}
+
+// ClaimWebhookDelivery records a delivery ID for a provider. It returns true if
+// the delivery was newly claimed, and false if it was already processed (a replay).
+func (m *Manager) ClaimWebhookDelivery(ctx context.Context, provider, deliveryID string) (bool, error) {
+	if deliveryID == "" {
+		return true, nil
+	}
+	if m.deps.Pool == nil {
+		m.deliveriesMu.Lock()
+		defer m.deliveriesMu.Unlock()
+		key := provider + ":" + deliveryID
+		if _, exists := m.deliveries[key]; exists {
+			return false, nil
+		}
+		m.deliveries[key] = m.now()
+		return true, nil
+	}
+	tag, err := m.deps.Pool.Exec(ctx, `INSERT INTO connector_webhook_deliveries (provider, delivery_id, received_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (provider, delivery_id) DO NOTHING`, provider, deliveryID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// CleanWebhookDeliveries drops delivery records older than the given TTL.
+func (m *Manager) CleanWebhookDeliveries(ctx context.Context, olderThan time.Duration) (int64, error) {
+	if m.deps.Pool == nil {
+		m.deliveriesMu.Lock()
+		defer m.deliveriesMu.Unlock()
+		cutoff := m.now().Add(-olderThan)
+		var cleaned int64
+		for k, t := range m.deliveries {
+			if t.Before(cutoff) {
+				delete(m.deliveries, k)
+				cleaned++
+			}
+		}
+		return cleaned, nil
+	}
+	tag, err := m.deps.Pool.Exec(ctx, `DELETE FROM connector_webhook_deliveries WHERE received_at < NOW() - make_interval(secs => $1)`, olderThan.Seconds())
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }

@@ -195,11 +195,16 @@ func (m *Manager) scheduler(ctx context.Context) {
 	t := time.NewTicker(scheduleEvery)
 	defer t.Stop()
 	lastSources := time.Time{}
+	lastClean := time.Time{}
 	for {
 		m.scheduleSyncs(ctx)
 		if time.Since(lastSources) >= sourcesRefresh {
 			m.scheduleSources(ctx)
 			lastSources = time.Now()
+		}
+		if time.Since(lastClean) >= time.Hour {
+			_, _ = m.CleanWebhookDeliveries(ctx, webhookDeliveryTTL)
+			lastClean = time.Now()
 		}
 		var due int
 		if err := m.deps.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM connector_jobs WHERE run_at <= NOW()`).Scan(&due); err == nil {
