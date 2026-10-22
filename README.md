@@ -201,10 +201,10 @@ docker compose up -d db
 
 # 2. Run backend API server
 cd server
-DATABASE_URL=postgres://memro:memro@localhost:5432/memro go run ./cmd/memro-api
+DATABASE_URL=postgres://memro:memro@localhost:55432/memro go run ./cmd/memro-api
 
 # 3. Run tests
-MEMRO_TEST_DATABASE_URL=postgres://memro:memro@localhost:5432/memro go test -race ./...
+MEMRO_TEST_DATABASE_URL=postgres://memro:memro@localhost:55432/memro go test -race ./...
 ```
 
 Please review [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) before submitting pull requests.
