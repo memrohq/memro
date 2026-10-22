@@ -56,14 +56,17 @@ type Intent struct {
 }
 
 type ClaimResult struct {
-	Granted        bool       `json:"granted"`
-	LeaseID        *uuid.UUID `json:"lease_id,omitempty"`
-	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
-	Holder         string     `json:"holder,omitempty"`
-	HolderSession  string     `json:"holder_session,omitempty"`
-	Intent         string     `json:"intent,omitempty"`
-	HandoffSummary string     `json:"handoff_summary,omitempty"`
-	HandoffFrom    string     `json:"handoff_from,omitempty"`
+	Granted       bool       `json:"granted"`
+	LeaseID       *uuid.UUID `json:"lease_id,omitempty"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	Holder        string     `json:"holder,omitempty"`
+	HolderSession string     `json:"holder_session,omitempty"`
+	// HolderResource is the resource the holder claimed when it differs from
+	// the one asked for: a folder containing it, or a path inside it.
+	HolderResource string `json:"holder_resource,omitempty"`
+	Intent         string `json:"intent,omitempty"`
+	HandoffSummary string `json:"handoff_summary,omitempty"`
+	HandoffFrom    string `json:"handoff_from,omitempty"`
 }
 
 type CheckResult struct {
@@ -93,6 +96,12 @@ func sessionOrDefault(s string) string {
 	}
 	return s
 }
+
+// overlapsSQL matches leases and intents on resource $2 itself, a folder
+// containing it, or a path inside it: a claim on "bench" covers
+// "bench/run.py", and the reverse. URLs only ever match exactly.
+const overlapsSQL = `(resource = $2 OR (position('://' in resource) = 0 AND position('://' in $2) = 0 AND
+	(starts_with($2, resource || '/') OR starts_with(resource, $2 || '/'))))`
 
 // CoordinationScopeKey derives the isolation scope:
 // 1. Tenant/Space UUID when TenantID != uuid.Nil
@@ -135,6 +144,12 @@ func (s *Store) ClaimLease(ctx context.Context, scopeKey, resource, agentID, ses
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+
+	// Claims in one scope go one at a time, so two overlapping claims (a
+	// folder and a file in it) can't both pass the overlap check below.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('coordination:' || $1))`, scopeKey); err != nil {
+		return nil, err
+	}
 
 	// 1. Atomically mark expired leases released (status 'expired') in this scope & resource
 	tag, err := tx.Exec(ctx, `UPDATE coordination_leases 
@@ -197,6 +212,35 @@ func (s *Store) ClaimLease(ctx context.Context, scopeKey, resource, agentID, ses
 			HolderSession: existing.holderSession,
 			Intent:        existing.intent,
 			ExpiresAt:     &existing.expiresAt,
+		}, nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+
+	// 2b. A folder containing this resource, or a path inside it, held by
+	// someone else blocks the claim too.
+	var ov struct {
+		holder, session, intent, resource string
+		expiresAt                         time.Time
+	}
+	err = tx.QueryRow(ctx, `SELECT holder_agent_id, holder_session, intent, expires_at, resource
+		FROM coordination_leases
+		WHERE scope_key = $1 AND released_at IS NULL AND expires_at > NOW() AND `+overlapsSQL+`
+			AND NOT (holder_agent_id = $3 AND holder_session = $4)
+		ORDER BY created_at LIMIT 1`, scopeKey, resource, agentID, sessionID).
+		Scan(&ov.holder, &ov.session, &ov.intent, &ov.expiresAt, &ov.resource)
+	if err == nil {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		metrics.CoordinationClaims.WithLabelValues("denied").Inc()
+		return &ClaimResult{
+			Granted:        false,
+			Holder:         ov.holder,
+			HolderSession:  ov.session,
+			HolderResource: ov.resource,
+			Intent:         ov.intent,
+			ExpiresAt:      &ov.expiresAt,
 		}, nil
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
@@ -408,26 +452,29 @@ func (s *Store) CheckCoordination(ctx context.Context, scopeKey, resource, agent
 		return nil, fmt.Errorf("resource is required")
 	}
 
-	// 1. Check for active lease by anyone
-	var holderID, holderSession, holderIntent string
+	// 1. An active lease by someone else on this resource, a folder
+	// containing it, or a path inside it blocks. Your own leases allow.
+	var holderID, holderSession, holderIntent, heldResource string
 	var expiresAt time.Time
-	err := s.Pool.QueryRow(ctx, `SELECT holder_agent_id, holder_session, intent, expires_at 
+	err := s.Pool.QueryRow(ctx, `SELECT holder_agent_id, holder_session, intent, expires_at, resource
 		FROM coordination_leases 
-		WHERE scope_key = $1 AND resource = $2 AND released_at IS NULL AND expires_at > NOW()`,
-		scopeKey, resource).Scan(&holderID, &holderSession, &holderIntent, &expiresAt)
+		WHERE scope_key = $1 AND released_at IS NULL AND expires_at > NOW() AND `+overlapsSQL+`
+			AND NOT (holder_agent_id = $3 AND holder_session = $4)
+		ORDER BY (resource = $2) DESC, created_at LIMIT 1`,
+		scopeKey, resource, agentID, sessionID).Scan(&holderID, &holderSession, &holderIntent, &expiresAt, &heldResource)
 
 	if err == nil {
-		if holderID == agentID && holderSession == sessionID {
-			// Your own lease returns allow
-			return &CheckResult{Decision: "allow"}, nil
+		reason := fmt.Sprintf("Resource '%s' is currently claimed by session '%s'.", resource, holderSession)
+		if heldResource != resource {
+			reason = fmt.Sprintf("Resource '%s' overlaps '%s', currently claimed by session '%s'.", resource, heldResource, holderSession)
 		}
 		return &CheckResult{
 			Decision: "block",
-			Reason:   fmt.Sprintf("Resource '%s' is currently claimed.", resource),
+			Reason:   reason,
 			Details: map[string]any{
 				"agent":      holderID,
 				"session":    holderSession,
-				"resource":   resource,
+				"resource":   heldResource,
 				"reason":     holderIntent,
 				"expires_at": expiresAt,
 			},
@@ -439,7 +486,7 @@ func (s *Store) CheckCoordination(ctx context.Context, scopeKey, resource, agent
 	// 2. Check for active intents by others
 	rows, err := s.Pool.Query(ctx, `SELECT agent_id, intent, expires_at 
 		FROM coordination_intents 
-		WHERE scope_key = $1 AND resource = $2 AND NOT (agent_id = $3 AND session = $4) AND expires_at > NOW()`,
+		WHERE scope_key = $1 AND `+overlapsSQL+` AND NOT (agent_id = $3 AND session = $4) AND expires_at > NOW()`,
 		scopeKey, resource, agentID, sessionID)
 	if err != nil {
 		return nil, err

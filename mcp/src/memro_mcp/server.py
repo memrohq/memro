@@ -508,10 +508,18 @@ def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolR
                 ttl = None
         res = agent.claim(resource=resource, intent=intent, session_id=session_id, ttl_seconds=ttl)
         if not res.get("granted"):
-            holder = res.get("holder", "unknown")
-            msg = f"Block: Resource '{resource}' is currently claimed by agent {holder}."
+            # Tools on one account share an agent id; the session names the tool.
+            session = res.get("holder_session")
+            who = session if session and session != "default" else f"agent {res.get('holder', 'unknown')}"
+            held = res.get("holder_resource")
+            where = f"'{held}', which overlaps '{resource}'" if held and held != resource else f"'{resource}'"
+            msg = f"Block: {where} is claimed by {who}"
+            if res.get("expires_at"):
+                msg += f" until {res.get('expires_at')}"
+            msg += "."
             if res.get("intent"):
                 msg += f" Intent: {res.get('intent')}."
+            msg += " Don't edit it; tell the user, or wait for it to be released."
             return CallToolResult(isError=True, content=[TextContent(type="text", text=msg)])
         msg = f"Resource '{resource}' claimed."
         if res.get("handoff_summary"):
@@ -606,6 +614,11 @@ class AuthMiddleware:
         if not session_id:
             sid = dict(scope.get("headers") or []).get(b"mcp-session-id", b"").decode().strip()
             session_id = f"mcp:{sid}" if sid else None
+        if not session_id:
+            # Stateless transport and no ?session_id= (tools connected before
+            # `memro connect` added it): tell tools apart by User-Agent.
+            session_id = _session_from_user_agent(
+                dict(scope.get("headers") or []).get(b"user-agent", b"").decode(errors="replace"))
         agent_id = token = None
         # Only the legacy SSE transport takes credentials in the URL, where
         # they end up in proxy logs; everything else needs the header.
@@ -631,6 +644,19 @@ class AuthMiddleware:
             current_auth_info.reset(t_auth)
             current_session_id.reset(t_sid)
             current_client_ip.reset(t_ip)
+
+# HTTP libraries and browsers that say nothing about which tool is calling.
+_GENERIC_AGENTS = {"mozilla", "node", "node-fetch", "undici", "axios", "python-httpx", "python-requests",
+                   "python-urllib", "aiohttp", "curl", "wget", "go-http-client", "okhttp", "java", "dart"}
+
+
+def _session_from_user_agent(ua: str):
+    """'claude-code/2.1 (cli)' -> 'ua:claude-code'; None for generic clients."""
+    product = re.sub(r"[^a-z0-9._-]", "", ua.strip().split(" ", 1)[0].split("/", 1)[0].lower())[:40]
+    if not product or product in _GENERIC_AGENTS:
+        return None
+    return f"ua:{product}"
+
 
 # --- ASGI SSE Handler ---
 

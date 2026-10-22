@@ -67,6 +67,12 @@ Existing `[CLAIMED]` procedural memories in the database remain intact, but all 
 - **MCP Server (`memro_mcp`)**: Deleted the in-memory `CoordinationEngine`. Tool handlers (`claim_task`, `release_task`, `handoff_task`, `pre_action_check`, `log_intent`, `get_active_work`, `get_active_context`) now route directly to the new API endpoints via the Agent SDK, and a new `heartbeat_task` tool was added. Tool descriptions updated to explicitly state that claims are shared across agents in the same account/space and expire after the TTL.
 - **SDKs (Go, Python, TypeScript)**: Added `Claim`, `Heartbeat`, `Release`, `Handoff`, `Check`, `Active`, and `LogIntent` methods. Python SDK provides a `with agent.claim("resource", intent=...):` context manager with automatic background heartbeating and release on exit.
 
+### 6. Amendment (2026-10-23): telling tools apart, and folders
+Found in production on the first two-tool test (Claude Code and Antigravity on one account):
+- **Every tool was the same holder.** The hosted MCP runs a stateless Streamable HTTP transport, so it never issues an `Mcp-Session-Id`. Every tool connected with one API key landed in session `default` and could claim straight over another tool. The session is now resolved as: `?session_id=` on the MCP URL, then `Mcp-Session-Id`, then the client's User-Agent product (`ua:claude-code`; generic HTTP libraries are ignored), then `default`. `memro connect` writes `?session_id=<tool id>` into every tool's URL.
+- **A folder claim didn't cover its files.** Leases matched the exact resource string, so a claim on `memro/bench` didn't block `memro/bench/run.py`. Claims and checks now treat path resources as a tree: a lease on a folder blocks claims and checks on paths inside it, and a lease on a path blocks claiming a folder that contains it. URLs and plain names still match exactly. Claims within one scope take a transaction-level advisory lock, so two overlapping claims can't both pass. A denied claim returns `holder_resource` when the conflicting lease is on a different path.
+- **Messages name the tool.** Tools on one account share an agent ID, so MCP block messages name the holder's session (the tool) instead.
+
 ## Consequences
 - Multi-agent teams sharing a tenant space or user account work safely without collision or race conditions.
 - Abandoned leases from crashed agents or sessions automatically expire after the TTL without blocking resources.

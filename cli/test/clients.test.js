@@ -13,7 +13,7 @@ process.env.XDG_CONFIG_HOME = path.join(HOME, ".config");
 process.env.CODEX_HOME = path.join(HOME, ".codex");
 process.env.MEMRO_NO_CLAUDE_CLI = "1";
 
-const { CLIENTS, MCP_REMOTE_VERSION, findClient, stripCodexServer } = await import("../src/clients.js");
+const { CLIENTS, MCP_REMOTE_VERSION, findClient, stripCodexServer, withSession } = await import("../src/clients.js");
 const conn = { mcpUrl: "https://mcp.memro.co/mcp", apiKey: "memro_sk_test" };
 
 beforeEach(() => {
@@ -132,4 +132,14 @@ test("Windsurf counts as installed only when the app or its command exists", () 
     process.env.PATH = savedPath;
   }
   assert.equal(windsurf.supportsScope("project"), false, "Windsurf has no per-project MCP config");
+});
+
+test("each tool's MCP URL carries its own coordination session", () => {
+  assert.equal(withSession("https://mcp.memro.co/mcp", "antigravity"), "https://mcp.memro.co/mcp?session_id=antigravity");
+  assert.equal(withSession("http://127.0.0.1:8080/mcp?x=1", "claude-code"), "http://127.0.0.1:8080/mcp?x=1&session_id=claude-code");
+  // A session the user set by hand is kept.
+  assert.equal(withSession("https://mcp.memro.co/mcp?session_id=mine", "cursor"), "https://mcp.memro.co/mcp?session_id=mine");
+  findClient("antigravity").add({ ...conn, mcpUrl: withSession(conn.mcpUrl, "antigravity") });
+  const cfg = JSON.parse(fs.readFileSync(findClient("antigravity").file(), "utf8"));
+  assert.equal(cfg.mcpServers.memro.serverUrl, "https://mcp.memro.co/mcp?session_id=antigravity");
 });

@@ -18,6 +18,7 @@ type claimResponse struct {
 	LeaseID        *uuid.UUID `json:"lease_id,omitempty"`
 	Holder         string     `json:"holder,omitempty"`
 	HolderSession  string     `json:"holder_session,omitempty"`
+	HolderResource string     `json:"holder_resource,omitempty"`
 	Intent         string     `json:"intent,omitempty"`
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 	HandoffSummary string     `json:"handoff_summary,omitempty"`
@@ -771,6 +772,62 @@ func TestCoordination_SameAgentDifferentSessionsBlock(t *testing.T) {
 	e.must(200, code, b, "holder release")
 	if r := claim("mcp:cursor"); !r.Granted {
 		t.Fatalf("after release the other session should be granted: %+v", r)
+	}
+}
+
+// A claim on a folder covers the files in it, and a claim on a file blocks
+// claiming its folder; unrelated paths with a shared prefix and URLs don't
+// overlap.
+func TestCoordination_FolderAndFileClaimsOverlap(t *testing.T) {
+	e := setup(t)
+	agent := newAgent(t)
+	if err := e.st.CreateIdentity(context.Background(), agent.id, nil, uuid.Nil); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	claim := func(res, session string) claimResponse {
+		n++
+		code, b := e.do(&agent, "v2", "POST", "/coordination/claim", j(map[string]any{"resource": res, "intent": fmt.Sprintf("edit %d", n), "session_id": session}), nil)
+		e.must(200, code, b, "claim "+res+" as "+session)
+		var r claimResponse
+		_ = json.Unmarshal(b, &r)
+		return r
+	}
+	check := func(res, session string) checkResponse {
+		n++
+		code, b := e.do(&agent, "v2", "POST", "/coordination/check", j(map[string]any{"resource": res, "intent": fmt.Sprintf("check %d", n), "session_id": session}), nil)
+		e.must(200, code, b, "check "+res+" as "+session)
+		var c checkResponse
+		_ = json.Unmarshal(b, &c)
+		return c
+	}
+
+	if r := claim("memro/bench", "claude-code"); !r.Granted {
+		t.Fatalf("folder claim should be granted: %+v", r)
+	}
+	if r := claim("memro/bench/longmemeval/run.py", "antigravity"); r.Granted || r.HolderResource != "memro/bench" || r.HolderSession != "claude-code" {
+		t.Fatalf("a file inside a claimed folder must be denied, naming the folder: %+v", r)
+	}
+	if c := check("./memro/bench//longmemeval/run.py", "antigravity"); c.Decision != "block" {
+		t.Fatalf("check on a file inside a claimed folder = %+v, want block", c)
+	}
+	if c := check("memro/bench/longmemeval/run.py", "claude-code"); c.Decision != "allow" {
+		t.Fatalf("the folder's holder may edit inside it: %+v", c)
+	}
+	if r := claim("memro/bench/longmemeval/run.py", "claude-code"); !r.Granted {
+		t.Fatalf("the folder's holder may claim a file inside it: %+v", r)
+	}
+	if r := claim("memro", "antigravity"); r.Granted {
+		t.Fatalf("a parent of a claimed path must be denied: %+v", r)
+	}
+	if r := claim("memro/benchmarks", "antigravity"); !r.Granted {
+		t.Fatalf("a sibling sharing a prefix is not inside the folder: %+v", r)
+	}
+	if r := claim("https://example.com/a", "claude-code"); !r.Granted {
+		t.Fatalf("url claim: %+v", r)
+	}
+	if r := claim("https://example.com/a/b", "antigravity"); !r.Granted {
+		t.Fatalf("URLs only overlap exactly: %+v", r)
 	}
 }
 
