@@ -1,7 +1,7 @@
 {
   "name": "@memro/sdk",
   "version": "0.2.0",
-  "description": "Official JavaScript/TypeScript SDK for Memro: long-term memory for AI agents",
+  "description": "Memro — Verified Memory Infrastructure for AI Agents (Official JavaScript/TypeScript SDK)",
   "main": "dist/cjs/index.js",
   "types": "dist/esm/index.d.ts",
   "files": [

@@ -1,0 +1,16 @@
+{
+  "name": "memro-typescript-example",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node --loader ts-node/esm index.ts",
+    "run": "node index.js"
+  },
+  "dependencies": {
+    "@memro/sdk": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}
