@@ -718,3 +718,113 @@ func TestCoordination_EndToEnd_TwoAgentsSameUserHandoff(t *testing.T) {
 		t.Fatalf("expected handoff from %q, got %q", agentA.id, claimB.HandoffFrom)
 	}
 }
+
+// Two tools on one account share an agent but are different sessions (the MCP
+// server sends each connection's Mcp-Session-Id). They must block each other.
+func TestCoordination_SameAgentDifferentSessionsBlock(t *testing.T) {
+	e := setup(t)
+	agent := newAgent(t)
+	if err := e.st.CreateIdentity(context.Background(), agent.id, nil, uuid.Nil); err != nil {
+		t.Fatal(err)
+	}
+	res := "src/shared.go"
+	n := 0
+	claim := func(session string) claimResponse {
+		n++ // identical signed bodies would trip the replay cache
+		code, b := e.do(&agent, "v2", "POST", "/coordination/claim", j(map[string]any{"resource": res, "intent": fmt.Sprintf("edit %d", n), "session_id": session}), nil)
+		e.must(200, code, b, "claim as "+session)
+		var r claimResponse
+		_ = json.Unmarshal(b, &r)
+		return r
+	}
+	if r := claim("mcp:claude-code"); !r.Granted {
+		t.Fatalf("first session should be granted: %+v", r)
+	}
+	if r := claim("mcp:cursor"); r.Granted || r.HolderSession != "mcp:claude-code" {
+		t.Fatalf("another session of the same agent must be denied: %+v", r)
+	}
+	code, b := e.do(&agent, "v2", "POST", "/coordination/check", j(map[string]any{"resource": res, "session_id": "mcp:cursor"}), nil)
+	var c checkResponse
+	_ = json.Unmarshal(b, &c)
+	if code != 200 || c.Decision != "block" {
+		t.Fatalf("check from the other session = %d %s, want block", code, b)
+	}
+	code, b = e.do(&agent, "v2", "POST", "/coordination/check", j(map[string]any{"resource": res, "session_id": "mcp:claude-code"}), nil)
+	_ = json.Unmarshal(b, &c)
+	if code != 200 || c.Decision != "allow" {
+		t.Fatalf("check from the holder = %d %s, want allow", code, b)
+	}
+	// The other session can't release or hand off by resource name.
+	code, _ = e.do(&agent, "v2", "POST", "/coordination/release", j(map[string]any{"resource": res, "session_id": "mcp:cursor"}), nil)
+	if code == 200 {
+		t.Fatal("another session released the holder's lease")
+	}
+	code, _ = e.do(&agent, "v2", "POST", "/coordination/handoff", j(map[string]any{"resource": res, "summary": "x", "session_id": "mcp:cursor"}), nil)
+	if code != 409 {
+		t.Fatalf("handoff from another session = %d, want 409", code)
+	}
+	// The holder re-claiming extends its own lease.
+	if r := claim("mcp:claude-code"); !r.Granted {
+		t.Fatalf("holder re-claim should extend: %+v", r)
+	}
+	code, b = e.do(&agent, "v2", "POST", "/coordination/release", j(map[string]any{"resource": res, "session_id": "mcp:claude-code"}), nil)
+	e.must(200, code, b, "holder release")
+	if r := claim("mcp:cursor"); !r.Granted {
+		t.Fatalf("after release the other session should be granted: %+v", r)
+	}
+}
+
+// Handing off work you only logged an intent for (no lease) still records the
+// note for the next claimer; MCP clients did this before leases existed.
+func TestCoordination_HandoffWithoutLeaseRecordsNote(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	email := fmt.Sprintf("handoff-nolease-%d@example.com", time.Now().UnixNano())
+	if err := e.st.EnsureUser(ctx, email, uuid.Nil); err != nil {
+		t.Fatal(err)
+	}
+	u, err := e.st.GetUserByEmail(ctx, email, uuid.Nil)
+	if err != nil || u == nil {
+		t.Fatalf("user: %v", err)
+	}
+	a, b := newAgent(t), newAgent(t)
+	for _, ag := range []*agent{&a, &b} {
+		if err := e.st.CreateIdentity(ctx, ag.id, &u.ID, uuid.Nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, body := e.do(&a, "v2", "POST", "/coordination/handoff", j(map[string]any{"resource": "docs", "summary": "quickstart drafted"}), nil)
+	e.must(200, code, body, "handoff without a lease")
+	code, body = e.do(&b, "v2", "POST", "/coordination/claim", j(map[string]any{"resource": "docs", "intent": "finish"}), nil)
+	e.must(200, code, body, "claim after handoff note")
+	var r claimResponse
+	_ = json.Unmarshal(body, &r)
+	if !r.Granted || r.HandoffSummary != "quickstart drafted" || r.HandoffFrom != a.id {
+		t.Fatalf("claim after a lease-less handoff = %+v", r)
+	}
+}
+
+func TestCoordination_PurgeKeepsActiveLeases(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	scope := "agent:purge-" + uuid.NewString()
+	if _, err := e.st.ClaimLease(ctx, scope, "keep.go", "a", "s", "", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.ClaimLease(ctx, scope, "old.go", "a", "s", "", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.ReleaseLease(ctx, scope, "a", "s", nil, "old.go", "completed"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.Pool.Exec(ctx, `UPDATE coordination_leases SET released_at = NOW() - INTERVAL '31 days' WHERE scope_key = $1 AND resource = 'old.go'`, scope); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.PurgeCoordination(ctx, 30*24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := e.st.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM coordination_leases WHERE scope_key = $1`, scope).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("after purge %d rows (err %v), want only the active lease", n, err)
+	}
+}

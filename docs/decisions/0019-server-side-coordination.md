@@ -24,7 +24,7 @@ Claims and intents never leak across scopes. Isolation is strictly enforced in S
 ### 2. Dedicated Storage & Indexing
 We add dedicated relational tables via migration `0030_coordination_leases.sql`:
 - **`coordination_leases`**:
-  - Columns: `id`, `scope_key`, `resource` (normalized: trimmed and path cleaned via `path.Clean`), `holder_agent_id`, `holder_session`, `intent`, `created_at`, `heartbeat_at`, `expires_at`, `released_at`, `release_status` (`completed` | `abandoned` | `expired` | `handoff`), `handoff_summary`, `handoff_to`.
+  - Columns: `id`, `scope_key`, `resource` (trimmed; values that look like file paths, containing `/` but not `://`, are cleaned with `path.Clean`, so URLs and plain names are kept as given), `holder_agent_id`, `holder_session`, `intent`, `created_at`, `heartbeat_at`, `expires_at`, `released_at`, `release_status` (`completed` | `abandoned` | `expired` | `handoff`), `handoff_summary`, `handoff_to`.
   - Partial Unique Index:
     ```sql
     CREATE UNIQUE INDEX idx_coordination_leases_active
@@ -41,7 +41,7 @@ We add dedicated relational tables via migration `0030_coordination_leases.sql`:
   In a single transaction:
   1. Reaps expired leases on `(scope_key, resource)`.
   2. Queries active lease with `FOR UPDATE`. If held by the same agent, it idempotently extends the lease TTL and updates the intent.
-  3. If held by another agent, returns `granted: false` with holder, intent, and expiry details.
+  3. If held by another holder, returns `granted: false` with holder, holder session, intent, and expiry details.
   4. If no active lease exists, inspects the newest previous handoff on this resource to populate `handoff_summary`.
   5. Inserts the new lease using `INSERT ... ON CONFLICT (scope_key, resource) WHERE released_at IS NULL DO NOTHING RETURNING expires_at`. If a concurrent transaction won the insertion race, it gracefully falls back to returning `granted: false` with the winner's details.
   - Returns: `{ "granted": true, "lease_id": "...", "expires_at": "...", "handoff_summary": "..." }` or `{ "granted": false, "holder": "...", "intent": "...", "expires_at": "..." }`.
@@ -51,7 +51,7 @@ We add dedicated relational tables via migration `0030_coordination_leases.sql`:
 - **Release (`POST /coordination/release`)**:
   Holder only (or account admin). Sets `released_at = NOW()` and `release_status` (`completed` | `abandoned`).
 - **Handoff (`POST /coordination/handoff`)**:
-  Holder only. Sets `released_at = NOW(), release_status = 'handoff'`, saving `handoff_summary` and optional `handoff_to` (`next_agent_id`). When the next claimer claims the resource, `handoff_summary` is returned in their claim response.
+  Holder only. Sets `released_at = NOW(), release_status = 'handoff'`, saving `handoff_summary` and optional `handoff_to` (`next_agent_id`). When the next claimer claims the resource, `handoff_summary` is returned in their claim response. With no active lease (work that only had an intent), the handoff note is still recorded, as an already-released lease row; it fails with `409` only when another holder has the resource.
 - **Check (`POST /coordination/check`)**:
   Non-blocking check returning:
   - `allow`: Unclaimed, expired, or currently held by the calling agent.
@@ -72,3 +72,13 @@ Existing `[CLAIMED]` procedural memories in the database remain intact, but all 
 - Abandoned leases from crashed agents or sessions automatically expire after the TTL without blocking resources.
 - Search and recall quality is preserved without coordination memory noise.
 - Prometheus counters `memro_coordination_claims_total`, `memro_coordination_expirations_total`, and `memro_coordination_handoffs_total` provide real-time observability into multi-agent coordination.
+
+## Holders are agent + session (amendment)
+The tools on one account (Claude Code, Cursor, Codex connected with `memro-cli connect`) share one agent and one API key. If a lease belonged to the agent alone, one tool's claim would not block the others, the very case coordination exists for. So a lease belongs to **agent + session**:
+- The session is the request's `session_id`, else the `X-Session-Id` header, else the credential (`key:<API key id>`, `sig:<signing key>`), else `dashboard` for dashboard sessions.
+- The hosted MCP server sends each client connection's `Mcp-Session-Id` (as `mcp:<id>`), unless the connection URL sets `?session_id=`.
+- Re-claim, `check` → `allow`, and heartbeat/release/handoff **by resource** match agent and session. By `lease_id` (an unguessable ID only the holder received) the agent must match, so a restarted process can still release its lease.
+- Intents carry their session too; `check` warns about intents from every other agent or session.
+
+## Retention
+Released leases and expired intents are purged after 30 days by an hourly job (`RunCoordinationPurge`). Active leases are never purged.

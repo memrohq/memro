@@ -9,6 +9,28 @@ import (
 	"github.com/memrohq/memro/server/internal/store"
 )
 
+// coordinationSession identifies which session of an agent is acting, so two
+// tools sharing one agent (Claude Code and Cursor on one account) are
+// different holders: the request's session_id, else X-Session-Id, else the
+// credential (API key or signing key), else the dashboard.
+func coordinationSession(r *http.Request, agent Agent, fromBody string) string {
+	if fromBody != "" {
+		return fromBody
+	}
+	if h := r.Header.Get("X-Session-Id"); h != "" {
+		return h
+	}
+	switch {
+	case agent.Via == "api_key" && agent.KeyID != nil:
+		return "key:" + agent.KeyID.String()
+	case agent.Via == "signature" && agent.SigningKey != "":
+		return "sig:" + agent.SigningKey
+	case agent.Via == "session":
+		return "dashboard"
+	}
+	return store.DefaultCoordinationSession
+}
+
 // POST /coordination/claim
 func (s *Server) coordinationClaim(w http.ResponseWriter, r *http.Request) {
 	agent := agentFrom(r)
@@ -26,13 +48,7 @@ func (s *Server) coordinationClaim(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "resource is required")
 		return
 	}
-	sessionID := req.SessionID
-	if sessionID == "" {
-		sessionID = r.Header.Get("X-Session-Id")
-	}
-	if sessionID == "" {
-		sessionID = "default"
-	}
+	sessionID := coordinationSession(r, agent, req.SessionID)
 	ttl := time.Duration(req.TTLSeconds) * time.Second
 
 	scopeKey := store.CoordinationScopeKey(agent.TenantID, agent.UserID, agent.ID)
@@ -51,6 +67,7 @@ func (s *Server) coordinationHeartbeat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Resource   string     `json:"resource"`
 		LeaseID    *uuid.UUID `json:"lease_id"`
+		SessionID  string     `json:"session_id"`
 		TTLSeconds int        `json:"ttl_seconds"`
 	}
 	if err := decodeJSON(body(r), &req); err != nil {
@@ -64,7 +81,7 @@ func (s *Server) coordinationHeartbeat(w http.ResponseWriter, r *http.Request) {
 	ttl := time.Duration(req.TTLSeconds) * time.Second
 
 	scopeKey := store.CoordinationScopeKey(agent.TenantID, agent.UserID, agent.ID)
-	newExpires, err := s.store.HeartbeatLease(r.Context(), scopeKey, agent.ID, req.LeaseID, req.Resource, ttl)
+	newExpires, err := s.store.HeartbeatLease(r.Context(), scopeKey, agent.ID, coordinationSession(r, agent, req.SessionID), req.LeaseID, req.Resource, ttl)
 	if err != nil {
 		if errors.Is(err, store.ErrLeaseNotFound) {
 			httpError(w, http.StatusNotFound, "Active lease not found or not owned by caller")
@@ -84,9 +101,10 @@ func (s *Server) coordinationHeartbeat(w http.ResponseWriter, r *http.Request) {
 func (s *Server) coordinationRelease(w http.ResponseWriter, r *http.Request) {
 	agent := agentFrom(r)
 	var req struct {
-		Resource string     `json:"resource"`
-		LeaseID  *uuid.UUID `json:"lease_id"`
-		Status   string     `json:"status"` // completed | abandoned
+		Resource  string     `json:"resource"`
+		LeaseID   *uuid.UUID `json:"lease_id"`
+		SessionID string     `json:"session_id"`
+		Status    string     `json:"status"` // completed | abandoned
 	}
 	if err := decodeJSON(body(r), &req); err != nil {
 		httpError(w, http.StatusBadRequest, "Invalid JSON body: "+err.Error())
@@ -98,7 +116,7 @@ func (s *Server) coordinationRelease(w http.ResponseWriter, r *http.Request) {
 	}
 
 	scopeKey := store.CoordinationScopeKey(agent.TenantID, agent.UserID, agent.ID)
-	if err := s.store.ReleaseLease(r.Context(), scopeKey, agent.ID, req.LeaseID, req.Resource, req.Status); err != nil {
+	if err := s.store.ReleaseLease(r.Context(), scopeKey, agent.ID, coordinationSession(r, agent, req.SessionID), req.LeaseID, req.Resource, req.Status); err != nil {
 		if errors.Is(err, store.ErrLeaseNotFound) {
 			httpError(w, http.StatusNotFound, "Active lease not found or not owned by caller")
 			return
@@ -119,6 +137,7 @@ func (s *Server) coordinationHandoff(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Resource    string     `json:"resource"`
 		LeaseID     *uuid.UUID `json:"lease_id"`
+		SessionID   string     `json:"session_id"`
 		Summary     string     `json:"summary"`
 		NextAgentID string     `json:"next_agent_id"`
 	}
@@ -136,7 +155,11 @@ func (s *Server) coordinationHandoff(w http.ResponseWriter, r *http.Request) {
 	}
 
 	scopeKey := store.CoordinationScopeKey(agent.TenantID, agent.UserID, agent.ID)
-	if err := s.store.HandoffLease(r.Context(), scopeKey, agent.ID, req.LeaseID, req.Resource, req.Summary, req.NextAgentID); err != nil {
+	if err := s.store.HandoffLease(r.Context(), scopeKey, agent.ID, coordinationSession(r, agent, req.SessionID), req.LeaseID, req.Resource, req.Summary, req.NextAgentID); err != nil {
+		if errors.Is(err, store.ErrLeaseHeldByOther) {
+			httpError(w, http.StatusConflict, "Resource is held by another agent or session")
+			return
+		}
 		if errors.Is(err, store.ErrLeaseNotFound) {
 			httpError(w, http.StatusNotFound, "Active lease not found or not owned by caller")
 			return
@@ -155,8 +178,9 @@ func (s *Server) coordinationHandoff(w http.ResponseWriter, r *http.Request) {
 func (s *Server) coordinationCheck(w http.ResponseWriter, r *http.Request) {
 	agent := agentFrom(r)
 	var req struct {
-		Resource string `json:"resource"`
-		Intent   string `json:"intent"`
+		Resource  string `json:"resource"`
+		Intent    string `json:"intent"`
+		SessionID string `json:"session_id"`
 	}
 	if err := decodeJSON(body(r), &req); err != nil {
 		httpError(w, http.StatusBadRequest, "Invalid JSON body: "+err.Error())
@@ -168,7 +192,7 @@ func (s *Server) coordinationCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	scopeKey := store.CoordinationScopeKey(agent.TenantID, agent.UserID, agent.ID)
-	result, err := s.store.CheckCoordination(r.Context(), scopeKey, req.Resource, agent.ID, req.Intent)
+	result, err := s.store.CheckCoordination(r.Context(), scopeKey, req.Resource, agent.ID, coordinationSession(r, agent, req.SessionID), req.Intent)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "Failed to check coordination: "+err.Error())
 		return
@@ -213,6 +237,7 @@ func (s *Server) coordinationActive(w http.ResponseWriter, r *http.Request) {
 		intentList[i] = map[string]any{
 			"id":         it.ID,
 			"agent":      it.AgentID,
+			"session_id": it.Session,
 			"resource":   it.Resource,
 			"intent":     it.Intent,
 			"created_at": it.CreatedAt,
@@ -233,6 +258,7 @@ func (s *Server) coordinationIntent(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Resource   string `json:"resource"`
 		Intent     string `json:"intent"`
+		SessionID  string `json:"session_id"`
 		TTLSeconds int    `json:"ttl_seconds"`
 	}
 	if err := decodeJSON(body(r), &req); err != nil {
@@ -246,7 +272,7 @@ func (s *Server) coordinationIntent(w http.ResponseWriter, r *http.Request) {
 	ttl := time.Duration(req.TTLSeconds) * time.Second
 
 	scopeKey := store.CoordinationScopeKey(agent.TenantID, agent.UserID, agent.ID)
-	it, err := s.store.LogIntent(r.Context(), scopeKey, req.Resource, agent.ID, req.Intent, ttl)
+	it, err := s.store.LogIntent(r.Context(), scopeKey, req.Resource, agent.ID, coordinationSession(r, agent, req.SessionID), req.Intent, ttl)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "Failed to log intent: "+err.Error())
 		return

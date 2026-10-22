@@ -22,6 +22,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_coordination_leases_active
 ON coordination_leases (scope_key, resource) 
 WHERE released_at IS NULL;
 
+CREATE INDEX IF NOT EXISTS idx_coordination_leases_released
+ON coordination_leases (released_at) WHERE released_at IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_coordination_leases_scope 
 ON coordination_leases (scope_key, expires_at);
 
@@ -30,6 +33,7 @@ CREATE TABLE IF NOT EXISTS coordination_intents (
     scope_key TEXT NOT NULL,
     resource TEXT NOT NULL,
     agent_id TEXT NOT NULL,
+    session TEXT NOT NULL DEFAULT 'default',
     intent TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL

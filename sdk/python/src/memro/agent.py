@@ -328,9 +328,11 @@ class Agent:
         resource: Optional[str] = None,
         lease_id: Optional[str] = None,
         ttl_seconds: Optional[int] = None,
+        session_id: Optional[str] = None,
     ) -> dict:
         return self.client.coordination_heartbeat(
-            self.agent_id, self._private_key, resource=resource, lease_id=lease_id, ttl_seconds=ttl_seconds
+            self.agent_id, self._private_key, resource=resource, lease_id=lease_id, ttl_seconds=ttl_seconds,
+            session_id=session_id,
         )
 
     def release(
@@ -338,9 +340,10 @@ class Agent:
         resource: Optional[str] = None,
         lease_id: Optional[str] = None,
         status: str = "completed",
+        session_id: Optional[str] = None,
     ) -> dict:
         return self.client.coordination_release(
-            self.agent_id, self._private_key, resource=resource, lease_id=lease_id, status=status
+            self.agent_id, self._private_key, resource=resource, lease_id=lease_id, status=status, session_id=session_id
         )
 
     def handoff(
@@ -349,19 +352,28 @@ class Agent:
         lease_id: Optional[str] = None,
         summary: str = "",
         next_agent_id: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> dict:
         return self.client.coordination_handoff(
-            self.agent_id, self._private_key, resource=resource, lease_id=lease_id, summary=summary, next_agent_id=next_agent_id
+            self.agent_id, self._private_key, resource=resource, lease_id=lease_id, summary=summary,
+            next_agent_id=next_agent_id, session_id=session_id,
         )
 
-    def check(self, resource: str, intent: str = "") -> dict:
-        return self.client.coordination_check(self.agent_id, self._private_key, resource=resource, intent=intent)
+    def check(self, resource: str, intent: str = "", session_id: Optional[str] = None) -> dict:
+        return self.client.coordination_check(
+            self.agent_id, self._private_key, resource=resource, intent=intent, session_id=session_id
+        )
 
     def active(self, prefix: Optional[str] = None) -> dict:
         return self.client.coordination_active(self.agent_id, self._private_key, resource=prefix)
 
-    def log_intent(self, resource: str, intent: str, ttl_seconds: Optional[int] = None) -> dict:
-        return self.client.coordination_intent(self.agent_id, self._private_key, resource=resource, intent=intent, ttl_seconds=ttl_seconds)
+    def log_intent(
+        self, resource: str, intent: str, ttl_seconds: Optional[int] = None, session_id: Optional[str] = None
+    ) -> dict:
+        return self.client.coordination_intent(
+            self.agent_id, self._private_key, resource=resource, intent=intent, ttl_seconds=ttl_seconds,
+            session_id=session_id,
+        )
 
     def __repr__(self) -> str:
         return f"Agent(id={self.agent_id[:16]}...)"
@@ -392,7 +404,7 @@ class ClaimContext(dict):
             interval = max(5, self.ttl_seconds // 3)
             while not self._stop_heartbeat.wait(interval):
                 try:
-                    self.agent.heartbeat(resource=self.resource, ttl_seconds=self.ttl_seconds)
+                    self.agent.heartbeat(lease_id=self.get("lease_id"), resource=self.resource, ttl_seconds=self.ttl_seconds)
                 except Exception:
                     pass
 
@@ -405,7 +417,7 @@ class ClaimContext(dict):
             self._stop_heartbeat.set()
         status = "abandoned" if exc_type is not None else "completed"
         try:
-            self.agent.release(resource=self.resource, status=status)
+            self.agent.release(lease_id=self.get("lease_id"), resource=self.resource, status=status)
         except Exception:
             pass
         return False

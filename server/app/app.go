@@ -126,6 +126,7 @@ func Run(ctx context.Context, cfg config.Config, opts ...Option) error {
 
 	go ix.Run(ctx)
 	go indexer.RunGraphMaintenance(ctx, st)
+	go store.RunCoordinationPurge(ctx, st)
 	go conns.Run(ctx)
 
 	srv := api.NewServer(api.Deps{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path"
 	"strings"
 	"time"
@@ -16,6 +17,9 @@ import (
 
 var (
 	ErrLeaseNotFound = errors.New("coordination lease not found, expired, or not owned by caller")
+	// ErrLeaseHeldByOther means someone else (another agent, or another
+	// session of the same agent) holds the resource.
+	ErrLeaseHeldByOther = errors.New("resource is held by another agent or session")
 )
 
 const (
@@ -45,6 +49,7 @@ type Intent struct {
 	ScopeKey  string    `json:"scope_key"`
 	Resource  string    `json:"resource"`
 	AgentID   string    `json:"agent_id"`
+	Session   string    `json:"session"`
 	Intent    string    `json:"intent"`
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`
@@ -69,12 +74,24 @@ type CheckResult struct {
 }
 
 // NormalizeResource trims whitespace and normalizes path separators.
+// NormalizeResource trims r and, when it looks like a file path, cleans it
+// ("./src//a.go" -> "src/a.go"). URLs and plain names are kept as given.
 func NormalizeResource(r string) string {
 	r = strings.TrimSpace(r)
-	if r == "" {
-		return ""
+	if r == "" || strings.Contains(r, "://") || !strings.Contains(r, "/") {
+		return r
 	}
 	return path.Clean(r)
+}
+
+// DefaultCoordinationSession is the session used when a caller names none.
+const DefaultCoordinationSession = "default"
+
+func sessionOrDefault(s string) string {
+	if s == "" {
+		return DefaultCoordinationSession
+	}
+	return s
 }
 
 // CoordinationScopeKey derives the isolation scope:
@@ -111,9 +128,7 @@ func (s *Store) ClaimLease(ctx context.Context, scopeKey, resource, agentID, ses
 		return nil, fmt.Errorf("resource is required")
 	}
 	ttl = clampTTL(ttl)
-	if sessionID == "" {
-		sessionID = "default"
-	}
+	sessionID = sessionOrDefault(sessionID)
 
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -148,8 +163,10 @@ func (s *Store) ClaimLease(ctx context.Context, scopeKey, resource, agentID, ses
 
 	if err == nil {
 		// Active lease exists
-		if existing.holderAgentID == agentID {
-			// Re-claiming your own active lease extends it (idempotent)
+		if existing.holderAgentID == agentID && existing.holderSession == sessionID {
+			// Re-claiming your own active lease extends it (idempotent). Another
+			// session of the same agent (say Cursor and Claude Code on one
+			// account) is a different holder and is denied below.
 			var newExpires time.Time
 			updateSQL := `UPDATE coordination_leases 
 				SET expires_at = NOW() + $2, heartbeat_at = NOW(),
@@ -255,8 +272,9 @@ func (s *Store) ClaimLease(ctx context.Context, scopeKey, resource, agentID, ses
 }
 
 // HeartbeatLease extends expires_at for the holder's lease.
-func (s *Store) HeartbeatLease(ctx context.Context, scopeKey, agentID string, leaseID *uuid.UUID, resource string, ttl time.Duration) (*time.Time, error) {
+func (s *Store) HeartbeatLease(ctx context.Context, scopeKey, agentID, sessionID string, leaseID *uuid.UUID, resource string, ttl time.Duration) (*time.Time, error) {
 	ttl = clampTTL(ttl)
+	sessionID = sessionOrDefault(sessionID)
 	resource = NormalizeResource(resource)
 
 	var newExpires time.Time
@@ -269,8 +287,8 @@ func (s *Store) HeartbeatLease(ctx context.Context, scopeKey, agentID string, le
 	} else if resource != "" {
 		err = s.Pool.QueryRow(ctx, `UPDATE coordination_leases 
 			SET expires_at = NOW() + $4, heartbeat_at = NOW()
-			WHERE resource = $1 AND scope_key = $2 AND holder_agent_id = $3 AND released_at IS NULL AND expires_at > NOW()
-			RETURNING expires_at`, resource, scopeKey, agentID, ttl).Scan(&newExpires)
+			WHERE resource = $1 AND scope_key = $2 AND holder_agent_id = $3 AND holder_session = $5 AND released_at IS NULL AND expires_at > NOW()
+			RETURNING expires_at`, resource, scopeKey, agentID, ttl, sessionID).Scan(&newExpires)
 	} else {
 		return nil, fmt.Errorf("lease_id or resource is required")
 	}
@@ -282,7 +300,8 @@ func (s *Store) HeartbeatLease(ctx context.Context, scopeKey, agentID string, le
 }
 
 // ReleaseLease releases the active lease held by the caller.
-func (s *Store) ReleaseLease(ctx context.Context, scopeKey, agentID string, leaseID *uuid.UUID, resource, status string) error {
+func (s *Store) ReleaseLease(ctx context.Context, scopeKey, agentID, sessionID string, leaseID *uuid.UUID, resource, status string) error {
+	sessionID = sessionOrDefault(sessionID)
 	if status != "completed" && status != "abandoned" {
 		status = "completed"
 	}
@@ -298,8 +317,8 @@ func (s *Store) ReleaseLease(ctx context.Context, scopeKey, agentID string, leas
 	} else if resource != "" {
 		tag, err = s.Pool.Exec(ctx, `UPDATE coordination_leases 
 			SET released_at = NOW(), release_status = $4
-			WHERE resource = $1 AND scope_key = $2 AND holder_agent_id = $3 AND released_at IS NULL`,
-			resource, scopeKey, agentID, status)
+			WHERE resource = $1 AND scope_key = $2 AND holder_agent_id = $3 AND holder_session = $5 AND released_at IS NULL`,
+			resource, scopeKey, agentID, status, sessionID)
 	} else {
 		return fmt.Errorf("lease_id or resource is required")
 	}
@@ -313,42 +332,77 @@ func (s *Store) ReleaseLease(ctx context.Context, scopeKey, agentID string, leas
 	return nil
 }
 
-// HandoffLease releases a lease with status 'handoff' and records summary for next claimer.
-func (s *Store) HandoffLease(ctx context.Context, scopeKey, agentID string, leaseID *uuid.UUID, resource, summary, nextAgentID string) error {
+// HandoffLease releases the caller's lease with status 'handoff' and records
+// the summary for the next claimer. With no active lease, the handoff note is
+// still recorded (as an already-released lease), so tools can hand off work
+// they only logged an intent for. It fails only when someone else holds the
+// resource.
+func (s *Store) HandoffLease(ctx context.Context, scopeKey, agentID, sessionID string, leaseID *uuid.UUID, resource, summary, nextAgentID string) error {
 	resource = NormalizeResource(resource)
+	sessionID = sessionOrDefault(sessionID)
 	var nextTo *string
 	if nextAgentID != "" {
 		nextTo = &nextAgentID
 	}
-
-	var tag pgconn.CommandTag
-	var err error
-	if leaseID != nil {
-		tag, err = s.Pool.Exec(ctx, `UPDATE coordination_leases 
-			SET released_at = NOW(), release_status = 'handoff', handoff_summary = $4, handoff_to = $5
-			WHERE id = $1 AND scope_key = $2 AND holder_agent_id = $3 AND released_at IS NULL`,
-			*leaseID, scopeKey, agentID, summary, nextTo)
-	} else if resource != "" {
-		tag, err = s.Pool.Exec(ctx, `UPDATE coordination_leases 
-			SET released_at = NOW(), release_status = 'handoff', handoff_summary = $4, handoff_to = $5
-			WHERE resource = $1 AND scope_key = $2 AND holder_agent_id = $3 AND released_at IS NULL`,
-			resource, scopeKey, agentID, summary, nextTo)
-	} else {
+	if leaseID == nil && resource == "" {
 		return fmt.Errorf("lease_id or resource is required")
 	}
 
+	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrLeaseNotFound
+	defer tx.Rollback(ctx)
+
+	var tag pgconn.CommandTag
+	if leaseID != nil {
+		tag, err = tx.Exec(ctx, `UPDATE coordination_leases
+			SET released_at = NOW(), release_status = 'handoff', handoff_summary = $4, handoff_to = $5
+			WHERE id = $1 AND scope_key = $2 AND holder_agent_id = $3 AND released_at IS NULL`,
+			*leaseID, scopeKey, agentID, summary, nextTo)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrLeaseNotFound
+		}
+	} else {
+		tag, err = tx.Exec(ctx, `UPDATE coordination_leases
+			SET released_at = NOW(), release_status = 'handoff', handoff_summary = $4, handoff_to = $5
+			WHERE resource = $1 AND scope_key = $2 AND holder_agent_id = $3 AND holder_session = $6 AND released_at IS NULL`,
+			resource, scopeKey, agentID, summary, nextTo, sessionID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			var held bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM coordination_leases
+				WHERE scope_key = $1 AND resource = $2 AND released_at IS NULL AND expires_at > NOW())`,
+				scopeKey, resource).Scan(&held); err != nil {
+				return err
+			}
+			if held {
+				return ErrLeaseHeldByOther
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO coordination_leases
+				(id, scope_key, resource, holder_agent_id, holder_session, intent, created_at, heartbeat_at, expires_at,
+				 released_at, release_status, handoff_summary, handoff_to)
+				VALUES ($1, $2, $3, $4, $5, '', NOW(), NOW(), NOW(), NOW(), 'handoff', $6, $7)`,
+				uuid.New(), scopeKey, resource, agentID, sessionID, summary, nextTo); err != nil {
+				return err
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
 	}
 	metrics.CoordinationHandoffs.Inc()
 	return nil
 }
 
 // CheckCoordination returns allow, warn (active intent by others), or block (active lease by others).
-func (s *Store) CheckCoordination(ctx context.Context, scopeKey, resource, agentID, intent string) (*CheckResult, error) {
+func (s *Store) CheckCoordination(ctx context.Context, scopeKey, resource, agentID, sessionID, intent string) (*CheckResult, error) {
+	sessionID = sessionOrDefault(sessionID)
 	resource = NormalizeResource(resource)
 	if resource == "" {
 		return nil, fmt.Errorf("resource is required")
@@ -363,7 +417,7 @@ func (s *Store) CheckCoordination(ctx context.Context, scopeKey, resource, agent
 		scopeKey, resource).Scan(&holderID, &holderSession, &holderIntent, &expiresAt)
 
 	if err == nil {
-		if holderID == agentID {
+		if holderID == agentID && holderSession == sessionID {
 			// Your own lease returns allow
 			return &CheckResult{Decision: "allow"}, nil
 		}
@@ -385,8 +439,8 @@ func (s *Store) CheckCoordination(ctx context.Context, scopeKey, resource, agent
 	// 2. Check for active intents by others
 	rows, err := s.Pool.Query(ctx, `SELECT agent_id, intent, expires_at 
 		FROM coordination_intents 
-		WHERE scope_key = $1 AND resource = $2 AND agent_id != $3 AND expires_at > NOW()`,
-		scopeKey, resource, agentID)
+		WHERE scope_key = $1 AND resource = $2 AND NOT (agent_id = $3 AND session = $4) AND expires_at > NOW()`,
+		scopeKey, resource, agentID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -461,12 +515,12 @@ func (s *Store) ActiveCoordination(ctx context.Context, scopeKey, resourcePrefix
 
 	var intentRows pgx.Rows
 	if resourcePrefix != "" {
-		intentRows, err = s.Pool.Query(ctx, `SELECT id, scope_key, resource, agent_id, intent, created_at, expires_at
+		intentRows, err = s.Pool.Query(ctx, `SELECT id, scope_key, resource, agent_id, session, intent, created_at, expires_at
 			FROM coordination_intents 
 			WHERE scope_key = $1 AND expires_at > NOW() AND (resource = $2 OR resource LIKE $2 || '/%')
 			ORDER BY created_at DESC`, scopeKey, resourcePrefix)
 	} else {
-		intentRows, err = s.Pool.Query(ctx, `SELECT id, scope_key, resource, agent_id, intent, created_at, expires_at
+		intentRows, err = s.Pool.Query(ctx, `SELECT id, scope_key, resource, agent_id, session, intent, created_at, expires_at
 			FROM coordination_intents 
 			WHERE scope_key = $1 AND expires_at > NOW()
 			ORDER BY created_at DESC`, scopeKey)
@@ -479,7 +533,7 @@ func (s *Store) ActiveCoordination(ctx context.Context, scopeKey, resourcePrefix
 	intents := []Intent{}
 	for intentRows.Next() {
 		var it Intent
-		if err := intentRows.Scan(&it.ID, &it.ScopeKey, &it.Resource, &it.AgentID, &it.Intent, &it.CreatedAt, &it.ExpiresAt); err != nil {
+		if err := intentRows.Scan(&it.ID, &it.ScopeKey, &it.Resource, &it.AgentID, &it.Session, &it.Intent, &it.CreatedAt, &it.ExpiresAt); err != nil {
 			return nil, nil, err
 		}
 		intents = append(intents, it)
@@ -492,7 +546,8 @@ func (s *Store) ActiveCoordination(ctx context.Context, scopeKey, resourcePrefix
 }
 
 // LogIntent records a soft, non-blocking intent.
-func (s *Store) LogIntent(ctx context.Context, scopeKey, resource, agentID, intent string, ttl time.Duration) (*Intent, error) {
+func (s *Store) LogIntent(ctx context.Context, scopeKey, resource, agentID, sessionID, intent string, ttl time.Duration) (*Intent, error) {
+	sessionID = sessionOrDefault(sessionID)
 	resource = NormalizeResource(resource)
 	if resource == "" {
 		return nil, fmt.Errorf("resource is required")
@@ -501,10 +556,10 @@ func (s *Store) LogIntent(ctx context.Context, scopeKey, resource, agentID, inte
 	id := uuid.New()
 	var createdAt, expiresAt time.Time
 	err := s.Pool.QueryRow(ctx, `INSERT INTO coordination_intents 
-		(id, scope_key, resource, agent_id, intent, created_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, NOW(), NOW() + $6)
+		(id, scope_key, resource, agent_id, session, intent, created_at, expires_at)
+		VALUES ($1, $2, $3, $4, $7, $5, NOW(), NOW() + $6)
 		RETURNING created_at, expires_at`,
-		id, scopeKey, resource, agentID, intent, ttl).Scan(&createdAt, &expiresAt)
+		id, scopeKey, resource, agentID, intent, ttl, sessionID).Scan(&createdAt, &expiresAt)
 	if err != nil {
 		return nil, err
 	}
@@ -513,8 +568,43 @@ func (s *Store) LogIntent(ctx context.Context, scopeKey, resource, agentID, inte
 		ScopeKey:  scopeKey,
 		Resource:  resource,
 		AgentID:   agentID,
+		Session:   sessionID,
 		Intent:    intent,
 		CreatedAt: createdAt,
 		ExpiresAt: expiresAt,
 	}, nil
+}
+
+// coordinationRetention is how long released leases and expired intents are
+// kept (for handoff notes and audit) before they are purged.
+const coordinationRetention = 30 * 24 * time.Hour
+
+// PurgeCoordination deletes leases released, and intents expired, before
+// olderThan ago. Active leases are never touched.
+func (s *Store) PurgeCoordination(ctx context.Context, olderThan time.Duration) (int64, error) {
+	a, err := s.Pool.Exec(ctx, `DELETE FROM coordination_leases WHERE released_at IS NOT NULL AND released_at < NOW() - $1::interval`, olderThan)
+	if err != nil {
+		return 0, err
+	}
+	b, err := s.Pool.Exec(ctx, `DELETE FROM coordination_intents WHERE expires_at < NOW() - $1::interval`, olderThan)
+	if err != nil {
+		return 0, err
+	}
+	return a.RowsAffected() + b.RowsAffected(), nil
+}
+
+// RunCoordinationPurge purges old coordination rows every hour until ctx ends.
+func RunCoordinationPurge(ctx context.Context, s *Store) {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if _, err := s.PurgeCoordination(ctx, coordinationRetention); err != nil && ctx.Err() == nil {
+			slog.Warn("coordination purge failed", "err", err)
+		}
+	}
 }

@@ -95,7 +95,7 @@ class FakeScopedAgent:
             out["handoff_summary"] = handoff_summary
         return out
 
-    def heartbeat(self, resource: str = None, lease_id: str = None, ttl_seconds: int = None):
+    def heartbeat(self, resource: str = None, lease_id: str = None, ttl_seconds: int = None, session_id: str = None):
         res = resource.strip()
         self.scope.reap_expired(res)
         if res not in self.scope.leases or self.scope.leases[res]["holder"] != self.agent_id:
@@ -106,7 +106,7 @@ class FakeScopedAgent:
         self.scope.leases[res]["heartbeat_at"] = now
         return {"renewed": True, "expires_at": now + ttl}
 
-    def release(self, resource: str = None, lease_id: str = None, status: str = "completed"):
+    def release(self, resource: str = None, lease_id: str = None, status: str = "completed", session_id: str = None):
         res = resource.strip()
         self.scope.reap_expired(res)
         if res not in self.scope.leases or self.scope.leases[res]["holder"] != self.agent_id:
@@ -114,7 +114,7 @@ class FakeScopedAgent:
         del self.scope.leases[res]
         return {"released": True}
 
-    def handoff(self, resource: str = None, lease_id: str = None, summary: str = "", next_agent_id: str = None):
+    def handoff(self, resource: str = None, lease_id: str = None, summary: str = "", next_agent_id: str = None, session_id: str = None):
         res = resource.strip()
         self.scope.reap_expired(res)
         if res not in self.scope.leases or self.scope.leases[res]["holder"] != self.agent_id:
@@ -128,7 +128,7 @@ class FakeScopedAgent:
         }
         return {"handoff": True}
 
-    def check(self, resource: str, intent: str = ""):
+    def check(self, resource: str, intent: str = "", session_id: str = None):
         res = resource.strip()
         self.scope.reap_expired(res)
         if res in self.scope.leases:
@@ -155,7 +155,7 @@ class FakeScopedAgent:
 
         return {"decision": "allow"}
 
-    def log_intent(self, resource: str, intent: str, ttl_seconds: int = None):
+    def log_intent(self, resource: str, intent: str, ttl_seconds: int = None, session_id: str = None):
         res = resource.strip()
         ttl = ttl_seconds or 900
         self.scope.intents.setdefault(res, []).append({

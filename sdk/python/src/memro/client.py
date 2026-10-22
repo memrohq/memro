@@ -387,8 +387,11 @@ class MemroClient:
         resource: Optional[str] = None,
         lease_id: Optional[str] = None,
         ttl_seconds: Optional[int] = None,
+        session_id: Optional[str] = None,
     ) -> dict:
         body: Dict[str, Any] = {}
+        if session_id:
+            body["session_id"] = session_id
         if resource:
             body["resource"] = resource
         if lease_id:
@@ -404,8 +407,11 @@ class MemroClient:
         resource: Optional[str] = None,
         lease_id: Optional[str] = None,
         status: str = "completed",
+        session_id: Optional[str] = None,
     ) -> dict:
         body: Dict[str, Any] = {"status": status}
+        if session_id:
+            body["session_id"] = session_id
         if resource:
             body["resource"] = resource
         if lease_id:
@@ -420,8 +426,11 @@ class MemroClient:
         lease_id: Optional[str] = None,
         summary: str = "",
         next_agent_id: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> dict:
         body: Dict[str, Any] = {"summary": summary}
+        if session_id:
+            body["session_id"] = session_id
         if resource:
             body["resource"] = resource
         if lease_id:
@@ -436,8 +445,12 @@ class MemroClient:
         private_key: Optional[str],
         resource: str,
         intent: str = "",
+        session_id: Optional[str] = None,
     ) -> dict:
-        return self._json("POST", "/coordination/check", json_body={"resource": resource, "intent": intent}, agent_id=agent_id, private_key=private_key)
+        body: Dict[str, Any] = {"resource": resource, "intent": intent}
+        if session_id:
+            body["session_id"] = session_id
+        return self._json("POST", "/coordination/check", json_body=body, agent_id=agent_id, private_key=private_key)
 
     def coordination_active(
         self,
@@ -455,8 +468,11 @@ class MemroClient:
         resource: str,
         intent: str,
         ttl_seconds: Optional[int] = None,
+        session_id: Optional[str] = None,
     ) -> dict:
         body: Dict[str, Any] = {"resource": resource, "intent": intent}
+        if session_id:
+            body["session_id"] = session_id
         if ttl_seconds:
             body["ttl_seconds"] = ttl_seconds
         return self._json("POST", "/coordination/intent", json_body=body, agent_id=agent_id, private_key=private_key)

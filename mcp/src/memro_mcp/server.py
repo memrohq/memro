@@ -496,7 +496,7 @@ def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolR
         return _text(_dump(agent.timeline(args.get("memory_id"))))
 
     if name == "pre_action_check":
-        return _text(agent.check(resource=args.get("resource"), intent=args.get("intent", "")))
+        return _text(agent.check(resource=args.get("resource"), intent=args.get("intent", ""), session_id=session_id))
 
     if name == "claim_task":
         resource, intent = args.get("resource"), args.get("intent")
@@ -526,7 +526,7 @@ def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolR
                 ttl = int(ttl)
             except (ValueError, TypeError):
                 ttl = None
-        res = agent.heartbeat(resource=resource, ttl_seconds=ttl)
+        res = agent.heartbeat(resource=resource, ttl_seconds=ttl, session_id=session_id)
         return _text(f"Resource '{resource}' heartbeat renewed until {res.get('expires_at')}.")
 
     if name == "release_task":
@@ -534,7 +534,7 @@ def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolR
         status = args.get("status", "completed")
         if status == "cancelled":
             status = "abandoned"
-        agent.release(resource=resource, status=status)
+        agent.release(resource=resource, status=status, session_id=session_id)
         return _text(f"Resource '{resource}' released.")
 
     if name == "log_intent":
@@ -545,7 +545,7 @@ def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolR
                 ttl = int(ttl)
             except (ValueError, TypeError):
                 ttl = None
-        agent.log_intent(resource=resource, intent=intent, ttl_seconds=ttl)
+        agent.log_intent(resource=resource, intent=intent, ttl_seconds=ttl, session_id=session_id)
         return _text(f"Intent for {resource} logged.")
 
     if name in ("get_active_work", "get_active_context"):
@@ -555,7 +555,7 @@ def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolR
 
     if name == "handoff_task":
         resource, summary, nxt = args.get("resource"), args.get("summary"), args.get("next_agent_id")
-        agent.handoff(resource=resource, summary=summary, next_agent_id=nxt)
+        agent.handoff(resource=resource, summary=summary, next_agent_id=nxt, session_id=session_id)
         return _text(f"Handoff completed for {resource}.")
 
     if name == "get_system_status":
@@ -599,7 +599,13 @@ class AuthMiddleware:
         query_string = scope.get("query_string", b"").decode()
         params = parse_qs(query_string)
         
+        # The coordination session: an explicit ?session_id=, else the MCP
+        # transport's per-connection Mcp-Session-Id, so each connected tool
+        # (Claude Code, Cursor, ...) is its own holder even on one account.
         session_id = params.get("session_id", [None])[0]
+        if not session_id:
+            sid = dict(scope.get("headers") or []).get(b"mcp-session-id", b"").decode().strip()
+            session_id = f"mcp:{sid}" if sid else None
         agent_id = token = None
         # Only the legacy SSE transport takes credentials in the URL, where
         # they end up in proxy logs; everything else needs the header.
