@@ -1,30 +1,29 @@
 # LongMemEval Benchmark Report: Memro
 
-*Status: Verified Run · Date: October 2026 · Dataset: LongMemEval_S (Full Continuity)*
+*Status: Verified Runs · Date: October 2026 · Dataset: LongMemEval_S*
 
-This report publishes the methodology, raw evaluation results, latency metrics, and API costs for Memro evaluated on the public **LongMemEval** benchmark suite across 500 challenge questions.
-
-In keeping with our transparency commitments, we disclose exact costs, hardware setup, and areas where Memro underperformed or has room for architectural improvement.
+This report publishes the methodology, evaluation results, latency metrics, and API costs for Memro evaluated on the public **LongMemEval** benchmark suite across 500 challenge questions.
 
 ---
 
-## 1. Executive Summary
+## 1. Executive Summary & Full Runs Comparison
 
-| Metric | Result | Notes |
-|---|---|---|
-| **Total Questions Evaluated** | 500 / 500 | Full continuity run (no cherry-picking) |
-| **Grading Model** | `gpt-4o-mini` | Evaluated against official ground truth (agreed with `gpt-4o` on 49/50 sample) |
-| **Embedding Model** | `text-embedding-3-small` | 1536-dimensional dense vectors |
-| **Overall QA Accuracy** | **77.6%** (388 / 500) | Correct answers confirmed by judge |
-| **Recall@5** | **97.6%** (488 / 500) | Ground truth fact present in top 5 items |
-| **Recall@10** | **99.0%** (495 / 500) | Ground truth fact present in top 10 items |
-| **Query Latency (p50)** | **401 ms** | Local Docker Postgres + pgvector (~249 memories/question) |
-| **Query Latency (p95)** | **1074 ms** | Uncached hybrid vector + full-text search |
-| **Total Evaluation Cost** | **$2.8664** | Cumulative spend across all runs (~$1.25 for single 500-question pass) |
+We conducted three full evaluations on the complete 500-question LongMemEval_S dataset. All three runs are published in `bench/longmemeval/runs/`:
+
+| Run | QA Accuracy | Recall@5 | Recall@10 | Latency (p50 / p95) | Differences / Configuration |
+|---|---|---|---|---|---|
+| **full** | **77.6%** (388/500) | **98.6%** (493/500) | **98.8%** (494/500) | 564 ms / 1053 ms | TOP_K=10 memories retrieved per question. |
+| **full-fixed** | **75.0%** (375/500) | **97.0%** (485/500) | **98.8%** (494/500) | 394 ms / 910 ms | TOP_K=15 memories retrieved; memories presented as individual turn excerpts without conversation continuity context. |
+| **full-continuity** | **77.6%** (388/500) | **97.6%** (488/500) | **99.0%** (495/500) | 401 ms / 1074 ms | TOP_K=15 memories retrieved; memories formatted with conversational turn continuity, improving preference and multi-session synthesis. |
+
+*Notes on Models*:
+- **Grading Model**: `gpt-4o-mini` evaluated against official ground truth (agreed with `gpt-4o` on 49/50 sampled answers; `gpt-4o` accuracy on that sample was 74.0%).
+- **Embedding Model**: `text-embedding-3-small` (1536-dimensional dense vectors).
+- **Environment**: Local Docker PostgreSQL 16 + pgvector (~249 memories ingested per question).
 
 ---
 
-## 2. Category Breakdown
+## 2. Category Breakdown (`full-continuity`)
 
 The benchmark evaluates six distinct challenge types:
 
@@ -42,74 +41,54 @@ The benchmark evaluates six distinct challenge types:
 
 ## 3. Cost & Spend Disclosures
 
-All LLM and embedding calls were tracked through a deterministic token ledger:
+All LLM and embedding calls were tracked through a deterministic token ledger (`bench/longmemeval/runs/ledger.json`):
 
-- **`text-embedding-3-small`**:
-  - Spend: **$0.8158**
-  - Tokens: 40,792,124 input / 0 output
-  - Calls: 3,879 calls
-- **`gpt-4o-mini`** (QA generation and automated grading):
-  - Spend: **$2.0114**
-  - Tokens: 12,801,684 input / 151,877 output
-  - Calls: 3,201 calls
-- **`gpt-4o`** (Ambiguity resolution sample):
-  - Spend: **$0.0392**
-  - Tokens: 15,208 input / 115 output
-  - Calls: 63 calls
-- **Total Ledger Spend**: **$2.8664** (single full-run pass cost ~$1.25)
+- **Cumulative Spend (All Runs & Experiments)**: **$3.5006**
+  - `text-embedding-3-small`: $0.8158 (40,792,124 input tokens across 3,879 calls)
+  - `gpt-4o-mini`: $2.6456 (16,828,341 prompt tokens, 202,232 completion tokens across 4,097 calls)
+  - `gpt-4o` (judge cross-validation sample): $0.0392 (15,208 prompt tokens, 115 completion tokens across 63 calls)
+- **Estimated Single Full-Run Pass**: **~$1.25**
+  - *Calculation*:
+    - Initial text embedding (500 questions × ~249 turns = ~124,500 turns; ~40.8M tokens at $0.02 / 1M tokens): **$0.82** (cached on rerun via `embed_cache.sqlite`).
+    - Answering (500 questions × ~4,000 prompt tokens with top 15 memories at $0.15 / 1M tokens + ~100 completion tokens at $0.60 / 1M tokens): **~$0.33**.
+    - LLM judge grading (500 questions × ~1,200 prompt tokens + ~50 completion tokens at $0.15/$0.60 per 1M tokens): **~$0.10**.
+    - Total estimated per-pass cost: $0.82 + $0.33 + $0.10 ≈ **$1.25** (or **~$0.43** per run when embedding cache is populated).
 
 ---
 
-## 4. Analysis: Strengths and Disclosed Limitations
+## 4. Analysis: Strengths and Bottlenecks
 
 ### What Worked Well:
-1. **Near-Perfect Top-K Retrieval**:
-   Recall@5 at 97.6% and Recall@10 at 99.0% prove that combining dense pgvector embeddings with PostgreSQL full-text search via Reciprocal Rank Fusion ($k=60$) reliably injects the necessary ground truth into the top context slots.
-2. **Knowledge Updates & Single-Session Facts**:
-   Single-session facts achieved 95.7%–96.4% accuracy, and knowledge updates reached 82.1%. Memro's explicit memory typing and contradiction detection logic successfully pruned obsolete assertions when updated facts were presented.
+1. **High Top-K Retrieval**:
+   Recall@5 at 97.6% and Recall@10 at 99.0% show that combining dense pgvector embeddings with PostgreSQL full-text search via Reciprocal Rank Fusion ($k=60$) reliably puts the necessary ground-truth sessions into the top context slots.
+2. **Single-Session Facts & Updates**:
+   Single-session facts achieved 95.7%–96.4% QA accuracy, and knowledge updates reached 82.1%.
 
-### Where Memro Lost or Needs Improvement:
-1. **Multi-Session Contexts (67.7%)**:
-   When answers required synthesizing disparate facts spread across 5+ distinct historical sessions, accuracy dropped to 67.7%. While Recall@10 was 100%, the LLM sometimes struggled to synthesize multi-hop relationships when presented with flat list contexts.
-2. **Temporal Reasoning (69.2%)**:
-   Questions requiring complex date differences and sequential event ordering scored 69.2%. While Memro's `BuildTemporalLedger` calculates chronological sequence and day offsets, relative calendar reasoning across distant multi-year sessions remains an active optimization focus.
-3. **Synthesis vs. Retrieval Bottleneck**:
-   Detailed error inspection across the 112 failed questions showed that **73 of the 112 wrong answers (65.2%) had all required ground-truth evidence successfully retrieved in the top context**. The primary bottleneck was the answering LLM failing to aggregate multi-session facts or compute day differences, rather than retrieval failure.
+### Synthesis vs. Retrieval Bottleneck:
+- The answer generation step receives TOP_K=15 (`run.py:28`).
+- **94 of 112 failed questions (84%) had every gold session among the 15 memories given to the answering model**.
+  - At top-5 cutoff: 61 of the 84 failed questions with available gold evidence had every gold session in the top 5.
+  - At top-10 cutoff: 84 of 112 failed questions had every gold session in the top 10.
+- This demonstrates that retrieval is rarely the failure cause; the bottleneck is primarily synthesis: the answering model failing to aggregate multiple disjoint session turns or compute date differences across conversations.
 
 ---
 
 ## 5. How to Reproduce
 
-Memro provides two reproducible evaluation pathways:
-
-### A. LongMemEval_S 500-Question Benchmark
-
-The complete benchmark harness, dataset loaders, and scoring scripts are in the [`memro-benchmark`](https://github.com/memrohq/memro-benchmark) repository:
+The complete benchmark harness, dataset loaders, and run outputs are included in [`bench/longmemeval/`](../../bench/longmemeval/):
 
 ```bash
 # 1. Start PostgreSQL with pgvector and Memro API
 docker compose up -d
 
-# 2. Clone the benchmark suite
-git clone https://github.com/memrohq/memro-benchmark.git
-cd memro-benchmark/longmemeval
+# 2. Navigate to benchmark directory
+cd bench/longmemeval
 
-# 3. Run pilot (12 questions) or full evaluation (500 questions)
+# 3. Run pilot or full evaluation
 python run.py --pilot   # Fast 12-question pilot run
 python run.py --all     # Full 500-question run (supports resume)
 
-# 4. Grade with LLM judge and generate report
+# 4. Grade with LLM judge and view report
 python judge.py runs/full-continuity
 python report.py runs/full-continuity
 ```
-
-### B. In-Repo Measurable Verification Suite
-
-For fast local verification of multi-tenant isolation, contradiction handling, stale fact handling, and distractor rejection without external LLM dependencies:
-
-```bash
-# Run against local Memro server (http://localhost:8081)
-python bench/eval_suite.py http://localhost:8081
-```
-
-Live web version: [https://memro.co/benchmarks](https://memro.co/benchmarks)
