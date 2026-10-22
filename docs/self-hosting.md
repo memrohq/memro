@@ -63,6 +63,7 @@ All settings are environment variables. The common ones:
 | `ALLOW_LEGACY_SIGNATURES` | `false` | Accept legacy v1 signatures (disabled by default; set `true` only if older clients require it) |
 | `RATE_LIMIT_MAX`, `RATE_LIMIT_WINDOW_SECONDS` | `200`, `60` | |
 | `MEMORY_SOFT_CAP` | `1000` | Memories per agent |
+| `SEARCH_AGGREGATE_PER_SESSION` | `0` (off) | For questions that count, total or list things ("how many…", "list all…"), return at most this many results per conversation so more conversations are covered. `3` is the tested value (ADR 0022). A request's own `max_per_session` wins |
 | `IDENTITY_POW_BITS` | `20` | Proof-of-work difficulty for agent registration (about a second of CPU) |
 | `IDENTITY_POW_REQUIRED` | `false` | Reject registrations without a proof; turn on once your clients send one |
 | `UNCLAIMED_MAX_MEMORIES`, `UNCLAIMED_MAX_FILE_BYTES` | `0`, `0` (no cap) | Caps for agents with no owner. A quota policy that implements `extension.UnclaimedCapExemption` can lift them per agent |

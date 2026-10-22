@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -35,6 +36,10 @@ type Engine struct {
 	indexer Indexer
 	cache   *ResultCache
 	now     func() time.Time
+
+	// aggregatePerSession caps results per conversation for aggregate
+	// questions when the caller sets no cap; 0 is off.
+	aggregatePerSession int
 }
 
 func New(pool *pgxpool.Pool, provider *embed.Provider, indexer Indexer) *Engine {
@@ -42,6 +47,32 @@ func New(pool *pgxpool.Pool, provider *embed.Provider, indexer Indexer) *Engine 
 }
 
 func (e *Engine) Cache() *ResultCache { return e.cache }
+
+// SetAggregatePerSession turns on session-diverse results for aggregate
+// questions (IsAggregateQuery), at most n per conversation; 0 turns it off.
+func (e *Engine) SetAggregatePerSession(n int) { e.aggregatePerSession = max(n, 0) }
+
+// aggregateQuery matches questions that ask to count, total or list things,
+// which usually need evidence from several conversations.
+var aggregateQuery = regexp.MustCompile(`(?i)\b(how many|how much|in total|total|altogether|combined|sum of|number of|list|all the|each of|every|both)\b`)
+
+// IsAggregateQuery reports whether q asks to count, total or list things.
+func IsAggregateQuery(q string) bool { return aggregateQuery.MatchString(q) }
+
+// perSessionFor is the per-conversation cap for q: the caller's, else the
+// aggregate cap when q is an aggregate question, else none. On LongMemEval a
+// cap of 3 on aggregate questions only gave 3 more of 94 questions all their
+// evidence and lost none; capping every question cut evidence recall@15 from
+// 93% to 79%.
+func (e *Engine) perSessionFor(q domain.SearchQuery) int {
+	if q.PerSession > 0 {
+		return q.PerSession
+	}
+	if e.aggregatePerSession > 0 && IsAggregateQuery(q.Query) {
+		return e.aggregatePerSession
+	}
+	return 0
+}
 
 // queryEmbedding returns nil (not an error) when semantic search is
 // unavailable, so callers fall back to keyword search.
@@ -103,7 +134,7 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 		}
 	}
 	order, scores := fuseRRF(semantic, keyword, depth*2)
-	order, err := e.diversify(ctx, order, q.Limit, q.PerSession)
+	order, err := e.diversify(ctx, order, q.Limit, e.perSessionFor(q))
 	if err != nil {
 		return nil, err
 	}
