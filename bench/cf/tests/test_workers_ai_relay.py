@@ -122,10 +122,15 @@ def test_reads_bench_env(monkeypatch, tmp_path):
 
 
 def test_requests_stay_under_the_model_token_limit():
-    # bge-small: 512 tokens -> 640-char budget per request.
+    # Padded cost: texts x longest. bge-small 512 tokens -> 256-token budget = 640 chars padded.
     items = [(0, "a" * 300), (1, "b" * 300), (2, "c" * 300), (3, "d" * 2000), (4, "e" * 10)]
     groups = [[i for i, _ in g] for g in relay_mod.batches(items, 512)]
     assert groups == [[0, 1], [2], [3], [4]]
-    # bge-m3: 60k tokens -> 75k chars; 50 texts of 2,000 chars split by size, not only count.
-    many = [(i, "x" * 2000) for i in range(50)]
-    assert [len(g) for g in relay_mod.batches(many, 60000)] == [37, 13]
+    # bge-m3 60k -> 30k-token budget. 9,500-char texts (3,800 tokens) go 7 per request.
+    many = [(i, "x" * 9500) for i in range(20)]
+    sizes = [len(g) for g in relay_mod.batches(many, 60000)]
+    assert sizes == [7, 7, 6]
+    # One long text among short ones caps the whole request.
+    mixed = [(0, "x" * 9500)] + [(i, "y" * 100) for i in range(1, 30)]
+    for g in relay_mod.batches(mixed, 60000):
+        assert len(g) * max(len(t) for _, t in g) / 2.5 <= 30000

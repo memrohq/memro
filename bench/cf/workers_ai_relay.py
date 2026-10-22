@@ -46,25 +46,27 @@ MODELS = {
     "@cf/baai/bge-small-en-v1.5": {"max_tokens": 512, "usd_per_m": None},
 }
 BATCH = 50  # most texts per upstream call
-# Workers AI applies a model's token limit to the whole request, not to each
-# text (bge-m3 rejected a 50-text batch at 69,500 tokens). Requests are capped
-# at half the limit, counting a token as 2.5 characters to be safe; a single
-# text over that goes alone (512-token models truncate it themselves).
+# Workers AI applies a model's token limit to the whole request, and counts
+# every text padded to the longest one: bge-m3 rejected 50 texts at 69,500
+# tokens, then a 75k-character batch at 105,184 tokens. So a request costs
+# about (texts x longest text); keep that under half the limit, counting a
+# token as 2.5 characters. A single text over it goes alone (512-token models
+# truncate it themselves).
 CHARS_PER_TOKEN = 2.5
 PARALLEL = 8  # concurrent upstream calls per incoming request
 
 
 def batches(texts_by_index: list, max_tokens: int):
-    """Split [(i, text)] into requests under max_tokens/2 and BATCH texts."""
-    budget = max_tokens / 2 * CHARS_PER_TOKEN
-    cur, size = [], 0
+    """Split [(i, text)] into requests whose padded size stays under max_tokens/2."""
+    budget = max_tokens / 2
+    cur, longest = [], 0
     for item in texts_by_index:
-        n = len(item[1])
-        if cur and (len(cur) >= BATCH or size + n > budget):
+        n = len(item[1]) / CHARS_PER_TOKEN
+        if cur and (len(cur) >= BATCH or (len(cur) + 1) * max(longest, n) > budget):
             yield cur
-            cur, size = [], 0
+            cur, longest = [], 0
         cur.append(item)
-        size += n
+        longest = max(longest, n)
     if cur:
         yield cur
 
