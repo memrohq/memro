@@ -1,6 +1,5 @@
-// Package memro is the official Go SDK for Memro, long-term memory for AI agents.
-//
-// With an API key from `npx memro-cli connect` or the dashboard:
+// Package memro is the official Go SDK for Memro — Verified Memory Infrastructure for AI Agents.
+// See https://memro.co and https://memro.co/docs for documentation and guides.
 //
 //	agent, err := memro.AgentFromAPIKey(ctx, os.Getenv("MEMRO_API_KEY"), nil)
 //	mem, err := agent.Remember(ctx, "User prefers Go", &memro.RememberOptions{Type: memro.MemoryTypeProfile})
