@@ -122,6 +122,38 @@ func TestBFSWalksIncludesShortDeadEndPaths(t *testing.T) {
 	}
 }
 
+func TestBFSWalksPreservesConvergingPaths(t *testing.T) {
+	a, b, c, d := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	nodes := []chainNode{
+		{ID: a, Content: "start"},
+		{ID: b, Content: "left"},
+		{ID: c, Content: "right"},
+		{ID: d, Content: "shared conclusion"},
+	}
+	edges := []domain.Relation{
+		{From: a, To: b, Confidence: 0.9},
+		{From: a, To: c, Confidence: 0.8},
+		{From: b, To: d, Confidence: 0.7},
+		{From: c, To: d, Confidence: 0.6},
+	}
+
+	walks := bfsWalks(a, nodes, edges, 3)
+	if len(walks) != 2 {
+		t.Fatalf("walks = %+v, want both paths through the shared node", walks)
+	}
+
+	got := map[string]bool{}
+	for _, walk := range walks {
+		if len(walk.Path) != 3 || walk.Path[0] != a || walk.Path[2] != d {
+			t.Fatalf("unexpected path: %v", walk.Path)
+		}
+		got[walk.Path[1].String()] = true
+	}
+	if !got[b.String()] || !got[c.String()] {
+		t.Fatalf("lost one converging path: got %v, want middle nodes %s and %s", got, b, c)
+	}
+}
+
 func TestResultCacheInvalidation(t *testing.T) {
 	c := NewResultCache()
 	q := domain.SearchQuery{AgentID: "agent", Query: "x", Limit: 5}
