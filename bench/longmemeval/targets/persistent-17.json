@@ -1,0 +1,147 @@
+{
+  "name": "persistent-17",
+  "created": "2026-10-23",
+  "description": "Questions wrong in both baseline-100 (2026-10-23) and its identical rerun; retrieval was identical in both. Fixed target set for improvement work; not a tuning set to fit prompts to.",
+  "source_runs": [
+    "runs/baseline-100",
+    "runs/emb-text-embedding-3-small-qa"
+  ],
+  "questions": [
+    {
+      "question_id": "0edc2aef",
+      "question_type": "single-session-preference",
+      "evidence": "all",
+      "mechanism": "answer-stage",
+      "note": "preference question answered 'I don't know' despite the preference being shown",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "2133c1b5",
+      "question_type": "knowledge-update",
+      "evidence": "all",
+      "mechanism": "temporal/update",
+      "note": "all evidence shown; chose an outdated value",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "28dc39ac",
+      "question_type": "multi-session",
+      "evidence": "partial",
+      "mechanism": "retrieval",
+      "note": "4/5 answer-bearing exchanges reached the prompt",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "69fee5aa",
+      "question_type": "knowledge-update",
+      "evidence": "all",
+      "mechanism": "temporal/update",
+      "note": "all evidence shown; chose an outdated value",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "71017277",
+      "question_type": "temporal-reasoning",
+      "evidence": "all",
+      "mechanism": "dataset",
+      "note": "gold answer counts a crystal chandelier from an aunt as 'jewelry'",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "88432d0a",
+      "question_type": "multi-session",
+      "evidence": "partial",
+      "mechanism": "retrieval",
+      "note": "3/4 answer-bearing exchanges reached the prompt",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "8e91e7d9",
+      "question_type": "multi-session",
+      "evidence": "partial",
+      "mechanism": "retrieval",
+      "note": "1/2 answer-bearing exchanges reached the prompt",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "92a0aa75",
+      "question_type": "multi-session",
+      "evidence": "partial",
+      "mechanism": "retrieval",
+      "note": "1/2 answer-bearing exchanges reached the prompt",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "9a707b82",
+      "question_type": "temporal-reasoning",
+      "evidence": "none",
+      "mechanism": "retrieval",
+      "note": "0/1 answer-bearing exchanges reached the prompt",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "d682f1a2",
+      "question_type": "multi-session",
+      "evidence": "all",
+      "mechanism": "synthesis",
+      "note": "all evidence shown; combined or counted it wrongly",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "e3038f8c",
+      "question_type": "multi-session",
+      "evidence": "partial",
+      "mechanism": "retrieval",
+      "note": "3/4 answer-bearing exchanges reached the prompt",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "f685340e",
+      "question_type": "knowledge-update",
+      "evidence": "all",
+      "mechanism": "temporal/update",
+      "note": "all evidence shown; chose an outdated value",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "gpt4_21adecb5",
+      "question_type": "temporal-reasoning",
+      "evidence": "all",
+      "mechanism": "temporal/update",
+      "note": "all evidence shown; date or ordering reasoning wrong",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "gpt4_8279ba03",
+      "question_type": "temporal-reasoning",
+      "evidence": "none",
+      "mechanism": "retrieval",
+      "note": "0/1 answer-bearing exchanges reached the prompt",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "gpt4_93159ced",
+      "question_type": "temporal-reasoning",
+      "evidence": "partial",
+      "mechanism": "retrieval",
+      "note": "2/3 answer-bearing exchanges reached the prompt",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "gpt4_a1b77f9c",
+      "question_type": "temporal-reasoning",
+      "evidence": "partial",
+      "mechanism": "retrieval",
+      "note": "5/6 answer-bearing exchanges reached the prompt",
+      "gpt4o_fixed_same_prompt": false
+    },
+    {
+      "question_id": "gpt4_e414231f",
+      "question_type": "temporal-reasoning",
+      "evidence": "all",
+      "mechanism": "temporal/update",
+      "note": "all evidence shown; date or ordering reasoning wrong",
+      "gpt4o_fixed_same_prompt": false
+    }
+  ]
+}

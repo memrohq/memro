@@ -34,6 +34,7 @@ BENCH = CF.parent
 LME = BENCH / "longmemeval"
 REPO = BENCH.parent
 sys.path.insert(0, str(LME))
+sys.path.insert(0, str(CF))
 from common import RUNS, openai_key  # noqa: E402
 
 DEFAULT_MODELS = ["text-embedding-3-small", "@cf/baai/bge-m3", "@cf/qwen/qwen3-embedding-0.6b"]
@@ -87,6 +88,35 @@ def stop(*procs):
                 p.kill()
 
 
+def prefill(model, subset_file):
+    """Embed every memory and question for these questions into the relay's
+    cache first, straight from Workers AI with no server deadline. Slow models
+    (qwen3 took ~4 s a call) otherwise time out the server's 30 s embedding
+    call, and the run is full of retries. The run then reads the cache."""
+    import concurrent.futures as cfut
+    import workers_ai_relay as w
+    from run import load_data, rounds
+    ids = set(json.loads(pathlib.Path(subset_file).read_text()))
+    texts = []
+    for q in load_data():
+        if q["question_id"] in ids:
+            texts.append(q["question"][:500])
+            for session in q["haystack_sessions"]:
+                texts.extend(rounds(session))
+    texts = list(dict.fromkeys(texts))
+    acc, token = w.credentials()
+    if not (acc and token):
+        raise SystemExit("Cloudflare credentials are required to prefill")
+    relay = w.Relay(f"https://api.cloudflare.com/client/v4/accounts/{acc}/ai/v1", token)
+    chunks = [texts[i:i + 200] for i in range(0, len(texts), 200)]
+    done = 0
+    with cfut.ThreadPoolExecutor(4) as ex:
+        for n in ex.map(lambda c: len(relay.embed(model, c)), chunks):
+            done += n
+            print(f"  prefill {model}: {done}/{len(texts)}", end="\r", flush=True)
+    print(f"  prefill {model}: {len(texts)} texts, {relay.stats['misses']} new, {relay.stats['hits']} cached")
+
+
 def fresh_database(admin_url, name):
     """Create an empty database for one model's run. Each memory keeps a single
     embedding, and a server re-embeds every memory lacking one for its model,
@@ -135,9 +165,12 @@ def run_model(model, args, server_bin):
                    "MEMRO_DATABASE_URL": db_url, "BENCH_EMBEDDING_MODEL": model}
         if args.retrieval_only:
             run_env["BENCH_NO_LLM"] = "1"
+        hyp = run_dir / "hyp.jsonl"
+        before = len(hyp.read_text().splitlines()) if hyp.exists() else 0
         subprocess.run([sys.executable, str(LME / "run.py"), "--subset", str(args.subset), "--name", name,
                         "--workers", str(args.workers)], env=run_env, cwd=LME, check=True)
-        if cloudflare:
+        ran = len(hyp.read_text().splitlines()) - before
+        if cloudflare and ran:  # a resumed, already-complete run embeds nothing
             stats = get_json(f"http://127.0.0.1:{EMBED_PORT}/")
             if stats["hits"] + stats["misses"] == 0:
                 raise SystemExit(f"{model}: the server never called the relay; results would be mislabeled")
@@ -217,12 +250,15 @@ def main():
                     help="admin connection; each model gets its own fresh database next to it")
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--build", action="store_true", help="rebuild the server binary")
+    ap.add_argument("--prefill", action="store_true", help="embed everything into the Workers AI cache before each run")
     args = ap.parse_args()
 
     server_bin = build_server(args.build)
     results = {}
     for model in args.models:
         print(f"== {model}", flush=True)
+        if args.prefill and model.startswith("@cf/"):
+            prefill(model, args.subset)
         results[model] = metrics(run_model(model, args, server_bin))
     text = report(results, args)
     out = RUNS / f"EMBEDDINGS_{dt.date.today()}{args.suffix}.md"

@@ -60,3 +60,5 @@ bench/longmemeval/runs/embed_cache.sqlite
 bench/cf/.env
 bench/cf/cache/
 bench/cf/.bin/
+bench/locomo/runs/*/*
+!bench/locomo/runs/*/REPORT.md
