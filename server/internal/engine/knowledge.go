@@ -221,16 +221,10 @@ func bfsWalks(start uuid.UUID, nodes []chainNode, edges []domain.Relation, maxDe
 		depth int
 	}
 	var walks []chainWalk
-	visited := map[[2]any]bool{}
 	queue := []item{{start, []uuid.UUID{start}, 1, 0}}
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
-		key := [2]any{cur.id, cur.depth}
-		if visited[key] {
-			continue
-		}
-		visited[key] = true
 		var next []domain.Relation
 		if cur.depth < maxDepth {
 			for _, e := range edges {
