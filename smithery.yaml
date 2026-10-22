@@ -1,0 +1,16 @@
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      MEMRO_API_KEY:
+        type: string
+        description: "Memro API key from https://memro.co or self-hosted dashboard"
+      MEMRO_BASE_URL:
+        type: string
+        description: "Memro backend API URL (defaults to https://api.memro.co)"
+        default: "https://api.memro.co"
+    required:
+      - MEMRO_API_KEY
+  commandFunction:
+    package: "memro-mcp"

@@ -1,0 +1,90 @@
+name: Publish Packages
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  publish-pypi:
+    name: Publish to PyPI (memro & memro-mcp)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build and twine
+        run: pip install build twine
+
+      - name: Build Python SDK (memro)
+        run: |
+          cd sdk/python
+          python -m build
+          twine check dist/*
+
+      - name: Build MCP Server (memro-mcp)
+        run: |
+          cd mcp
+          python -m build
+          twine check dist/*
+
+      - name: Publish Python SDK to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          twine upload sdk/python/dist/*
+
+      - name: Publish MCP Server to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          twine upload mcp/dist/*
+
+  publish-npm:
+    name: Publish to npm (@memro/sdk & memro-cli)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Publish JS SDK (@memro/sdk)
+        working-directory: sdk/js
+        run: |
+          npm ci
+          npm run build
+          npm test
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish CLI (memro-cli)
+        working-directory: cli
+        run: |
+          npm test
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  tag-go-modules:
+    name: Tag Submodules for Go Proxy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create and push Go submodule tags
+        run: |
+          # Go requires module path prefixes for multi-module repositories
+          git tag -f "sdk/go/${GITHUB_REF_NAME}" || true
+          git tag -f "server/${GITHUB_REF_NAME}" || true
+          git push origin "sdk/go/${GITHUB_REF_NAME}" || true
+          git push origin "server/${GITHUB_REF_NAME}" || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

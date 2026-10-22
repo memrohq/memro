@@ -1,7 +1,11 @@
 # Go SDK
 
+Verified memory infrastructure for AI agents.
+
+## Install
+
 ```bash
-go get github.com/memrohq/memro/sdk/go
+go get github.com/memrohq/memro/sdk/go@v0.1.0
 ```
 
 ```go
@@ -9,6 +13,16 @@ import memro "github.com/memrohq/memro/sdk/go"
 ```
 
 No dependencies outside the standard library. Go 1.21+.
+
+## Quick Example
+
+```go
+ctx := context.Background()
+agent, _ := memro.CreateAgent(nil) // local Ed25519 sovereign identity
+mem, _ := agent.Remember(ctx, "The billing service was rewritten in Go", nil)
+results, _ := agent.Recall(ctx, "billing service language", nil)
+fmt.Println(results[0].Content)
+```
 
 ## Connect
 
@@ -86,4 +100,5 @@ signed with [v2 signatures](https://github.com/memrohq/memro/blob/main/docs/auth
 
 ---
 
-Full documentation: https://github.com/memrohq/memro/tree/main/docs · License: PolyForm Noncommercial 1.0.0
+Repository: [github.com/memrohq/memro](https://github.com/memrohq/memro) · Documentation: [https://memro.co](https://memro.co)
+License: Source available under [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0). Free for non-commercial use; commercial use through Memro Cloud or a commercial license.
