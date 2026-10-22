@@ -226,26 +226,36 @@ func bfsWalks(start uuid.UUID, nodes []chainNode, edges []domain.Relation, maxDe
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
-		if cur.depth >= maxDepth {
+		key := [2]any{cur.id, cur.depth}
+		if visited[key] {
+			continue
+		}
+		visited[key] = true
+		var next []domain.Relation
+		if cur.depth < maxDepth {
+			for _, e := range edges {
+				if e.From == cur.id && !slices.Contains(cur.path, e.To) {
+					next = append(next, e)
+				}
+			}
+		}
+		if cur.depth >= maxDepth || len(next) == 0 {
+			// A valid short path is still useful when it terminates before the
+			// requested depth. Previously such paths disappeared entirely.
 			w := chainWalk{Path: cur.path, Confidence: cur.conf}
 			for _, n := range nodes {
 				if slices.Contains(cur.path, n.ID) {
 					w.Nodes = append(w.Nodes, n)
 				}
 			}
-			walks = append(walks, w)
-			continue
-		}
-		key := [2]any{cur.id, cur.depth}
-		if visited[key] {
-			continue
-		}
-		visited[key] = true
-		for _, e := range edges {
-			if e.From == cur.id && !slices.Contains(cur.path, e.To) {
-				p := append(slices.Clone(cur.path), e.To)
-				queue = append(queue, item{e.To, p, cur.conf * e.Confidence, cur.depth + 1})
+			if len(w.Path) > 1 {
+				walks = append(walks, w)
 			}
+			continue
+		}
+		for _, e := range next {
+			p := append(slices.Clone(cur.path), e.To)
+			queue = append(queue, item{e.To, p, cur.conf * e.Confidence, cur.depth + 1})
 		}
 	}
 	return walks

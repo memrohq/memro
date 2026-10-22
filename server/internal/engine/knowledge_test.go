@@ -106,6 +106,22 @@ func TestBFSWalks(t *testing.T) {
 	}
 }
 
+func TestBFSWalksIncludesShortDeadEndPaths(t *testing.T) {
+	a, b := uuid.New(), uuid.New()
+	nodes := []chainNode{{ID: a, Content: "A"}, {ID: b, Content: "B"}}
+	edges := []domain.Relation{{From: a, To: b, Confidence: 0.8}}
+	walks := bfsWalks(a, nodes, edges, 2)
+	if len(walks) != 1 {
+		t.Fatalf("walks = %+v, want one short path ending at B", walks)
+	}
+	if len(walks[0].Path) != 2 || walks[0].Path[1] != b {
+		t.Fatalf("path = %v, want A -> B", walks[0].Path)
+	}
+	if walks[0].Confidence < 0.799 || walks[0].Confidence > 0.801 {
+		t.Fatalf("confidence = %v, want 0.8", walks[0].Confidence)
+	}
+}
+
 func TestResultCacheInvalidation(t *testing.T) {
 	c := NewResultCache()
 	q := domain.SearchQuery{AgentID: "agent", Query: "x", Limit: 5}
