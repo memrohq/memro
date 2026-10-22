@@ -105,6 +105,7 @@ func Run(ctx context.Context, cfg config.Config, opts ...Option) error {
 	slog.Info("embedding provider", "name", provider.Name(), "model", provider.Model(), "enabled", provider.Enabled())
 	ix := indexer.New(st, provider)
 	eng := engine.New(pool, provider, ix)
+	eng.SetAggregatePerSession(cfg.SearchAggregatePerSession)
 	ix.OnIndexed = eng.Cache().InvalidateAgent
 	files, err := filestore.NewLocal(cfg.FileStoragePath)
 	if err != nil {

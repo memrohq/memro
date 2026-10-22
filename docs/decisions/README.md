@@ -25,6 +25,7 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0017](0017-webhook-replay-protection.md) | Webhook replay protection for GitHub, Linear and Sentry | 2026-10-22 | Accepted |
 | [0018](0018-tenant-agent-scoping-audit.md) | Tenant and agent scoping audit & cross-agent isolation | 2026-10-22 | Accepted |
 | [0019](0019-server-side-coordination.md) | Server-side multi-agent coordination leases and intents | 2026-10-22 | Accepted |
+| [0022](0022-session-diverse-search-for-aggregate-questions.md) | Session-diverse search for aggregate questions (off by default) | 2026-10-23 | Accepted |
 
 Template:
 
