@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -60,8 +61,9 @@ type Config struct {
 	// replaced, e.g. how to pay for a plan.
 	UnclaimedCapHint string
 
-	// MetricsToken protects GET /metrics with Bearer auth. When empty, /metrics
-	// is served without auth (for self-hosters) and a warning is logged.
+	// MetricsToken protects GET /metrics and GET /stats/cache with Bearer auth.
+	// When set, it must be at least 32 characters. When empty, metrics and
+	// cache stats are served without auth (for self-hosters) and a warning is logged.
 	MetricsToken string
 
 	// Public URLs handed to `memro connect`.
@@ -165,6 +167,14 @@ func Load() Config {
 		}
 	}
 	return c
+}
+
+// Validate checks for configuration errors that must prevent the server from starting.
+func (c Config) Validate() error {
+	if c.MetricsToken != "" && len(c.MetricsToken) < 32 {
+		return errors.New("METRICS_TOKEN must be at least 32 characters")
+	}
+	return nil
 }
 
 // ConnectorsConfig configures the Slack and GitHub connectors.

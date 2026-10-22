@@ -55,6 +55,13 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) cacheStats(w http.ResponseWriter, r *http.Request) {
+	if s.embed == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"query_embedding_cache": map[string]any{
+			"size": 0, "max_size": 0, "hits": 0, "misses": 0,
+			"hit_rate_percent": "0.00%", "ttl_seconds": 3600,
+		}})
+		return
+	}
 	st := s.embed.CacheStats()
 	rate := 0.0
 	if total := st.Hits + st.Misses; total > 0 {
