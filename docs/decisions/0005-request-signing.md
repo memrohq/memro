@@ -9,12 +9,14 @@ resource ID while sending an empty body. Key formats differed (32-byte seed vs
 signature could be replayed against another route within 5 minutes.
 
 ## Decision
-- v1 (default for now): `ed25519(timestamp || body)`; every SDK signs the
-  exact bytes sent (empty for GET/DELETE). `ALLOW_LEGACY_SIGNATURES` can turn
-  v1 off.
-- v2 (`X-Signature-Version: 2`): `timestamp \n METHOD \n path?query \n body`,
-  with a replay cache. SDKs should move to v2.
+- v1 (legacy): `ed25519(timestamp || body)`; disabled by default (`ALLOW_LEGACY_SIGNATURES=false`).
+  When enabled for legacy clients, v1 requests are checked against the replay cache,
+  increment `memro_legacy_signature_requests_total`, and log at INFO once per agent per hour
+  (agent ID only; never signatures or bodies).
+- v2 (`X-Signature-Version: 2`, default): `timestamp \n METHOD \n path?query \n body`,
+  with replay protection and signature case normalization. All current SDKs send v2.
 - All SDKs accept 32-byte seeds and 64-byte keys.
 
 ## Consequences
-Cross-SDK keys work. Next: switch SDKs to v2, then disable v1.
+Cross-SDK keys work. Legacy v1 signatures are rejected by default. Older clients
+can re-enable them via `ALLOW_LEGACY_SIGNATURES=true` while migrating.

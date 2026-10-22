@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "memro": {
+      "command": "npx",
+      "args": ["-y", "memro-cli", "mcp"],
+      "env": {
+        "MEMRO_API_KEY": "memro_sk_your_api_key_here"
+      }
+    }
+  }
+}

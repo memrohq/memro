@@ -41,8 +41,10 @@ import (
 	"github.com/memrohq/memro/server/internal/engine"
 	"github.com/memrohq/memro/server/internal/filestore"
 	"github.com/memrohq/memro/server/internal/indexer"
+	"github.com/memrohq/memro/server/internal/metrics"
 	"github.com/memrohq/memro/server/internal/store"
 	"github.com/memrohq/memro/server/migrations"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // fakeEmbeddings returns bag-of-words vectors, so texts sharing words are
@@ -147,33 +149,40 @@ func setup(t *testing.T, customize ...func(*api.Deps)) *env {
 // do sends a request; sign is "", "v1" or "v2".
 func (e *env) do(a *agent, sign, method, path string, body []byte, hdr map[string]string) (int, []byte) {
 	e.t.Helper()
-	req, _ := http.NewRequest(method, e.srv.URL+path, bytes.NewReader(body))
-	if body != nil && hdr["Content-Type"] == "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	for k, v := range hdr {
-		req.Header.Set(k, v)
-	}
-	if a != nil && sign != "" {
-		ts := strconv.FormatInt(time.Now().Unix(), 10)
-		var payload []byte
-		if sign == "v2" {
-			payload = []byte(ts + "\n" + method + "\n" + req.URL.RequestURI() + "\n" + string(body))
-			req.Header.Set("X-Signature-Version", "2")
-		} else {
-			payload = append([]byte(ts), body...)
+	for attempt := 0; attempt < 3; attempt++ {
+		req, _ := http.NewRequest(method, e.srv.URL+path, bytes.NewReader(body))
+		if body != nil && hdr["Content-Type"] == "" {
+			req.Header.Set("Content-Type", "application/json")
 		}
-		req.Header.Set("X-Agent-Id", a.id)
-		req.Header.Set("X-Timestamp", ts)
-		req.Header.Set("X-Signature", hex.EncodeToString(ed25519.Sign(a.priv, payload)))
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		if a != nil && sign != "" {
+			ts := strconv.FormatInt(time.Now().Unix(), 10)
+			var payload []byte
+			if sign == "v2" {
+				payload = []byte(ts + "\n" + method + "\n" + req.URL.RequestURI() + "\n" + string(body))
+				req.Header.Set("X-Signature-Version", "2")
+			} else {
+				payload = append([]byte(ts), body...)
+			}
+			req.Header.Set("X-Agent-Id", a.id)
+			req.Header.Set("X-Timestamp", ts)
+			req.Header.Set("X-Signature", hex.EncodeToString(ed25519.Sign(a.priv, payload)))
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			e.t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		if a != nil && sign != "" && resp.StatusCode == 401 && strings.Contains(string(b), "Request already used") && attempt < 2 {
+			time.Sleep(1100 * time.Millisecond)
+			continue
+		}
+		return resp.StatusCode, b
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		e.t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, b
+	return 0, nil
 }
 
 func (e *env) must(want int, got int, body []byte, what string) {
@@ -197,7 +206,7 @@ func (e *env) remember(a agent, content, memType string) string {
 	if memType != "" {
 		req["memory_type"] = memType
 	}
-	code, b := e.do(&a, "v1", "POST", "/memory", j(req), nil)
+	code, b := e.do(&a, "v2", "POST", "/memory", j(req), nil)
 	e.must(200, code, b, "create memory")
 	var m struct{ ID string }
 	_ = json.Unmarshal(b, &m)
@@ -244,12 +253,12 @@ func TestAuthRejections(t *testing.T) {
 	// Regression: any bearer token used to be accepted.
 	code, b = e.do(nil, "", "GET", "/memory/agent/"+a.id, nil, map[string]string{"Authorization": "Bearer whatever", "X-Agent-Id": a.id})
 	e.must(401, code, b, "fake bearer token")
-	code, b = e.do(&stranger, "v1", "GET", "/memory/agent/"+stranger.id, nil, nil)
+	code, b = e.do(&stranger, "v2", "GET", "/memory/agent/"+stranger.id, nil, nil)
 	e.must(401, code, b, "unregistered agent")
 
 	// Wrong key for the claimed agent id.
 	forged := agent{id: a.id, priv: stranger.priv}
-	code, b = e.do(&forged, "v1", "GET", "/memory/agent/"+a.id, nil, nil)
+	code, b = e.do(&forged, "v2", "GET", "/memory/agent/"+a.id, nil, nil)
 	e.must(401, code, b, "forged signature")
 
 	// v2 binds the request line and cannot be replayed.
@@ -267,6 +276,78 @@ func TestAuthRejections(t *testing.T) {
 	e.must(401, code, b, "v2 signature reused on another route")
 }
 
+func TestSignatureHexCaseReplay(t *testing.T) {
+	e := setup(t)
+	a := newAgent(t)
+	e.register(a)
+
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	payload := []byte(ts + "\nGET\n/usage\n")
+	sig := hex.EncodeToString(ed25519.Sign(a.priv, payload))
+
+	// 1. A valid v2 request -> 200
+	h := map[string]string{
+		"X-Agent-Id":          a.id,
+		"X-Timestamp":         ts,
+		"X-Signature":         sig,
+		"X-Signature-Version": "2",
+	}
+	code, b := e.do(nil, "", "GET", "/usage", nil, h)
+	e.must(200, code, b, "valid v2 request")
+
+	// 2. The identical request again -> 401 "Request already used"
+	code, b = e.do(nil, "", "GET", "/usage", nil, h)
+	e.must(401, code, b, "identical request replay")
+	if !strings.Contains(string(b), "Request already used") {
+		t.Fatalf("expected 'Request already used', got %s", b)
+	}
+
+	// 3. The same signature uppercased -> 401 "Request already used"
+	hUpper := map[string]string{
+		"X-Agent-Id":          a.id,
+		"X-Timestamp":         ts,
+		"X-Signature":         strings.ToUpper(sig),
+		"X-Signature-Version": "2",
+	}
+	code, b = e.do(nil, "", "GET", "/usage", nil, hUpper)
+	e.must(401, code, b, "uppercased signature replay")
+	if !strings.Contains(string(b), "Request already used") {
+		t.Fatalf("expected 'Request already used', got %s", b)
+	}
+
+	// 4. Mixed case -> 401 "Request already used"
+	mixed := make([]byte, len(sig))
+	for i := 0; i < len(sig); i++ {
+		c := sig[i]
+		if i%2 == 0 && c >= 'a' && c <= 'f' {
+			mixed[i] = c - 'a' + 'A'
+		} else {
+			mixed[i] = c
+		}
+	}
+	hMixed := map[string]string{
+		"X-Agent-Id":          a.id,
+		"X-Timestamp":         ts,
+		"X-Signature":         string(mixed),
+		"X-Signature-Version": "2",
+	}
+	code, b = e.do(nil, "", "GET", "/usage", nil, hMixed)
+	e.must(401, code, b, "mixed-case signature replay")
+	if !strings.Contains(string(b), "Request already used") {
+		t.Fatalf("expected 'Request already used', got %s", b)
+	}
+
+	// 5. Non-128 hex chars -> 401
+	hShort := map[string]string{
+		"X-Agent-Id":          a.id,
+		"X-Timestamp":         ts,
+		"X-Signature":         sig[:126],
+		"X-Signature-Version": "2",
+	}
+	code, b = e.do(nil, "", "GET", "/usage", nil, hShort)
+	e.must(401, code, b, "short signature rejected")
+}
+
 func TestMemoryLifecycleAndSearch(t *testing.T) {
 	e := setup(t)
 	a, b := newAgent(t), newAgent(t)
@@ -274,7 +355,7 @@ func TestMemoryLifecycleAndSearch(t *testing.T) {
 	e.register(b)
 
 	// MCP-style request: no agent_id, no visibility, with metadata.
-	code, body := e.do(&a, "v1", "POST", "/memory", j(map[string]any{
+	code, body := e.do(&a, "v2", "POST", "/memory", j(map[string]any{
 		"content": "User prefers dark mode in the editor", "memory_type": "profile", "metadata": map[string]any{"source": "mcp"},
 	}), nil)
 	e.must(200, code, body, "create memory")
@@ -287,12 +368,12 @@ func TestMemoryLifecycleAndSearch(t *testing.T) {
 	e.remember(a, "Deployed the billing service to production yesterday", "episodic")
 	e.remember(a, "The office coffee machine is on the third floor", "")
 
-	code, body = e.do(&a, "v1", "POST", "/memory", j(map[string]any{"agent_id": b.id, "content": "x"}), nil)
+	code, body = e.do(&a, "v2", "POST", "/memory", j(map[string]any{"agent_id": b.id, "content": "x"}), nil)
 	e.must(403, code, body, "write into another agent")
 
 	e.waitEmbedded(a, 3)
 
-	code, body = e.do(&a, "v1", "GET", "/search?agent_id="+a.id+"&query=editor+dark+mode&mode=semantic&limit=2", nil, nil)
+	code, body = e.do(&a, "v2", "GET", "/search?agent_id="+a.id+"&query=editor+dark+mode&mode=semantic&limit=2", nil, nil)
 	e.must(200, code, body, "semantic search")
 	var sr struct {
 		Results []struct{ Content string }
@@ -303,55 +384,55 @@ func TestMemoryLifecycleAndSearch(t *testing.T) {
 		t.Fatalf("semantic search = %s", body)
 	}
 
-	code, body = e.do(&a, "v1", "GET", "/search?query=billing&mode=keyword", nil, nil)
+	code, body = e.do(&a, "v2", "GET", "/search?query=billing&mode=keyword", nil, nil)
 	e.must(200, code, body, "keyword search")
 	if !strings.Contains(string(body), "billing service") {
 		t.Fatalf("keyword search = %s", body)
 	}
 
-	code, body = e.do(&b, "v1", "GET", "/search?agent_id="+a.id+"&query=billing", nil, nil)
+	code, body = e.do(&b, "v2", "GET", "/search?agent_id="+a.id+"&query=billing", nil, nil)
 	e.must(403, code, body, "search another agent")
 
 	// Cached results must be invalidated when a memory is added.
-	e.do(&a, "v1", "GET", "/search?query=kubernetes", nil, nil)
+	e.do(&a, "v2", "GET", "/search?query=kubernetes", nil, nil)
 	e.remember(a, "We migrated the cluster to kubernetes", "semantic")
-	code, body = e.do(&a, "v1", "GET", "/search?query=kubernetes&mode=keyword", nil, nil)
+	code, body = e.do(&a, "v2", "GET", "/search?query=kubernetes&mode=keyword", nil, nil)
 	if !strings.Contains(string(body), "kubernetes") {
 		t.Fatalf("stale search cache: %s", body)
 	}
 
-	code, body = e.do(&a, "v1", "GET", "/search/temporal?query=billing+service+production&temporal_weight=0.5", nil, nil)
+	code, body = e.do(&a, "v2", "GET", "/search/temporal?query=billing+service+production&temporal_weight=0.5", nil, nil)
 	e.must(200, code, body, "temporal search")
 	if !strings.Contains(string(body), "Observed:") {
 		t.Fatalf("temporal search = %s", body)
 	}
 
-	code, body = e.do(&a, "v1", "GET", "/memory/agent/"+a.id+"?memory_type=profile", nil, nil)
+	code, body = e.do(&a, "v2", "GET", "/memory/agent/"+a.id+"?memory_type=profile", nil, nil)
 	e.must(200, code, body, "list memories")
 	var list []map[string]any
 	_ = json.Unmarshal(body, &list)
 	if len(list) != 1 {
 		t.Fatalf("filtered list = %s", body)
 	}
-	code, body = e.do(&b, "v1", "GET", "/memory/agent/"+a.id, nil, nil)
+	code, body = e.do(&b, "v2", "GET", "/memory/agent/"+a.id, nil, nil)
 	e.must(403, code, body, "list another agent")
 
-	code, body = e.do(&a, "v1", "GET", "/export/"+a.id, nil, nil)
+	code, body = e.do(&a, "v2", "GET", "/export/"+a.id, nil, nil)
 	e.must(200, code, body, "export")
 	if !strings.Contains(string(body), `"total":4`) {
 		t.Fatalf("export = %s", body)
 	}
 
-	code, body = e.do(&a, "v1", "GET", "/stats/temporal", nil, nil)
+	code, body = e.do(&a, "v2", "GET", "/stats/temporal", nil, nil)
 	e.must(200, code, body, "temporal stats")
 	if !strings.Contains(string(body), `"total_memories":4`) {
 		t.Fatalf("stats = %s", body)
 	}
 
 	id := list[0]["id"].(string)
-	code, body = e.do(&b, "v1", "DELETE", "/memory/"+id, nil, nil)
+	code, body = e.do(&b, "v2", "DELETE", "/memory/"+id, nil, nil)
 	e.must(404, code, body, "delete another agent's memory")
-	code, body = e.do(&a, "v1", "DELETE", "/memory/"+id, nil, nil)
+	code, body = e.do(&a, "v2", "DELETE", "/memory/"+id, nil, nil)
 	e.must(204, code, body, "delete memory")
 }
 
@@ -369,13 +450,13 @@ func TestCognitiveEngine(t *testing.T) {
 	foreign := e.remember(other, "Some other agent fact", "semantic")
 	e.waitEmbedded(a, 5)
 
-	code, body := e.do(&a, "v1", "POST", "/mee/reason", j(map[string]string{"query": "spicy food"}), nil)
+	code, body := e.do(&a, "v2", "POST", "/mee/reason", j(map[string]string{"query": "spicy food"}), nil)
 	e.must(200, code, body, "reason")
 	if !strings.Contains(string(body), "spicy") {
 		t.Fatalf("reason = %s", body)
 	}
 
-	code, body = e.do(&a, "v1", "POST", "/mee/evolve", nil, nil)
+	code, body = e.do(&a, "v2", "POST", "/mee/evolve", nil, nil)
 	e.must(200, code, body, "evolve")
 	var ev struct {
 		MemoriesEvolved    int      `json:"memories_evolved"`
@@ -386,41 +467,41 @@ func TestCognitiveEngine(t *testing.T) {
 		t.Fatalf("evolve = %s", body)
 	}
 
-	code, body = e.do(&a, "v1", "GET", "/analyze/conflicts", nil, nil)
+	code, body = e.do(&a, "v2", "GET", "/analyze/conflicts", nil, nil)
 	e.must(200, code, body, "analyze conflicts")
 	if !strings.Contains(string(body), `"total_conflicts":1`) {
 		t.Fatalf("conflicts = %s", body)
 	}
 
-	code, body = e.do(&a, "v1", "GET", "/memory/chain/"+love, nil, nil)
+	code, body = e.do(&a, "v2", "GET", "/memory/chain/"+love, nil, nil)
 	e.must(200, code, body, "memory chain")
 	if !strings.Contains(string(body), `"relation_type":"updates"`) {
 		t.Fatalf("chain = %s", body)
 	}
 
-	code, body = e.do(&a, "v1", "POST", "/mee/resolve", j(map[string]string{"memory_a_id": love, "memory_b_id": hate}), nil)
+	code, body = e.do(&a, "v2", "POST", "/mee/resolve", j(map[string]string{"memory_a_id": love, "memory_b_id": hate}), nil)
 	e.must(200, code, body, "resolve")
 	if !strings.Contains(string(body), "Resolved") && !strings.Contains(string(body), "Ambiguous") {
 		t.Fatalf("resolve = %s", body)
 	}
-	code, body = e.do(&a, "v1", "POST", "/mee/resolve", j(map[string]string{"memory_a_id": love, "memory_b_id": foreign}), nil)
+	code, body = e.do(&a, "v2", "POST", "/mee/resolve", j(map[string]string{"memory_a_id": love, "memory_b_id": foreign}), nil)
 	e.must(404, code, body, "resolve with another agent's memory")
 
-	code, body = e.do(&a, "v1", "GET", "/mee/timeline/"+love, nil, nil)
+	code, body = e.do(&a, "v2", "GET", "/mee/timeline/"+love, nil, nil)
 	e.must(200, code, body, "timeline")
 	if !strings.Contains(string(body), "memory.create") {
 		t.Fatalf("timeline = %s", body)
 	}
-	code, body = e.do(&a, "v1", "GET", "/mee/timeline/"+foreign, nil, nil)
+	code, body = e.do(&a, "v2", "GET", "/mee/timeline/"+foreign, nil, nil)
 	e.must(404, code, body, "timeline of another agent's memory")
 
-	code, body = e.do(&a, "v1", "POST", "/memory/generate-atoms", j(map[string]string{"chunk": "Ana works at Acme. She loves tea."}), nil)
+	code, body = e.do(&a, "v2", "POST", "/memory/generate-atoms", j(map[string]string{"chunk": "Ana works at Acme. She loves tea."}), nil)
 	e.must(200, code, body, "generate atoms")
 	if !strings.Contains(string(body), "employed_at") {
 		t.Fatalf("atoms = %s", body)
 	}
 
-	code, body = e.do(&a, "v1", "GET", "/usage", nil, nil)
+	code, body = e.do(&a, "v2", "GET", "/usage", nil, nil)
 	e.must(200, code, body, "usage")
 	if !strings.Contains(string(body), `"reason_calls":1`) || !strings.Contains(string(body), `"evolve_calls":1`) {
 		t.Fatalf("usage = %s", body)
@@ -438,7 +519,7 @@ func TestFilesHooksTenants(t *testing.T) {
 	fw, _ := w.CreateFormFile("file", "notes.md")
 	_, _ = fw.Write([]byte("Quarterly planning notes: ship the Go backend."))
 	_ = w.Close()
-	code, body := e.do(&a, "v1", "POST", "/upload", buf.Bytes(), map[string]string{"Content-Type": w.FormDataContentType()})
+	code, body := e.do(&a, "v2", "POST", "/upload", buf.Bytes(), map[string]string{"Content-Type": w.FormDataContentType()})
 	e.must(200, code, body, "upload")
 	var up struct {
 		FileID        string  `json:"file_id"`
@@ -449,7 +530,7 @@ func TestFilesHooksTenants(t *testing.T) {
 		t.Fatalf("upload = %s", body)
 	}
 
-	code, body = e.do(&a, "v1", "POST", "/memory/from-file", j(map[string]string{
+	code, body = e.do(&a, "v2", "POST", "/memory/from-file", j(map[string]string{
 		"agent_id": a.id, "file_id": up.FileID, "memory_type": "semantic", "visibility": "private"}), nil)
 	e.must(200, code, body, "memory from file")
 
@@ -461,11 +542,11 @@ func TestFilesHooksTenants(t *testing.T) {
 	code, body = e.do(nil, "", "GET", "/assets/"+up.FileID[:4], nil, nil)
 	e.must(404, code, body, "asset by prefix")
 
-	code, body = e.do(&a, "v1", "POST", "/hooks", j(map[string]string{"event_type": "memory_created", "url": "http://169.254.169.254/latest"}), nil)
+	code, body = e.do(&a, "v2", "POST", "/hooks", j(map[string]string{"event_type": "memory_created", "url": "http://169.254.169.254/latest"}), nil)
 	e.must(400, code, body, "metadata-server webhook")
-	code, body = e.do(&a, "v1", "POST", "/hooks", j(map[string]string{"event_type": "memory_created", "url": "https://hooks.example.com/memro"}), nil)
+	code, body = e.do(&a, "v2", "POST", "/hooks", j(map[string]string{"event_type": "memory_created", "url": "https://hooks.example.com/memro"}), nil)
 	e.must(201, code, body, "register hook")
-	code, body = e.do(&a, "v1", "GET", "/hooks/memory_created", nil, nil)
+	code, body = e.do(&a, "v2", "GET", "/hooks/memory_created", nil, nil)
 	e.must(200, code, body, "list hooks")
 	if !strings.Contains(string(body), "hooks.example.com") {
 		t.Fatalf("hooks = %s", body)
@@ -473,15 +554,15 @@ func TestFilesHooksTenants(t *testing.T) {
 
 	// The shared default tenant's usage spans every user (ADR 0012); see
 	// TestTenantEndpointsRequirePlatformAdmin for who may read it.
-	code, body = e.do(&a, "v1", "GET", "/tenant/00000000-0000-0000-0000-000000000000/usage?hours=1", nil, nil)
+	code, body = e.do(&a, "v2", "GET", "/tenant/00000000-0000-0000-0000-000000000000/usage?hours=1", nil, nil)
 	e.must(403, code, body, "default tenant usage")
 
 	code, body = e.do(nil, "", "POST", "/auth/login", j(map[string]string{"email": "dev@memro.co"}), nil)
 	e.must(503, code, body, "login without SMTP")
 
-	code, body = e.do(&a, "v1", "DELETE", "/identity/"+newAgent(t).id, nil, nil)
+	code, body = e.do(&a, "v2", "DELETE", "/identity/"+newAgent(t).id, nil, nil)
 	e.must(403, code, body, "delete another identity")
-	code, body = e.do(&a, "v1", "DELETE", "/identity/"+a.id, nil, nil)
+	code, body = e.do(&a, "v2", "DELETE", "/identity/"+a.id, nil, nil)
 	e.must(204, code, body, "delete own identity")
 }
 
@@ -505,13 +586,13 @@ func TestExtensionPoints(t *testing.T) {
 	e.register(a)
 	e.remember(a, "first memory", "semantic")
 	e.remember(a, "second memory", "semantic")
-	code, body := e.do(&a, "v1", "POST", "/memory", j(map[string]any{"content": "third memory"}), nil)
+	code, body := e.do(&a, "v2", "POST", "/memory", j(map[string]any{"content": "third memory"}), nil)
 	e.must(403, code, body, "custom quota")
 	if !strings.Contains(string(body), "soft cap reached (2/agent)") {
 		t.Fatalf("quota message = %s", body)
 	}
 
-	code, body = e.do(&a, "v1", "GET", "/search?query=memory&mode=keyword", nil, nil)
+	code, body = e.do(&a, "v2", "GET", "/search?query=memory&mode=keyword", nil, nil)
 	e.must(200, code, body, "search")
 	mu.Lock()
 	got := map[string]int{}
@@ -686,10 +767,10 @@ func TestHooksAreScopedToTheAgent(t *testing.T) {
 	a, b := newAgent(t), newAgent(t)
 	e.register(a)
 	e.register(b)
-	code, body := e.do(&a, "v1", "POST", "/hooks", j(map[string]string{"event_type": "memory_created", "url": "https://a.example.com/hook"}), nil)
+	code, body := e.do(&a, "v2", "POST", "/hooks", j(map[string]string{"event_type": "memory_created", "url": "https://a.example.com/hook"}), nil)
 	e.must(201, code, body, "register hook as A")
 
-	code, body = e.do(&b, "v1", "GET", "/hooks/memory_created", nil, nil)
+	code, body = e.do(&b, "v2", "GET", "/hooks/memory_created", nil, nil)
 	e.must(200, code, body, "list hooks as B")
 	if strings.Contains(string(body), "a.example.com") {
 		t.Fatalf("B sees A's hook: %s", body)
@@ -783,7 +864,7 @@ func TestTemporalSearchFindsMemoriesWithoutEmbeddings(t *testing.T) {
 	if err := e.st.InsertMemory(context.Background(), m); err != nil {
 		t.Fatal(err)
 	}
-	code, body := e.do(&a, "v1", "GET", "/search/temporal?query=invoicing+pipeline", nil, nil)
+	code, body := e.do(&a, "v2", "GET", "/search/temporal?query=invoicing+pipeline", nil, nil)
 	e.must(200, code, body, "temporal search")
 	if !strings.Contains(string(body), m.ID.String()) {
 		t.Fatalf("un-embedded memory not found: %s", body)
@@ -1057,5 +1138,67 @@ func TestQuotaPolicyWithoutGateIsUnchanged(t *testing.T) {
 	for i := range 3 {
 		code, body := e.do(&a, "v2", "GET", fmt.Sprintf("/search?query=q%d&mode=keyword", i), nil, nil)
 		e.must(200, code, body, "search")
+	}
+}
+
+func TestLegacyV1Signatures(t *testing.T) {
+	// 1. Verify default in config.Load() is false
+	os.Unsetenv("ALLOW_LEGACY_SIGNATURES")
+	defaultCfg := config.Load()
+	if defaultCfg.AllowLegacySignatures {
+		t.Fatal("expected AllowLegacySignatures to default to false")
+	}
+
+	// 2. Test v1 rejected by default when AllowLegacySignatures is false
+	eDisabled := setup(t, func(d *api.Deps) {
+		d.Config.AllowLegacySignatures = false
+	})
+	agentDisabled := newAgent(t)
+	eDisabled.register(agentDisabled)
+
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	sig := hex.EncodeToString(ed25519.Sign(agentDisabled.priv, []byte(ts)))
+	h := map[string]string{
+		"X-Agent-Id":  agentDisabled.id,
+		"X-Timestamp": ts,
+		"X-Signature": sig,
+	}
+	code, b := eDisabled.do(nil, "", "GET", "/usage", nil, h)
+	eDisabled.must(401, code, b, "v1 rejected by default")
+	if !strings.Contains(string(b), "Legacy signatures are disabled") {
+		t.Fatalf("expected legacy signatures disabled message, got %s", b)
+	}
+
+	// 3. With ALLOW_LEGACY_SIGNATURES=true: accepted once, replay -> 401, counter increments
+	eEnabled := setup(t, func(d *api.Deps) {
+		d.Config.AllowLegacySignatures = true
+	})
+	agentEnabled := newAgent(t)
+	eEnabled.register(agentEnabled)
+
+	initialCount := testutil.ToFloat64(metrics.LegacySignatureRequests)
+
+	ts2 := strconv.FormatInt(time.Now().Unix(), 10)
+	sig2 := hex.EncodeToString(ed25519.Sign(agentEnabled.priv, []byte(ts2)))
+	h2 := map[string]string{
+		"X-Agent-Id":  agentEnabled.id,
+		"X-Timestamp": ts2,
+		"X-Signature": sig2,
+	}
+	// Accepted once
+	code, b = eEnabled.do(nil, "", "GET", "/usage", nil, h2)
+	eEnabled.must(200, code, b, "v1 accepted when enabled")
+
+	// Replay -> 401
+	code, b = eEnabled.do(nil, "", "GET", "/usage", nil, h2)
+	eEnabled.must(401, code, b, "v1 replay rejected")
+	if !strings.Contains(string(b), "Request already used") {
+		t.Fatalf("expected 'Request already used', got %s", b)
+	}
+
+	// Counter increments
+	finalCount := testutil.ToFloat64(metrics.LegacySignatureRequests)
+	if finalCount != initialCount+1 {
+		t.Fatalf("expected counter to increment by 1, before=%f, after=%f", initialCount, finalCount)
 	}
 }

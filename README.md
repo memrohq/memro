@@ -1,30 +1,37 @@
 # Memro — Verified Memory Infrastructure for AI Agents
 
-Persistent, verifiable memory for AI agents. Retrieve relevant context, validate facts, eliminate contradictions, and build reliable autonomous AI systems.
+Give your AI agents persistent memory across sessions: agent identity, memory storage and hybrid retrieval through an API, SDKs and MCP.
 
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](LICENSE)
 [![CI](https://github.com/memrohq/memro/actions/workflows/ci.yml/badge.svg)](https://github.com/memrohq/memro/actions/workflows/ci.yml)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
 [![MCP Ready](https://img.shields.io/badge/MCP-ready-purple.svg)](mcp)
-[![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+> **License (Source Available)**
+> 
+> Memro is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+> - **Free for Non-Commercial Use**: Personal study, experiments, hobby projects, research, and testing without commercial application.
+> - **Commercial Use**: Using Memro for commercial products or production services requires a managed subscription on [Memro Cloud](https://memro.co) or an enterprise commercial license.
+> - **How to Get a Commercial License**: Visit [memro.co/pricing](https://memro.co/pricing) or contact `licensing@memro.co`.
+
+> **Repository Notice**: `github.com/memrohq/memro` is the single public repository for Memro. It contains the Go server, official SDKs (Python, JavaScript/TypeScript, Go), Model Context Protocol (MCP) server, and the CLI.
 
 ---
 
-## 60-Second Quickstart
+## Quickstart
 
-### Option A: Connect Your Coding Assistants (Cloud & MCP)
-
-Connect Claude Code, Cursor, Codex, VS Code, Windsurf, or Claude Desktop with a single command:
+### Option A: Memro Cloud with Claude Code, Cursor, or Codex (< 10 lines)
 
 ```bash
-# 1. Sign in via browser device flow and auto-configure local tools
+# 1. Connect installed agent tools via device login:
 npx memro-cli connect
 
-# 2. Check connection status
+# 2. Check connection status:
 npx memro-cli status
 ```
 
-Your coding assistants will immediately have access to persistent project and developer context across sessions.
+In your assistant, say: *"Remember that our primary database is PostgreSQL 16 with pgvector."*  
+Restart your session and ask: *"What database and extensions do we use?"*
 
 ### Option B: Self-Host with Docker Compose (Source Available)
 
@@ -62,173 +69,137 @@ For complete deployment options, production topologies, and configuration tables
 
 ## Architecture
 
-Memro couples dense vector embeddings with PostgreSQL full-text search, fused via Reciprocal Rank Fusion ($k=60$) and audited by a contradiction resolution engine.
-
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                          AI Clients & Agents                           │
-│   Claude Code · Cursor · Codex · Claude Desktop · Autonomous Agents    │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                        Ed25519 Signed REST / MCP
-                                    │
-┌───────────────────────────────────▼────────────────────────────────────┐
-│                       Memro Engine & API Server                        │
-│                               (Go Server)                              │
-├───────────────────────────────────┬────────────────────────────────────┤
-│        Verification Engine        │         Temporal Ledger            │
-│   Contradiction detection         │   Chronological timeline offsets   │
-│   Supersedes obsolete facts       │   Calendar hallucination guard     │
-├───────────────────────────────────┴────────────────────────────────────┤
-│                       Hybrid Retrieval (RRF)                           │
-│     RRF Score = 1/(60 + Rank_vector) + 1/(60 + Rank_fulltext)         │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                SQL / Embeddings
-                                    │
-┌───────────────────────────────────▼────────────────────────────────────┐
-│                 PostgreSQL 16 + pgvector Database                      │
-│   Identities · Typed Memories · pgvector Cosine · FTS tsvectors        │
-└────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────┐
+│         Clients & MCP Tools          │
+│   Claude Code · Cursor · Codex · SDKs│
+└──────────────────┬───────────────────┘
+                   │  HTTP REST / Stdio MCP
+┌──────────────────▼───────────────────┐
+│            Memro API (Go)            │
+│  Sovereign Ed25519 Identity · RRF    │
+└──────────────────┬───────────────────┘
+                   │  SQL & Embeddings
+┌──────────────────▼───────────────────┐
+│       PostgreSQL 16 + pgvector       │
+│  pgvector Dense Search + tsvector FTS│
+└──────────────────────────────────────┘
 ```
 
-### Core Primitives
-
-Memro structures memory into four typed categories rather than dumping unstructured text chunks:
-- **`episodic`**: Conversational turns, command logs, execution history.
-- **`semantic`**: Lasting facts, schemas, decisions, user profile attributes.
-- **`procedural`**: Reusable recipes, instructions, workflows, bash commands.
-- **`profile`**: Agent persona definitions, guardrails, role boundaries.
-
-Two calls drive the entire lifecycle:
-1. **`remember(text, type, tags)`**: Index vector embeddings in pgvector and full-text search terms in PostgreSQL.
-2. **`recall(query, limit)`**: Retrieve context using Reciprocal Rank Fusion, filtering out contradicted facts.
-
----
-
-## Official SDKs & Examples
-
-Runnable, complete examples are available in [`examples/`](examples/):
-
-| Language | SDK Package | Quick Example |
-|---|---|---|
-| **Python** | [`pip install memro`](sdk/python/) | [`examples/python/`](examples/python/) |
-| **JavaScript / TypeScript** | [`npm install @memro/sdk`](sdk/js/) | [`examples/typescript/`](examples/typescript/) |
-| **Go** | [`go get github.com/memrohq/memro/sdk/go`](sdk/go/) | [`examples/go/`](examples/go/) |
-
-### Python Example
-
-```python
-from memro import Agent
-
-# Create an autonomous agent identity (solves proof-of-work)
-agent = Agent.create()
-
-# Store procedural memory
-agent.remember("Always run database migrations before deploying billing services", type="procedural")
-
-# Hybrid recall
-memories = agent.recall("deploying billing service", limit=5)
-for m in memories:
-    print(f"[{m.memory_type}] {m.text}")
-```
-
-### TypeScript Example
-
-```typescript
-import { Agent } from '@memro/sdk';
-
-// Create an autonomous agent identity
-const agent = await Agent.create();
-
-// Store procedural memory
-await agent.remember('Always run database migrations before deploying billing services', {
-  type: 'procedural'
-});
-
-// Hybrid recall
-const results = await agent.recall('deploying billing service', { limit: 5 });
-results.forEach(r => console.log(`[${r.memory_type}] ${r.content}`));
-```
-
-### Go Example
-
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "github.com/memrohq/memro/sdk/go"
-)
-
-func main() {
-    ctx := context.Background()
-    agent, _ := memro.CreateAgent(nil)
-
-    _, _ = agent.Remember(ctx, "Always run database migrations before deploying billing services", &memro.RememberOptions{
-        Type: memro.MemoryTypeProcedural,
-    })
-
-    memories, _ := agent.Recall(ctx, "deploying billing service", &memro.RecallOptions{Limit: 5})
-    for _, m := range memories {
-        fmt.Println(m.Content)
-    }
-}
-```
-
----
-
-## Supported Clients & Ecosystem
-
-- **Claude Code**: Native MCP tool support via `npx memro-cli connect`.
-- **Cursor**: Automated `.cursor/mcp.json` configuration.
-- **Codex / OpenCode**: Built-in CLI integration.
-- **Claude Desktop & Zed**: Standard JSON configuration over STDIO or remote HTTP MCP.
-- **Any MCP Client**: Full support for Model Context Protocol specifications.
-
----
-
-## Reproducible Benchmarks
-
-Memro is evaluated on the standard **LongMemEval** benchmark suite across 500 challenge questions with full transparency:
-- **Overall QA Accuracy**: 77.6% (388/500)
-- **Recall@5**: 97.6% (488/500)
-- **Recall@10**: 99.0% (495/500)
-- **Knowledge Updates**: 82.1% QA accuracy
-- **Single-Session Facts**: 95.7%–96.4% QA accuracy
-
-Full methodology, raw reports, and reproduction instructions are published in [`bench/`](bench/) and on the [Memro Benchmarks Page](https://memro.co/benchmarks).
+Memro runs a Go HTTP API backed by PostgreSQL and pgvector. Search queries combine vector cosine similarity and full-text keyword search using Reciprocal Rank Fusion (RRF, $k=60$). Agents authenticate using sovereign Ed25519 keypairs solved via local proof-of-work (private keys never leave the host) or standard Bearer API tokens.
 
 ---
 
 ## Repository Layout
 
-| Path | Contents |
-|---|---|
-| [`server/`](server) | Memro API server and engine (Go, PostgreSQL + pgvector) |
-| [`sdk/python/`](sdk/python) | Official Python SDK |
-| [`sdk/js/`](sdk/js) | Official JavaScript / TypeScript SDK |
-| [`sdk/go/`](sdk/go) | Official Go SDK |
-| [`cli/`](cli) | CLI connector (`npx memro-cli connect`) |
-| [`examples/`](examples) | Runnable register -> remember -> recall examples |
-| [`mcp/`](mcp) | MCP server implementation |
-| [`bench/`](bench) | Reproducible benchmark harness and evaluation scripts |
-| [`docs/`](docs) | Documentation: concepts, API reference, architecture, self-hosting |
+`memrohq/memro` holds all components in one mono-repository:
+
+| Path | Description | Documentation |
+|---|---|---|
+| [`server/`](server) | Go API server, PostgreSQL + pgvector engine | [Self-Hosting Guide](docs/self-hosting.md) |
+| [`cli/`](cli) | One-command connector (`npx memro-cli connect`) | [CLI Documentation](cli/README.md) |
+| [`mcp/`](mcp) | Model Context Protocol server (stdio & SSE HTTP) | [MCP Guide](docs/mcp.md) |
+| [`sdk/python/`](sdk/python) | Official Python SDK (PyPI: `memro`) | [Python SDK Guide](sdk/python/README.md) |
+| [`sdk/js/`](sdk/js) | Official JavaScript / TypeScript SDK (npm: `@memro/sdk`) | [JavaScript SDK Guide](sdk/js/README.md) |
+| [`sdk/go/`](sdk/go) | Official Go SDK (`github.com/memrohq/memro/sdk/go@v0.1.0`) | [Go SDK Guide](sdk/go/README.md) |
+| [`examples/`](examples) | Runnable integrations (Claude Code, Cursor, Codex) | [Examples Index](examples/README.md) |
+| [`bench/`](bench) | Reproducible benchmark harness and test suites | [Benchmarks Index](docs/benchmarks/README.md) |
+| [`docs/`](docs) | Architecture, concepts, API reference, decisions | [Documentation Index](docs/README.md) |
 
 ---
 
-## Contributing
+## Official SDKs & Runnable Examples
 
-We welcome community contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting pull requests.
+### Python (`sdk/python`)
+```bash
+# PyPI (once published) or install from source: pip install ./sdk/python
+pip install memro
+```
+```python
+from memro import Agent
 
-### Development Setup
+agent = Agent.create()  # local sovereign Ed25519 identity
+mem = agent.remember("The billing service was rewritten in Go", type="semantic")
+results = agent.recall("billing service language")
+print(results[0].content)
+```
+See runnable script at [`examples/python/register_remember_recall.py`](examples/python/register_remember_recall.py).
+
+### JavaScript / TypeScript (`sdk/js`)
+```bash
+# npm (once published) or install from local build: npm install ./sdk/js
+npm install @memro/sdk
+```
+```typescript
+import { Agent } from '@memro/sdk';
+
+const agent = await Agent.create(); // local sovereign Ed25519 identity
+const mem = await agent.remember('The billing service was rewritten in Go', { type: 'semantic' });
+const results = await agent.recall('billing service language');
+console.log(results[0].content);
+```
+See runnable script at [`examples/typescript/index.js`](examples/typescript/index.js).
+
+### Go (`sdk/go`)
+```bash
+go get github.com/memrohq/memro/sdk/go@v0.1.0
+```
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	memro "github.com/memrohq/memro/sdk/go"
+)
+
+func main() {
+	ctx := context.Background()
+	agent, _ := memro.CreateAgent(nil)
+	mem, _ := agent.Remember(ctx, "The billing service was rewritten in Go", nil)
+	results, _ := agent.Recall(ctx, "billing service language", nil)
+	fmt.Println(results[0].Content)
+}
+```
+See runnable script at [`examples/go/main.go`](examples/go/main.go).
+
+---
+
+## Integration Guides
+
+Step-by-step guides for connecting coding tools with full session-restart memory verification:
+- [Claude Code Integration](docs/integrations/claude-code.md) ([`examples/claude-code/`](examples/claude-code/))
+- [Cursor Integration](docs/integrations/cursor.md) ([`examples/cursor/`](examples/cursor/))
+- [OpenAI Codex Integration](docs/integrations/codex.md) ([`examples/codex/`](examples/codex/))
+
+---
+
+## Advanced Memory Features
+
+Memro includes structured primitives and cognitive graphs beyond basic vector search:
+- **Typed Memories**: Categorize observations as `semantic` (facts), `episodic` (events/conversations), `procedural` (runbooks/recipes), or `profile` (agent guardrails). See [Memory Concepts](docs/concepts.md).
+- **Temporal Search & Evolution**: Query memories with timestamp weighting and trace how beliefs evolve over time. See [API Reference](docs/api-reference.md).
+- **Conflict Analysis & Resolution**: Identify contradictory facts across sessions and mark superseded memories using `resolve_conflict()`. See [Conflict Resolution](docs/concepts.md#conflict-resolution).
+- **Reasoning Graphs**: Trace memory provenance, causal chains, and dependencies between stored observations. See [Opinionated Guide](docs/Opinionated_Guide.md).
+
+---
+
+## Measurable Verification & Benchmarks
+
+Memro publishes empirical evaluations and methodology:
+- **LongMemEval Benchmark**: Evaluated across 500 questions testing multi-session recall and knowledge updates. See [LongMemEval Report](docs/benchmarks/longmemeval.md).
+- **Empirical Failure & Boundary Evaluations**: Runnable test suite for identity boundaries, contradictory facts, stale facts, and distractor rejection. See [Measurable Evaluations](docs/benchmarks/evaluations.md).
+- **Clean-Machine Verification**: Full transcript verifying every quickstart command in a container without local caches. See [Verification Transcript](docs/verify-quickstart.md).
+
+---
+
+## Contributing & Development
 
 ```bash
 # 1. Start PostgreSQL with pgvector
 docker compose up -d db
 
-# 2. Run backend API server (Go 1.22+)
+# 2. Run backend API server
 cd server
 DATABASE_URL=postgres://memro:memro@localhost:5432/memro go run ./cmd/memro-api
 
@@ -236,12 +207,9 @@ DATABASE_URL=postgres://memro:memro@localhost:5432/memro go run ./cmd/memro-api
 MEMRO_TEST_DATABASE_URL=postgres://memro:memro@localhost:5432/memro go test -race ./...
 ```
 
+Please review [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) before submitting pull requests.
+
 ---
 
-## License
-
-Memro is **source available** under the [PolyForm Noncommercial License 1.0.0](LICENSE).
-
-You are free to read, run, modify, and self-host Memro for personal projects, research, academic study, and non-commercial development.
-
-Commercial use requires [Memro Cloud](https://memro.co) or an enterprise license agreement. Contact support@memro.co or visit [memro.co/pricing](https://memro.co/pricing).
+Repository: [github.com/memrohq/memro](https://github.com/memrohq/memro) · Documentation: [https://memro.co](https://memro.co)
+License: Source available under [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0). Free for non-commercial use; commercial use requires Memro Cloud or a commercial license.

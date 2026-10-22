@@ -93,20 +93,22 @@ instructions (`CLAUDE.md`, `AGENTS.md`, …):
 | `get_timeline` | `memory_id` | Audit history of a memory |
 | `find_contradictions` | | How many conflicts exist and how many are unresolved |
 
-**Coordinating several agents** on one codebase (stored as procedural
-memories). The session is the `session_id` query parameter on the MCP URL
-(`…/mcp?session_id=team-a`, default `default`); claims and intents are only
-visible within it. A release or handoff frees the resource for a new claim.
-`limit` on any tool is capped at 50.
+**Coordinating several agents** on one codebase with atomic server-side leases
+and non-blocking intents. Claims are shared with agents in the same account/space
+and expire after the TTL (default 15 minutes, max 2 hours). A release or handoff
+frees the resource for a new claim, and handoff summaries are passed to the next claimer.
+Coordination records use dedicated tables rather than procedural memories, keeping
+memory search and recall clean.
 
 | Tool | Arguments | |
 |---|---|---|
 | `pre_action_check` | `resource`, `intent` | `allow`, `warn` (overlapping intent) or `block` (claimed) |
-| `claim_task` | `resource`, `intent` | Claim a file or task |
-| `release_task` | `resource`, `status?` | |
-| `log_intent` | `resource`, `intent` | Announce planned work |
-| `handoff_task` | `resource`, `summary`, `next_agent_id?` | Hand off and release |
-| `get_active_work`, `get_active_context` | `resource?` | Current claims and intents |
+| `claim_task` | `resource`, `intent`, `ttl?` | Claim a file or task (shared in account/space, expires after TTL) |
+| `heartbeat_task` | `resource`, `ttl?` | Extend an active lease before it expires |
+| `release_task` | `resource`, `status?` | Release a claim (`completed` or `abandoned`) |
+| `log_intent` | `resource`, `intent`, `ttl?` | Announce planned work (non-blocking) |
+| `handoff_task` | `resource`, `summary`, `next_agent_id?` | Hand off and release with summary for next claimer |
+| `get_active_work`, `get_active_context` | `resource?` | Current active claims and intents in scope |
 | `get_system_status` | | Server version, agent and API health |
 
 ## Run it yourself

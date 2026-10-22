@@ -237,7 +237,8 @@ func (e *Engine) semanticIDs(ctx context.Context, q domain.SearchQuery, tenantID
 	args := []any{q.AgentID, tenantID, pgvector.NewVector(vec), len(vec), limit}
 	sql := `SELECT m.id FROM memory_embeddings e JOIN memories m ON m.id = e.memory_id
 		WHERE m.agent_id = $1 AND m.tenant_id = $2 AND e.dims = $4
-		  AND m.created_at > NOW() - INTERVAL '90 days'` + typeFilter(q, &args) + `
+		  AND m.created_at > NOW() - INTERVAL '90 days'
+		  AND (m.metadata->>'action' IS NULL OR m.metadata->>'action' NOT IN ('claim', 'release', 'intent', 'handoff'))` + typeFilter(q, &args) + `
 		ORDER BY e.embedding <=> $3 LIMIT $5`
 	rows, err := e.pool.Query(ctx, sql, args...)
 	if err != nil {
@@ -270,6 +271,7 @@ func (e *Engine) keywordHits(ctx context.Context, q domain.SearchQuery, tenantID
 		FROM memories m
 		WHERE m.agent_id = $1 AND m.tenant_id = $2
 		  AND m.created_at > NOW() - INTERVAL '90 days'
+		  AND (m.metadata->>'action' IS NULL OR m.metadata->>'action' NOT IN ('claim', 'release', 'intent', 'handoff'))
 		  AND to_tsvector('english', m.content) @@ ` + tsq + typeFilter(q, &args) + `
 		ORDER BY rank DESC LIMIT $4`
 	rows, err := e.pool.Query(ctx, sql, args...)
@@ -355,7 +357,7 @@ type TemporalItem struct {
 // score = similarity*(1-w) + recency*w, where recency = 1/(1 + age_days/30).
 func (e *Engine) TemporalSearch(ctx context.Context, q TemporalQuery, tenantID uuid.UUID) ([]TemporalItem, error) {
 	args := []any{q.AgentID, tenantID}
-	where := `m.agent_id = $1 AND m.tenant_id = $2`
+	where := `m.agent_id = $1 AND m.tenant_id = $2 AND (m.metadata->>'action' IS NULL OR m.metadata->>'action' NOT IN ('claim', 'release', 'intent', 'handoff'))`
 	add := func(cond string, v any) {
 		args = append(args, v)
 		where += fmt.Sprintf(" AND "+cond, len(args))

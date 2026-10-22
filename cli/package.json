@@ -1,14 +1,14 @@
 {
   "name": "memro-cli",
   "version": "0.1.6",
-  "description": "Memro — Verified Memory Infrastructure for AI Agents. Connect Claude Code, Codex, Cursor, and other AI tools with one command.",
-  "license": "SEE LICENSE IN LICENSE",
+  "description": "Memro — verified memory infrastructure for AI agents",
+  "license": "LicenseRef-PolyForm-Noncommercial-1.0.0",
   "homepage": "https://memro.co",
-  "repository": { "type": "git", "url": "git+https://github.com/memrohq/memro.git", "directory": "cli" },
+  "repository": { "type": "git", "url": "https://github.com/memrohq/memro", "directory": "cli" },
   "type": "module",
   "bin": { "memro-cli": "bin/memro.js", "memro": "bin/memro.js" },
   "files": ["bin", "src", "LICENSE", "README.md"],
   "engines": { "node": ">=18" },
   "scripts": { "test": "node --test" },
-  "keywords": ["memro", "mcp", "memory", "claude-code", "codex", "cursor", "antigravity", "opencode", "ai-agents"]
+  "keywords": ["ai-agents", "agent-memory", "mcp", "llm"]
 }

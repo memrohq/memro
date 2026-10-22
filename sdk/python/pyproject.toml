@@ -5,18 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "memro"
 version = "0.2.0"
-description = "Memro — Verified Memory Infrastructure for AI Agents (Official Python SDK)"
+description = "Memro — verified memory infrastructure for AI agents"
 readme = "README.md"
 requires-python = ">=3.8"
-license = {text = "PolyForm-Noncommercial-1.0.0"}
+license = {text = "LicenseRef-PolyForm-Noncommercial-1.0.0"}
 authors = [
     {name = "memro Team", email = "sdk@memro.co"}
 ]
-keywords = ["agent-memory", "ai-agents", "agentic-memory", "memory", "vector-database", "embeddings", "mcp"]
+keywords = ["ai-agents", "agent-memory", "mcp", "llm"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: Other/Proprietary License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
@@ -49,7 +48,7 @@ dev = [
 [project.urls]
 Homepage = "https://memro.co"
 Documentation = "https://docs.memro.co/sdk/python"
-Repository = "https://github.com/memrohq/memro/tree/main/sdk/python"
+Repository = "https://github.com/memrohq/memro"
 Issues = "https://github.com/memrohq/memro/issues"
 
 [tool.setuptools.packages.find]

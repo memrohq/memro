@@ -1,7 +1,7 @@
 {
   "name": "@memro/sdk",
   "version": "0.2.0",
-  "description": "Memro — Verified Memory Infrastructure for AI Agents (Official JavaScript/TypeScript SDK)",
+  "description": "Memro — verified memory infrastructure for AI agents",
   "main": "dist/cjs/index.js",
   "types": "dist/esm/index.d.ts",
   "files": [
@@ -9,6 +9,9 @@
     "README.md",
     "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node -e \"require('fs').writeFileSync('dist/cjs/package.json','{\\\"type\\\":\\\"commonjs\\\"}');require('fs').writeFileSync('dist/esm/package.json','{\\\"type\\\":\\\"module\\\"}')\"",
     "typecheck": "tsc --noEmit",
@@ -16,15 +19,13 @@
     "prepublishOnly": "npm test"
   },
   "keywords": [
-    "ai",
-    "agents",
-    "memory",
-    "vector-database",
-    "embeddings",
-    "memro"
+    "ai-agents",
+    "agent-memory",
+    "mcp",
+    "llm"
   ],
   "author": "Memro <sdk@memro.co>",
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "LicenseRef-PolyForm-Noncommercial-1.0.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/memrohq/memro",
