@@ -115,8 +115,9 @@ func (m *Manager) linkCrossReferences(ctx context.Context, tx pgx.Tx, c *conn, c
 				    OR source_item ILIKE $3
 				    OR entity_tags @> $4
 				  )
+				  AND tenant_id = $5
 				LIMIT 5`,
-				mem.AgentID, mem.ID, pattern, []string{ref.Key})
+				mem.AgentID, mem.ID, pattern, []string{ref.Key}, mem.TenantID)
 			if err != nil {
 				continue
 			}
@@ -152,7 +153,7 @@ func (m *Manager) linkCrossReferences(ctx context.Context, tx pgx.Tx, c *conn, c
 					SET relationship_types = ARRAY(
 						SELECT DISTINCT UNNEST(array_append(relationship_types, 'cross_source'))
 					)
-					WHERE id IN ($1, $2)`, mem.ID, targetID)
+					WHERE id IN ($1, $2) AND agent_id = $3 AND tenant_id = $4`, mem.ID, targetID, mem.AgentID, mem.TenantID)
 			}
 		}
 	}
