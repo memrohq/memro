@@ -89,7 +89,7 @@ func Load() Config {
 		RateLimitMax:          envInt("RATE_LIMIT_MAX", 200),
 		RateLimitWindow:       time.Duration(envInt("RATE_LIMIT_WINDOW_SECONDS", 60)) * time.Second,
 		TrustProxyHeaders:     envBool("TRUST_PROXY_HEADERS", false),
-		AllowLegacySignatures: envBool("ALLOW_LEGACY_SIGNATURES", true),
+		AllowLegacySignatures: envBool("ALLOW_LEGACY_SIGNATURES", false),
 		EmbeddingProvider:     strings.ToLower(env("EMBEDDING_PROVIDER", "openai")),
 		EmbeddingModel:        os.Getenv("EMBEDDING_MODEL"),
 		OpenAIAPIKey:          os.Getenv("OPENAI_API_KEY"),

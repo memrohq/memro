@@ -328,7 +328,7 @@ func TestSlackConnector(t *testing.T) {
 		t.Fatalf("providers: %+v", l)
 	}
 	// Connectors are a dashboard action: a signed agent request may not use them.
-	code, body := e.do(&e.a, "v1", "GET", "/connectors", nil, nil)
+	code, body := e.do(&e.a, "v2", "GET", "/connectors", nil, nil)
 	e.must(403, code, body, "connectors with agent signature")
 
 	authURL, cookie := e.authorize("slack")

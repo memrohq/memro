@@ -32,7 +32,7 @@ func TestCrossAgentIsolation_Search(t *testing.T) {
 	e.waitEmbedded(agentA, 1)
 
 	// 1. Agent A searches for their secret: finds it
-	code, b := e.do(&agentA, "v1", "GET", "/search?query=quantum+encryption+key&mode=hybrid", nil, nil)
+	code, b := e.do(&agentA, "v2", "GET", "/search?query=quantum+encryption+key&mode=hybrid", nil, nil)
 	e.must(http.StatusOK, code, b, "agent A hybrid search")
 	var respA domain.SearchResponse
 	if err := json.Unmarshal(b, &respA); err != nil {
@@ -43,7 +43,7 @@ func TestCrossAgentIsolation_Search(t *testing.T) {
 	}
 
 	// 2. Before Agent B stores any memories, Agent B searches: must return 0 results
-	code, b = e.do(&agentB, "v1", "GET", "/search?query=quantum+encryption+key&mode=hybrid", nil, nil)
+	code, b = e.do(&agentB, "v2", "GET", "/search?query=quantum+encryption+key&mode=hybrid", nil, nil)
 	e.must(http.StatusOK, code, b, "agent B empty hybrid search")
 	var respBEmpty domain.SearchResponse
 	if err := json.Unmarshal(b, &respBEmpty); err != nil {
@@ -58,7 +58,7 @@ func TestCrossAgentIsolation_Search(t *testing.T) {
 	e.waitEmbedded(agentB, 1)
 
 	// 4. Agent B searches for Agent A's exact phrase in hybrid mode: must NEVER return Agent A's memory
-	code, b = e.do(&agentB, "v1", "GET", "/search?query=quantum+encryption+key&mode=hybrid", nil, nil)
+	code, b = e.do(&agentB, "v2", "GET", "/search?query=quantum+encryption+key&mode=hybrid", nil, nil)
 	e.must(http.StatusOK, code, b, "agent B hybrid search")
 	var respB domain.SearchResponse
 	if err := json.Unmarshal(b, &respB); err != nil {
@@ -71,7 +71,7 @@ func TestCrossAgentIsolation_Search(t *testing.T) {
 	}
 
 	// 3. Agent B searches in semantic-only mode
-	code, b = e.do(&agentB, "v1", "GET", "/search?query=quantum+encryption+key&mode=semantic", nil, nil)
+	code, b = e.do(&agentB, "v2", "GET", "/search?query=quantum+encryption+key&mode=semantic", nil, nil)
 	e.must(http.StatusOK, code, b, "agent B semantic search")
 	var respBSem domain.SearchResponse
 	_ = json.Unmarshal(b, &respBSem)
@@ -82,7 +82,7 @@ func TestCrossAgentIsolation_Search(t *testing.T) {
 	}
 
 	// 4. Agent B searches in keyword-only mode
-	code, b = e.do(&agentB, "v1", "GET", "/search?query=quantum+encryption+key&mode=keyword", nil, nil)
+	code, b = e.do(&agentB, "v2", "GET", "/search?query=quantum+encryption+key&mode=keyword", nil, nil)
 	e.must(http.StatusOK, code, b, "agent B keyword search")
 	var respBKw domain.SearchResponse
 	_ = json.Unmarshal(b, &respBKw)
@@ -93,7 +93,7 @@ func TestCrossAgentIsolation_Search(t *testing.T) {
 	}
 
 	// 5. Agent B searches with temporal search
-	code, b = e.do(&agentB, "v1", "GET", "/search/temporal?query=quantum+encryption+key", nil, nil)
+	code, b = e.do(&agentB, "v2", "GET", "/search/temporal?query=quantum+encryption+key", nil, nil)
 	e.must(http.StatusOK, code, b, "agent B temporal search")
 	var tempResults []map[string]any
 	_ = json.Unmarshal(b, &tempResults)
@@ -104,7 +104,7 @@ func TestCrossAgentIsolation_Search(t *testing.T) {
 	}
 
 	// 6. Agent B attempts to query specifying agent_id=agentA
-	code, _ = e.do(&agentB, "v1", "GET", "/search?query=quantum&agent_id="+agentA.id, nil, nil)
+	code, _ = e.do(&agentB, "v2", "GET", "/search?query=quantum&agent_id="+agentA.id, nil, nil)
 	if code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden when Agent B supplies Agent A's agent_id, got %d", code)
 	}
@@ -125,25 +125,25 @@ func TestCrossAgentIsolation_Get(t *testing.T) {
 	memIDA := e.remember(agentA, "Agent A confidential briefing notes", "semantic")
 
 	// 1. Agent B attempts to list Agent A's memories
-	code, _ := e.do(&agentB, "v1", "GET", "/memory/agent/"+agentA.id, nil, nil)
+	code, _ := e.do(&agentB, "v2", "GET", "/memory/agent/"+agentA.id, nil, nil)
 	if code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden for cross-agent memory listing, got %d", code)
 	}
 
 	// 2. Agent B attempts to export Agent A's data
-	code, _ = e.do(&agentB, "v1", "GET", "/export/"+agentA.id, nil, nil)
+	code, _ = e.do(&agentB, "v2", "GET", "/export/"+agentA.id, nil, nil)
 	if code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden for cross-agent export, got %d", code)
 	}
 
 	// 3. Agent B attempts to fetch memory chain for Agent A's memory
-	code, _ = e.do(&agentB, "v1", "GET", "/memory/chain/"+memIDA, nil, nil)
+	code, _ = e.do(&agentB, "v2", "GET", "/memory/chain/"+memIDA, nil, nil)
 	if code != http.StatusNotFound {
 		t.Fatalf("expected 404 Not Found for cross-agent memory chain, got %d", code)
 	}
 
 	// 4. Agent B attempts to fetch timeline for Agent A's memory
-	code, _ = e.do(&agentB, "v1", "GET", "/mee/timeline/"+memIDA, nil, nil)
+	code, _ = e.do(&agentB, "v2", "GET", "/mee/timeline/"+memIDA, nil, nil)
 	if code != http.StatusNotFound {
 		t.Fatalf("expected 404 Not Found for cross-agent timeline, got %d", code)
 	}
@@ -165,7 +165,7 @@ func TestCrossAgentIsolation_Get(t *testing.T) {
 		ExtractedText: &txt,
 	})
 
-	code, _ = e.do(&agentB, "v1", "POST", "/memory/from-file", j(map[string]any{
+	code, _ = e.do(&agentB, "v2", "POST", "/memory/from-file", j(map[string]any{
 		"file_id":     fileID.String(),
 		"memory_type": "semantic",
 	}), nil)
@@ -187,7 +187,7 @@ func TestCrossAgentIsolation_Delete(t *testing.T) {
 	memIDA := e.remember(agentA, "Agent A permanent architectural record", "semantic")
 
 	// 1. Agent B attempts to delete Agent A's memory
-	code, _ := e.do(&agentB, "v1", "DELETE", "/memory/"+memIDA, nil, nil)
+	code, _ := e.do(&agentB, "v2", "DELETE", "/memory/"+memIDA, nil, nil)
 	if code != http.StatusNotFound {
 		t.Fatalf("expected 404 Not Found when Agent B deletes Agent A memory, got %d", code)
 	}
@@ -199,7 +199,7 @@ func TestCrossAgentIsolation_Delete(t *testing.T) {
 	}
 
 	// 2. Agent B attempts to delete Agent A's identity
-	code, _ = e.do(&agentB, "v1", "DELETE", "/identity/"+agentA.id, nil, nil)
+	code, _ = e.do(&agentB, "v2", "DELETE", "/identity/"+agentA.id, nil, nil)
 	if code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden when Agent B deletes Agent A identity, got %d", code)
 	}
