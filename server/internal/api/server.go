@@ -53,6 +53,7 @@ type Server struct {
 	otpLimiter      *RateLimiter // sign-in codes requested per email
 	identityLimiter *RateLimiter // agents registered per client address
 	meeLimiters     map[string]*RateLimiter
+	promHandler     http.Handler
 }
 
 type Deps struct {
@@ -82,6 +83,9 @@ func StoreUsageMeter(st *store.Store) extension.UsageMeter {
 }
 
 func NewServer(d Deps) *Server {
+	if err := d.Config.Validate(); err != nil {
+		panic(err) // misconfiguration; app.Run validates this before building the server
+	}
 	usage, quota := d.Usage, d.Quota
 	if usage == nil {
 		usage = StoreUsageMeter(d.Store)
@@ -113,6 +117,7 @@ func NewServer(d Deps) *Server {
 			"/mee/evolve":  NewRateLimiter(5, time.Minute),
 			"/mee/resolve": NewRateLimiter(10, time.Minute),
 		},
+		promHandler: promhttp.Handler(),
 	}
 	if d.Config.MetricsToken == "" {
 		slog.Warn("METRICS_TOKEN is not set; /metrics is open without authentication")
@@ -127,8 +132,8 @@ func (s *Server) Handler() http.Handler {
 	protected := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.requireAgent(h)) }
 
 	public("GET /health", s.health)
-	public("GET /metrics", s.metrics)
-	public("GET /stats/cache", s.cacheStats)
+	public("GET /metrics", s.requireMetricsToken(s.metrics))
+	public("GET /stats/cache", s.requireMetricsToken(s.cacheStats))
 	public("POST /identity", s.createIdentity)
 	public("GET /identity/pow", s.identityPow)
 	public("GET /identity/{id}", s.getIdentity)
@@ -392,7 +397,8 @@ var signedWebhooks = map[string]bool{
 
 func (s *Server) rateLimitIP(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/health" && r.URL.Path != "/metrics" && !signedWebhooks[r.URL.Path] && !s.ipLimiter.Allow(s.clientIP(r)) {
+		metricsExempt := (r.URL.Path == "/metrics" || r.URL.Path == "/stats/cache") && s.validMetricsToken(r)
+		if r.URL.Path != "/health" && !metricsExempt && !signedWebhooks[r.URL.Path] && s.ipLimiter != nil && !s.ipLimiter.Allow(s.clientIP(r)) {
 			metrics.RateLimitHits.Inc()
 			httpError(w, http.StatusTooManyRequests, "Rate limit exceeded")
 			return
@@ -464,7 +470,7 @@ func observe(next http.Handler) http.Handler {
 		if sw.status >= 400 {
 			metrics.HTTPErrors.WithLabelValues(code).Inc()
 		}
-		if r.URL.Path != "/health" && r.URL.Path != "/metrics" {
+		if r.URL.Path != "/health" && r.URL.Path != "/metrics" && r.URL.Path != "/stats/cache" {
 			slog.Info("request", "method", r.Method, "path", r.URL.Path, "status", sw.status, "ms", time.Since(start).Milliseconds())
 		}
 	})
@@ -550,17 +556,32 @@ func (l *RateLimiter) Allow(key string) bool {
 	return true
 }
 
-func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.MetricsToken != "" {
-		authHeader := r.Header.Get("Authorization")
-		expected := "Bearer " + s.cfg.MetricsToken
-		if subtle.ConstantTimeCompare([]byte(authHeader), []byte(expected)) != 1 {
+func (s *Server) validMetricsToken(r *http.Request) bool {
+	if s.cfg.MetricsToken == "" {
+		return true
+	}
+	authHeader := r.Header.Get("Authorization")
+	expected := "Bearer " + s.cfg.MetricsToken
+	return subtle.ConstantTimeCompare([]byte(authHeader), []byte(expected)) == 1
+}
+
+func (s *Server) requireMetricsToken(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.validMetricsToken(r) {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="metrics"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		next(w, r)
 	}
-	promhttp.Handler().ServeHTTP(w, r)
+}
+
+func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
+	h := s.promHandler
+	if h == nil {
+		h = promhttp.Handler()
+	}
+	h.ServeHTTP(w, r)
 }
 
 // --- Responses ------------------------------------------------------------------
