@@ -21,6 +21,7 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0013](0013-agent-keys-claims-and-expiry.md) | Agent identity separate from its keys; claiming and expiry | 2026-10-21 | Accepted (steps 1 and 4 built) |
 | [0014](0014-declarative-connector-engine.md) | Declarative Connector Engine (DCE) | 2026-10-21 | Accepted |
 | [0015](0015-verified-code-memory.md) | Verified memory for coding agents: anchors, validity and provenance | 2026-10-21 | Proposed |
+| [0016](0016-metrics-token-protection.md) | Metrics endpoint token protection (`METRICS_TOKEN`) | 2026-10-22 | Accepted |
 
 Template:
 
