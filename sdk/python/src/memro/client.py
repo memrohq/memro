@@ -261,9 +261,24 @@ class MemroClient:
         private_key: Optional[str] = None,
         memory_type: Optional[str] = None,
         mode: str = "hybrid",
+        order: Optional[str] = None,
+        resolve_conflicts: Optional[bool] = None,
+        include_ledger: Optional[bool] = None,
+        anchor_date: Optional[str] = None,
+        temporal_weight: Optional[float] = None,
     ) -> List[dict]:
         """Search memories. mode is hybrid (default), semantic or keyword."""
         params = {"agent_id": agent_id, "query": query, "limit": min(limit, 50), "mode": mode, "memory_type": memory_type}
+        if order:
+            params["order"] = order
+        if resolve_conflicts is not None:
+            params["resolve_conflicts"] = str(resolve_conflicts).lower()
+        if include_ledger is not None:
+            params["include_ledger"] = str(include_ledger).lower()
+        if anchor_date:
+            params["anchor_date"] = anchor_date
+        if temporal_weight is not None:
+            params["temporal_weight"] = str(temporal_weight)
         return self._json("GET", "/search", params=params, agent_id=agent_id, private_key=private_key).get("results", [])
 
     def search_temporal(

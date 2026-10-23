@@ -138,11 +138,15 @@ def answer(q, hits, meta, session_memories):
             if mid not in expanded_ids:
                 expanded_ids.append(mid)
 
+    superseded_ids = {h["memory_id"] for h in hits if h.get("is_superseded")}
+
     # Sort chronologically by date
     ctx = []
     for mid in sorted(expanded_ids, key=lambda mid: meta[mid]["date"]):
         m = meta[mid]
         header = format_session_header(m["date"], q["question_date"])
+        if mid in superseded_ids:
+            header += " [SUPERSEDED by newer update]"
         ctx.append(f"{header}\n{m['content'][:PER_ITEM_CHARS]}")
 
     prompt = ANSWER_PROMPT.format(now=q["question_date"], context="\n\n---\n\n".join(ctx) or "(nothing found)",

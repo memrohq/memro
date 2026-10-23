@@ -53,12 +53,17 @@ type Memory struct {
 
 // SearchResult is one search hit.
 type SearchResult struct {
-	MemoryID   string     `json:"memory_id"`
-	Content    string     `json:"content"`
-	Score      float64    `json:"score"`
-	MemoryType MemoryType `json:"memory_type"`
-	CreatedAt  string     `json:"created_at"`
-	AssetURL   *string    `json:"asset_url,omitempty"`
+	MemoryID     string     `json:"memory_id"`
+	Content      string     `json:"content"`
+	Score        float64    `json:"score"`
+	MemoryType   MemoryType `json:"memory_type"`
+	CreatedAt    string     `json:"created_at"`
+	DocumentDate *string    `json:"document_date,omitempty"`
+	EventDate    *string    `json:"event_date,omitempty"`
+	SessionID    *string    `json:"session_id,omitempty"`
+	AssetURL     *string    `json:"asset_url,omitempty"`
+	IsSuperseded bool       `json:"is_superseded,omitempty"`
+	SupersededBy *string    `json:"superseded_by,omitempty"`
 }
 
 // TemporalResult is one temporal search hit.

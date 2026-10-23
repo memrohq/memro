@@ -131,15 +131,31 @@ type SearchQuery struct {
 	// file) in the first sweep. Off by default: on LongMemEval it found more
 	// of the right conversations but fewer of the exchanges holding answers.
 	PerSession int
+	// Order controls result sequencing: "score" (default), "chronological", or "chronological_desc".
+	Order string
+	// ResolveContradictions, when true, detects contradicting facts among top hits
+	// and marks older superseded versions with IsSuperseded=true.
+	ResolveContradictions bool
+	// IncludeLedger, when true, generates a deterministic chronological timeline ledger.
+	IncludeLedger bool
+	// AnchorDate is the reference timestamp for relative day calculations in the ledger.
+	AnchorDate *time.Time
+	// TemporalWeight (0..1), when > 0, blends similarity score with recency decay.
+	TemporalWeight float32
 }
 
 type SearchResult struct {
-	MemoryID   string  `json:"memory_id"`
-	Content    string  `json:"content"`
-	Score      float32 `json:"score"`
-	MemoryType string  `json:"memory_type"`
-	CreatedAt  string  `json:"created_at"`
-	AssetURL   *string `json:"asset_url"`
+	MemoryID     string  `json:"memory_id"`
+	Content      string  `json:"content"`
+	Score        float32 `json:"score"`
+	MemoryType   string  `json:"memory_type"`
+	CreatedAt    string  `json:"created_at"`
+	DocumentDate *string `json:"document_date,omitempty"`
+	EventDate    *string `json:"event_date,omitempty"`
+	SessionID    *string `json:"session_id,omitempty"`
+	AssetURL     *string `json:"asset_url"`
+	IsSuperseded bool    `json:"is_superseded,omitempty"`
+	SupersededBy *string `json:"superseded_by,omitempty"`
 }
 
 type SearchResponse struct {
@@ -147,6 +163,7 @@ type SearchResponse struct {
 	Mode      string         `json:"mode"`
 	LatencyMS int64          `json:"latency_ms"`
 	Total     int            `json:"total"`
+	Ledger    *string        `json:"ledger,omitempty"`
 }
 
 // --- Memory engine results ----------------------------------------------------

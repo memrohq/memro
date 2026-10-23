@@ -77,7 +77,9 @@ var (
 		regexp.MustCompile(`(?i)^(.+?)\s+(?:is|was|are|were|be|has been)\s+(?:a|an|the\s+)?(.+)$`),
 		regexp.MustCompile(`(?i)^(.+?)\s+(?:prefers?|likes?|wants?|uses?|chose|switched to)\s+(.+)$`),
 		regexp.MustCompile(`(?i)^(?:(.+?)\s+)?(?:lives in|moved to|based in|located in)\s+(.+)$`),
-		regexp.MustCompile(`(?i)^(.+?)\s*:\s*(.+)$`),
+		regexp.MustCompile(`(?i)^(.+?)\s+(?:lived in|stayed in|rented|occupied|worked at)\s+(.+)$`),
+		regexp.MustCompile(`(?i)^(.+?)\s+(?:has|had|owns|collected|bought|possesses)\s+(\d+\s+.+)$`),
+		regexp.MustCompile(`(?i)^(.+?)\s+(?:plays with|uses|selected|drives|switched to|chose)\s+(.+)$`),
 	}
 )
 
@@ -86,6 +88,8 @@ func cleanText(s string) string {
 	s = strings.TrimRight(s, ".!?,;")
 	return s
 }
+
+var reDurationOrNumber = regexp.MustCompile(`\b(\d+(?:\.\d+)?)\s*(years?|months?|weeks?|days?|hours?|coins?|dollars?|items?|percent|%)?\b`)
 
 // DetectContradiction returns a 0..1 likelihood that a and b contradict.
 func DetectContradiction(a, b string) float32 {
@@ -157,6 +161,34 @@ func DetectContradiction(a, b string) float32 {
 			}
 		}
 		return 0.6
+	}
+
+	// 4. Topic overlap with conflicting numbers/durations
+	// e.g. "I lived in that apartment for 6 months" vs "I lived in that apartment for 2 years"
+	// e.g. "I collected 50 coins" vs "I collected 75 coins"
+	numsA := reDurationOrNumber.FindAllString(al, -1)
+	numsB := reDurationOrNumber.FindAllString(bl, -1)
+	if len(numsA) > 0 && len(numsB) > 0 {
+		wordsA := strings.Fields(al)
+		wordsB := strings.Fields(bl)
+		overlap := 0
+		for _, wa := range wordsA {
+			if len(wa) > 3 && !reDurationOrNumber.MatchString(wa) && slices.Contains(wordsB, wa) {
+				overlap++
+			}
+		}
+		if overlap >= 2 {
+			hasCommonNum := false
+			for _, na := range numsA {
+				if slices.Contains(numsB, na) {
+					hasCommonNum = true
+					break
+				}
+			}
+			if !hasCommonNum {
+				return 0.75
+			}
+		}
 	}
 
 	return 0

@@ -112,11 +112,76 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 	if err != nil {
 		return nil, err
 	}
+
+	if len(results) > 1 {
+		relations, _ := e.relationsTouching(ctx, order)
+		resolveSearchContradictions(results, relations)
+		if q.ResolveContradictions {
+			for i := range results {
+				if results[i].IsSuperseded {
+					results[i].Score *= 0.5
+				}
+			}
+			if q.Order == "" || q.Order == "score" {
+				sort.SliceStable(results, func(i, j int) bool {
+					return results[i].Score > results[j].Score
+				})
+			}
+		}
+	}
+
+	if q.TemporalWeight > 0 {
+		now := e.now()
+		for i := range results {
+			t := resultTime(results[i])
+			if !t.IsZero() {
+				rec := RecencyScore(t, now)
+				results[i].Score = results[i].Score*(1.0-q.TemporalWeight) + rec*q.TemporalWeight
+			}
+		}
+		if q.Order == "" || q.Order == "score" {
+			sort.SliceStable(results, func(i, j int) bool {
+				return results[i].Score > results[j].Score
+			})
+		}
+	}
+
+	if q.Order == "chronological" {
+		sort.SliceStable(results, func(i, j int) bool {
+			ti, tj := resultTime(results[i]), resultTime(results[j])
+			if ti.Equal(tj) {
+				return results[i].Score > results[j].Score
+			}
+			return ti.Before(tj)
+		})
+	} else if q.Order == "chronological_desc" {
+		sort.SliceStable(results, func(i, j int) bool {
+			ti, tj := resultTime(results[i]), resultTime(results[j])
+			if ti.Equal(tj) {
+				return results[i].Score > results[j].Score
+			}
+			return ti.After(tj)
+		})
+	}
+
+	var ledger *string
+	if q.IncludeLedger && len(results) > 0 {
+		anchor := e.now()
+		if q.AnchorDate != nil && !q.AnchorDate.IsZero() {
+			anchor = *q.AnchorDate
+		}
+		rendered := RenderLedgerFromResults(anchor, results)
+		if rendered != "" {
+			ledger = &rendered
+		}
+	}
+
 	resp := &domain.SearchResponse{
 		Results:   results,
 		Mode:      mode,
 		LatencyMS: e.now().Sub(start).Milliseconds(),
 		Total:     len(results),
+		Ledger:    ledger,
 	}
 	e.cache.Set(q, tenantID, resp)
 	return resp, nil
@@ -299,7 +364,7 @@ func (e *Engine) loadResults(ctx context.Context, ids []uuid.UUID, scores map[uu
 		last_accessed_at = NOW() WHERE id = ANY($1)`, ids); err != nil {
 		slog.Warn("access tracking failed", "err", err)
 	}
-	rows, err := e.pool.Query(ctx, `SELECT id, content, memory_type, created_at, asset_url FROM memories WHERE id = ANY($1)`, ids)
+	rows, err := e.pool.Query(ctx, `SELECT id, content, memory_type, created_at, asset_url, document_date, event_date, session_id FROM memories WHERE id = ANY($1)`, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -309,11 +374,26 @@ func (e *Engine) loadResults(ctx context.Context, ids []uuid.UUID, scores map[uu
 		var id uuid.UUID
 		var r domain.SearchResult
 		var created time.Time
-		if err := rows.Scan(&id, &r.Content, &r.MemoryType, &created, &r.AssetURL); err != nil {
+		var docDate *time.Time
+		var evDate *time.Time
+		var sessID *uuid.UUID
+		if err := rows.Scan(&id, &r.Content, &r.MemoryType, &created, &r.AssetURL, &docDate, &evDate, &sessID); err != nil {
 			return nil, err
 		}
 		r.MemoryID = id.String()
 		r.CreatedAt = created.UTC().Format(time.RFC3339Nano)
+		if docDate != nil {
+			s := docDate.UTC().Format(time.RFC3339Nano)
+			r.DocumentDate = &s
+		}
+		if evDate != nil {
+			s := evDate.UTC().Format(time.RFC3339Nano)
+			r.EventDate = &s
+		}
+		if sessID != nil {
+			s := sessID.String()
+			r.SessionID = &s
+		}
 		byID[id] = r
 	}
 	if err := rows.Err(); err != nil {
@@ -326,6 +406,74 @@ func (e *Engine) loadResults(ctx context.Context, ids []uuid.UUID, scores map[uu
 		}
 	}
 	return results, nil
+}
+
+func resultTime(r domain.SearchResult) time.Time {
+	if r.EventDate != nil && *r.EventDate != "" {
+		if t, err := time.Parse(time.RFC3339Nano, *r.EventDate); err == nil {
+			return t
+		}
+		if t, err := time.Parse(time.RFC3339, *r.EventDate); err == nil {
+			return t
+		}
+	}
+	if r.DocumentDate != nil && *r.DocumentDate != "" {
+		if t, err := time.Parse(time.RFC3339Nano, *r.DocumentDate); err == nil {
+			return t
+		}
+		if t, err := time.Parse(time.RFC3339, *r.DocumentDate); err == nil {
+			return t
+		}
+	}
+	if r.CreatedAt != "" {
+		if t, err := time.Parse(time.RFC3339Nano, r.CreatedAt); err == nil {
+			return t
+		}
+		if t, err := time.Parse(time.RFC3339, r.CreatedAt); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
+func resolveSearchContradictions(results []domain.SearchResult, relations []domain.Relation) {
+	relMap := map[uuid.UUID]uuid.UUID{}
+	for _, rel := range relations {
+		if rel.Type == domain.RelUpdates {
+			relMap[rel.To] = rel.From
+		}
+	}
+	for i := range results {
+		id, err := uuid.Parse(results[i].MemoryID)
+		if err == nil {
+			if newerID, ok := relMap[id]; ok {
+				s := newerID.String()
+				results[i].IsSuperseded = true
+				results[i].SupersededBy = &s
+			}
+		}
+	}
+
+	for i := 0; i < len(results); i++ {
+		for j := i + 1; j < len(results); j++ {
+			conf := DetectContradiction(results[i].Content, results[j].Content)
+			if conf >= 0.7 {
+				ti := resultTime(results[i])
+				tj := resultTime(results[j])
+				if !ti.IsZero() && !tj.IsZero() {
+					if ti.Before(tj) {
+						results[i].IsSuperseded = true
+						s := results[j].MemoryID
+						results[i].SupersededBy = &s
+					} else if tj.Before(ti) {
+						results[j].IsSuperseded = true
+						s := results[i].MemoryID
+						results[j].SupersededBy = &s
+					}
+				}
+			}
+		}
+	}
 }
 
 // --- Temporal search ---------------------------------------------------------
@@ -852,7 +1000,9 @@ const (
 func NewResultCache() *ResultCache { return &ResultCache{entries: map[string]cachedResponse{}} }
 
 func cacheKey(q domain.SearchQuery, tenantID uuid.UUID) string {
-	return fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%d", tenantID, q.AgentID, q.Query, q.Limit, q.MemoryType, q.Mode, q.PerSession)
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%d\x00%s\x00%t\x00%t\x00%.2f",
+		tenantID, q.AgentID, q.Query, q.Limit, q.MemoryType, q.Mode, q.PerSession,
+		q.Order, q.ResolveContradictions, q.IncludeLedger, q.TemporalWeight)
 }
 
 func (c *ResultCache) Get(q domain.SearchQuery, tenantID uuid.UUID) (*domain.SearchResponse, bool) {

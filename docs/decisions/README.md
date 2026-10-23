@@ -25,6 +25,7 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0017](0017-webhook-replay-protection.md) | Webhook replay protection for GitHub, Linear and Sentry | 2026-10-22 | Accepted |
 | [0018](0018-tenant-agent-scoping-audit.md) | Tenant and agent scoping audit & cross-agent isolation | 2026-10-22 | Accepted |
 | [0019](0019-server-side-coordination.md) | Server-side multi-agent coordination leases and intents | 2026-10-22 | Accepted |
+| [0021](0021-temporal-ordering-and-contradiction-resolution.md) | Temporal ordering and contradiction resolution in search | 2026-10-23 | Accepted |
 
 Template:
 

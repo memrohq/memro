@@ -27,7 +27,12 @@ export interface SearchResult {
   score: number;
   memory_type: MemoryType;
   created_at: string;
+  document_date?: string | null;
+  event_date?: string | null;
+  session_id?: string | null;
   asset_url?: string | null;
+  is_superseded?: boolean;
+  superseded_by?: string | null;
 }
 
 export interface SearchResponse {
@@ -35,6 +40,7 @@ export interface SearchResponse {
   mode: SearchMode;
   latency_ms: number;
   total: number;
+  ledger?: string | null;
 }
 
 export interface TemporalResult {
