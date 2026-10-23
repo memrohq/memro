@@ -178,6 +178,9 @@ export class MemroClient {
   // ── Memories ────────────────────────────────────────────────────────────
 
   createMemory(body: Record<string, unknown>, signer?: Signer) { return this.request<Memory>('POST', '/memory', { json: body, signer }); }
+  createMemoriesBatch(memories: Record<string, unknown>[], signer?: Signer) {
+    return this.request<{ ids: string[]; count: number; memories: Memory[] }>('POST', '/memories/batch', { json: memories, signer });
+  }
   listMemories(agentId: string, query: Query, signer?: Signer) { return this.request<Memory[]>('GET', `/memory/agent/${agentId}`, { query, signer }); }
   async deleteMemory(memoryId: string, signer?: Signer): Promise<boolean> {
     try {

@@ -271,3 +271,20 @@ def test_remember_keeps_an_explicit_type():
 def test_remember_default_is_not_episodic(mock_agent):
     mock_agent.remember("User prefers TypeScript")
     assert mock_agent.client.create_memory.call_args.kwargs["memory_type"] is None
+
+
+def test_remember_batch():
+    agent_id, private_key = generate_keypair()
+    client = MemroClient(base_url="http://example.test")
+    client._session.request = rec = _Recorder(
+        body=json.dumps({"ids": ["id-1", "id-2"], "count": 2, "memories": []}).encode()
+    )
+    agent = Agent(agent_id=agent_id, private_key=private_key, client=client)
+    ids = agent.remember_batch([{"content": "First"}, {"content": "Second"}])
+    assert ids == ["id-1", "id-2"]
+    payload = json.loads(rec.calls[0]["data"])
+    assert len(payload) == 2
+    assert payload[0]["content"] == "First" and payload[0]["agent_id"] == agent_id
+    assert payload[1]["content"] == "Second" and payload[1]["agent_id"] == agent_id
+    assert rec.calls[0]["url"] == "http://example.test/memories/batch"
+

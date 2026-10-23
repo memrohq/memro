@@ -426,6 +426,53 @@ func (s *Store) InsertMemory(ctx context.Context, m *domain.Memory) error {
 	return err
 }
 
+func (s *Store) InsertMemories(ctx context.Context, memories []*domain.Memory) error {
+	if len(memories) == 0 {
+		return nil
+	}
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	const insertQuery = `INSERT INTO memories (id, agent_id, tenant_id, content, memory_type, visibility,
+			created_at, file_id, asset_url, document_date, event_date, session_id, is_atomic, entity_tags,
+			relationship_types, access_count, confidence, last_accessed_at, metadata)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`
+
+	batch := &pgx.Batch{}
+	for _, m := range memories {
+		var meta any
+		if len(m.Metadata) > 0 && string(m.Metadata) != "null" {
+			meta = []byte(m.Metadata)
+		}
+		if m.EntityTags == nil {
+			m.EntityTags = []string{}
+		}
+		if m.RelationshipTypes == nil {
+			m.RelationshipTypes = []string{}
+		}
+		batch.Queue(insertQuery,
+			m.ID, m.AgentID, m.TenantID, m.Content, string(m.MemoryType), string(m.Visibility), m.CreatedAt,
+			m.FileID, m.AssetURL, m.DocumentDate, m.EventDate, m.SessionID, m.IsAtomic, m.EntityTags,
+			m.RelationshipTypes, m.AccessCount, m.Confidence, m.LastAccessedAt, meta)
+	}
+
+	br := tx.SendBatch(ctx, batch)
+	for range memories {
+		if _, err := br.Exec(); err != nil {
+			br.Close()
+			return err
+		}
+	}
+	if err := br.Close(); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+
 func (s *Store) CountMemories(ctx context.Context, agentID string) (int, error) {
 	var n int
 	err := s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM memories WHERE agent_id = $1`, agentID).Scan(&n)

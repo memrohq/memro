@@ -51,6 +51,14 @@ type Memory struct {
 	Metadata     json.RawMessage `json:"metadata,omitempty"`
 }
 
+// BatchMemoryResponse is returned by CreateMemoriesBatch.
+type BatchMemoryResponse struct {
+	IDs      []string `json:"ids"`
+	Count    int      `json:"count"`
+	Memories []Memory `json:"memories"`
+}
+
+
 // SearchResult is one search hit.
 type SearchResult struct {
 	MemoryID   string     `json:"memory_id"`

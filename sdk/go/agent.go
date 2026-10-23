@@ -141,6 +141,47 @@ func (a *Agent) Remember(ctx context.Context, content string, opts *RememberOpti
 	return a.Client.CreateMemory(ctx, body, a.signer)
 }
 
+// BatchMemoryItem represents a single memory in a batch operation.
+type BatchMemoryItem struct {
+	Content string
+	Opts    *RememberOptions
+}
+
+// RememberBatch stores up to 500 memories in a single transaction. Returns the IDs in input order.
+func (a *Agent) RememberBatch(ctx context.Context, items []BatchMemoryItem) ([]string, error) {
+	formatted := make([]map[string]any, len(items))
+	for i, item := range items {
+		opts := item.Opts
+		if opts == nil {
+			opts = &RememberOptions{}
+		}
+		body := map[string]any{"agent_id": a.AgentID, "content": item.Content, "visibility": VisibilityPrivate, "is_atomic": opts.IsAtomic}
+		if opts.Type != "" {
+			body["memory_type"] = opts.Type
+		}
+		if opts.Visibility != "" {
+			body["visibility"] = opts.Visibility
+		}
+		if opts.EventDate != "" {
+			body["event_date"] = opts.EventDate
+		}
+		if opts.SessionID != "" {
+			body["session_id"] = opts.SessionID
+		}
+		if opts.Metadata != nil {
+			body["metadata"] = opts.Metadata
+		}
+		formatted[i] = body
+	}
+	res, err := a.Client.CreateMemoriesBatch(ctx, formatted, a.signer)
+	if err != nil {
+		return nil, err
+	}
+	return res.IDs, nil
+}
+
+
+
 // Recall searches memories (hybrid by default). opts may be nil.
 func (a *Agent) Recall(ctx context.Context, query string, opts *RecallOptions) ([]SearchResult, error) {
 	if opts == nil {

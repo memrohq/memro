@@ -173,3 +173,40 @@ func TestCreateIdentityWithoutPowEndpoint(t *testing.T) {
 		t.Fatal("sent a proof to a server that has none")
 	}
 }
+
+func TestCreateMemoriesBatch(t *testing.T) {
+	var received []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/memories/batch" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&received)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ids":   []string{"id-1", "id-2"},
+			"count": 2,
+			"memories": []map[string]any{
+				{"id": "id-1", "content": "first"},
+				{"id": "id-2", "content": "second"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c := NewClient(&ClientOptions{BaseURL: srv.URL, APIKey: "memro_sk_testkey"})
+	agent := NewAgent("agent-123", "", c)
+	ids, err := agent.RememberBatch(context.Background(), []BatchMemoryItem{
+		{Content: "first", Opts: &RememberOptions{Type: MemoryTypeSemantic}},
+		{Content: "second"},
+	})
+	if err != nil {
+		t.Fatalf("RememberBatch: %v", err)
+	}
+	if len(ids) != 2 || ids[0] != "id-1" || ids[1] != "id-2" {
+		t.Fatalf("unexpected ids: %v", ids)
+	}
+	if len(received) != 2 || received[0]["content"] != "first" || received[1]["content"] != "second" {
+		t.Fatalf("unexpected payload sent: %v", received)
+	}
+}
+
