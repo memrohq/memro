@@ -26,6 +26,7 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0018](0018-tenant-agent-scoping-audit.md) | Tenant and agent scoping audit & cross-agent isolation | 2026-10-22 | Accepted |
 | [0019](0019-server-side-coordination.md) | Server-side multi-agent coordination leases and intents | 2026-10-22 | Accepted |
 | [0021](0021-temporal-ordering-and-contradiction-resolution.md) | Temporal ordering and contradiction resolution in search | 2026-10-23 | Accepted |
+| [0023](0023-graph-edges-and-search-expansion.md) | Graph edge semantics, save-time edges, and optional graph expansion in search | 2026-10-24 | Proposed |
 
 Template:
 
