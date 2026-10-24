@@ -86,6 +86,15 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			temporalWeight = float32(min(1.0, max(0.0, tw)))
 		}
 	}
+	graphMode := q.Get("graph")
+	switch graphMode {
+	case "", "legacy", "bounded":
+	default:
+		if s.cfg.GraphRetrieval {
+			httpError(w, http.StatusBadRequest, "graph must be one of legacy, bounded")
+			return
+		}
+	}
 	if !s.gate(w, r, a, extension.MetricQueries, 1) {
 		return
 	}
@@ -94,6 +103,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		MemoryType: q.Get("memory_type"), Mode: mode, PerSession: perSession(q.Get("max_per_session")),
 		Order: order, ResolveContradictions: resolveConflicts, IncludeLedger: includeLedger,
 		AnchorDate: anchorDate, TemporalWeight: temporalWeight,
+		GraphMode: graphMode, GraphRetrievalEnabled: s.cfg.GraphRetrieval,
 	}, a.TenantID)
 	if err != nil {
 		slog.Error("search", "err", err)

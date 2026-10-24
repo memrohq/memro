@@ -51,19 +51,28 @@ type Memory struct {
 	Metadata     json.RawMessage `json:"metadata,omitempty"`
 }
 
+// ResultGraphInfo contains provenance when a search result was discovered through graph expansion.
+type ResultGraphInfo struct {
+	SeedID        string   `json:"seed_id"`
+	Path          []string `json:"path"`
+	RelationTypes []string `json:"relation_types"`
+	Hops          int      `json:"hops"`
+}
+
 // SearchResult is one search hit.
 type SearchResult struct {
-	MemoryID     string     `json:"memory_id"`
-	Content      string     `json:"content"`
-	Score        float64    `json:"score"`
-	MemoryType   MemoryType `json:"memory_type"`
-	CreatedAt    string     `json:"created_at"`
-	DocumentDate *string    `json:"document_date,omitempty"`
-	EventDate    *string    `json:"event_date,omitempty"`
-	SessionID    *string    `json:"session_id,omitempty"`
-	AssetURL     *string    `json:"asset_url,omitempty"`
-	IsSuperseded bool       `json:"is_superseded,omitempty"`
-	SupersededBy *string    `json:"superseded_by,omitempty"`
+	MemoryID     string           `json:"memory_id"`
+	Content      string           `json:"content"`
+	Score        float64          `json:"score"`
+	MemoryType   MemoryType       `json:"memory_type"`
+	CreatedAt    string           `json:"created_at"`
+	DocumentDate *string          `json:"document_date,omitempty"`
+	EventDate    *string          `json:"event_date,omitempty"`
+	SessionID    *string          `json:"session_id,omitempty"`
+	AssetURL     *string          `json:"asset_url,omitempty"`
+	IsSuperseded bool             `json:"is_superseded,omitempty"`
+	SupersededBy *string          `json:"superseded_by,omitempty"`
+	Graph        *ResultGraphInfo `json:"graph,omitempty"`
 }
 
 // TemporalResult is one temporal search hit.
@@ -208,6 +217,7 @@ type RecallOptions struct {
 	Type     MemoryType
 	Mode     SearchMode // default hybrid
 	MinScore float64
+	Graph    string // "legacy" or "bounded"
 }
 
 // TemporalOptions are optional parameters for Agent.RecallTemporal.

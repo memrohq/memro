@@ -153,6 +153,9 @@ func (a *Agent) Recall(ctx context.Context, query string, opts *RecallOptions) (
 	if opts.Type != "" {
 		q.Set("memory_type", string(opts.Type))
 	}
+	if opts.Graph != "" {
+		q.Set("graph", opts.Graph)
+	}
 	res, err := a.Client.Search(ctx, q, a.signer)
 	if err != nil || opts.MinScore <= 0 {
 		return res, err

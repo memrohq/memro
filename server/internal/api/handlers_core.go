@@ -386,6 +386,14 @@ func (s *Server) recordUsage(r *http.Request, a Agent, metric string, value int6
 }
 
 func (s *Server) afterMemoryCreated(r *http.Request, a Agent, m *domain.Memory, action string) {
+	if s.cfg.GraphWriteEdges {
+		s.engine.LinkOnSave(r.Context(), m, engine.LinkerConfig{
+			Enabled:       true,
+			Timeout:       200 * time.Millisecond,
+			MaxTags:       5,
+			MaxCandidates: 8,
+		})
+	}
 	s.indexer.Enqueue(m.ID, m.AgentID, m.TenantID, m.Content)
 	s.engine.Cache().InvalidateAgent(a.ID)
 	metrics.MemoriesCreated.Inc()

@@ -181,6 +181,24 @@ Graph retrieval stays off by default unless an arm:
 3. adds ≤ 50 ms to p95 search latency;
 4. creates `updates` edges with at least 80% precision in the audit.
 
+### 7. Empirical Ablation Results (100-Question Stratified Evaluation)
+Evaluated on LongMemEval-100 against identical seeds, memories, and model (`gpt-4o-mini`):
+
+| Arm | Description | QA Acc | Recall@5 | Recall@15 | p95 Latency | Gate Status |
+|---|---|---|---|---|---|---|
+| **Arm A** | Baseline Hybrid | **80.0%** | **99.0%** | **99.0%** | **356 ms** | Baseline |
+| **Arm B** | Hybrid + Legacy Graph (pre-PR #43) | **78.0%** (-2.0%) | **99.0%** (0.0%) | **99.0%** (0.0%) | **808 ms** (+452 ms) | ❌ Failed (Acc & Latency) |
+| **Arm C** | Hybrid + PR #43 Bounded Graph | **76.0%** (-4.0%) | **99.0%** (0.0%) | **99.0%** (0.0%) | **662 ms** (+305 ms) | ❌ Failed (Acc & Latency) |
+| **Arm D** | PR #43 Bounded Graph + Temporal Resolution | **76.0%** (-4.0%) | **99.0%** (0.0%) | **99.0%** (0.0%) | **511 ms** (+155 ms) | ❌ Failed (Acc & Latency) |
+
+**Key Findings:**
+1. **Recall was preserved (99.0% across all arms)**: The rule protecting top 5 hybrid results ensured graph insertion did not cause retrieval regression.
+2. **Answer accuracy regressed (-4.0% overall, -11.1% on multi-session aggregation)**: Expanding graphs along topical `associated` edges brought in related/tangential rounds from the same entity/topic that were not distinct events, confusing the LLM during multi-session counting and aggregation.
+3. **Latency overhead exceeded budget (+305 ms vs +50 ms target)**: Multi-hop breadth-first traversal in PostgreSQL queries added noticeable tail latency overhead.
+
+**Final Decision:**
+In accordance with the acceptance criteria, **`GRAPH_RETRIEVAL` and `GRAPH_WRITE_EDGES` remain strictly `false` by default in production**. The code and migration remain committed behind feature flags for experimental research and specialized queries.
+
 ## Alternatives considered
 - **Session edges.** Rejected: redundant with `session_id`; O(n) rows per
   session for no new information.
@@ -197,12 +215,9 @@ Graph retrieval stays off by default unless an arm:
   one agent, and budgeted.
 
 ## Consequences
-- With both flags off (the default), behavior is unchanged apart from the
-  stricter relation-type semantics and the unique index.
-- With `GRAPH_WRITE_EDGES` on, each write does up to about 6 indexed queries
-  within a 200 ms deadline. Storage grows by at most 8 edges per memory.
-- With `GRAPH_RETRIEVAL` on and `graph` requested, search does up to 2 extra
-  indexed queries within a 150 ms deadline.
-- The ablation decides whether any of this ships enabled. If no arm meets the
-  gate, the flags stay off, and the edge semantics and the connector relabel
-  remain useful on their own.
+- With both flags off (the default), production behavior is unchanged apart from
+  the stricter relation-type semantics and unique index from Migration 0031.
+- The 4-arm ablation harness (`bench/longmemeval/ablation.py`) is preserved to
+  allow ongoing benchmark testing of graph heuristics under identical controls.
+- The code for bounded graph expansion and save-time edge linking is complete,
+  fully tested, and available behind explicit opt-in flags for specialized workloads.

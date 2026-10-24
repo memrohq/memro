@@ -93,6 +93,7 @@ export class Agent {
     const res = await this.client.search({
       agent_id: this.agentId, query, limit: Math.min(options.limit ?? 10, 50),
       memory_type: options.type, mode: options.mode ?? 'hybrid',
+      graph: options.graph,
     }, this.signer);
     return options.minScore === undefined ? res.results : res.results.filter((r) => r.score >= options.minScore!);
   }

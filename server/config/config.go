@@ -73,6 +73,10 @@ type Config struct {
 	// Connectors (ADR 0011). Each is enabled only when its credentials are set.
 	Connectors ConnectorsConfig
 
+	// Graph flags (ADR 0023, off by default).
+	GraphWriteEdges bool
+	GraphRetrieval  bool
+
 	// DevLogOTP writes dashboard sign-in codes to the server log (and still
 	// emails them when SMTP is configured), so local development and staging
 	// smoke tests can sign in. Never enable it in production.
@@ -86,6 +90,8 @@ func Load() Config {
 		DBMaxConns:            int32(envInt("DB_MAX_CONNECTIONS", 20)),
 		DBMinConns:            int32(envInt("DB_MIN_CONNECTIONS", 2)),
 		MigrateOnStartup:      envBool("MIGRATE_ON_STARTUP", true),
+		GraphWriteEdges:       envBool("GRAPH_WRITE_EDGES", false),
+		GraphRetrieval:        envBool("GRAPH_RETRIEVAL", false),
 		RateLimitMax:          envInt("RATE_LIMIT_MAX", 200),
 		RateLimitWindow:       time.Duration(envInt("RATE_LIMIT_WINDOW_SECONDS", 60)) * time.Second,
 		TrustProxyHeaders:     envBool("TRUST_PROXY_HEADERS", false),

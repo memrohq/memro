@@ -113,6 +113,11 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 		return nil, err
 	}
 
+	var graphDiag *domain.GraphDiagnostics
+	if q.GraphMode != "" {
+		results, graphDiag = e.ExpandGraph(ctx, q, tenantID, results)
+	}
+
 	if len(results) > 1 {
 		relations, _ := e.relationsTouching(ctx, order)
 		resolveSearchContradictions(results, relations)
@@ -182,6 +187,7 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 		LatencyMS: e.now().Sub(start).Milliseconds(),
 		Total:     len(results),
 		Ledger:    ledger,
+		Graph:     graphDiag,
 	}
 	e.cache.Set(q, tenantID, resp)
 	return resp, nil
@@ -1000,9 +1006,10 @@ const (
 func NewResultCache() *ResultCache { return &ResultCache{entries: map[string]cachedResponse{}} }
 
 func cacheKey(q domain.SearchQuery, tenantID uuid.UUID) string {
-	return fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%d\x00%s\x00%t\x00%t\x00%.2f",
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%d\x00%s\x00%t\x00%t\x00%.2f\x00%s\x00%t",
 		tenantID, q.AgentID, q.Query, q.Limit, q.MemoryType, q.Mode, q.PerSession,
-		q.Order, q.ResolveContradictions, q.IncludeLedger, q.TemporalWeight)
+		q.Order, q.ResolveContradictions, q.IncludeLedger, q.TemporalWeight,
+		q.GraphMode, q.GraphRetrievalEnabled)
 }
 
 func (c *ResultCache) Get(q domain.SearchQuery, tenantID uuid.UUID) (*domain.SearchResponse, bool) {
