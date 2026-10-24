@@ -53,6 +53,7 @@ export interface GraphDiagnostics {
   truncated?: boolean;
   elapsed_ms?: number;
   reason?: string;
+  query_intent?: string;
 }
 
 export interface SearchResponse {
@@ -180,7 +181,7 @@ export interface RecallOptions {
   mode?: SearchMode;
   /** Drop results scoring below this (0..1). */
   minScore?: number;
-  graph?: 'legacy' | 'bounded';
+  graph?: 'legacy' | 'bounded' | 'rerank' | 'selective';
 }
 
 export interface TemporalOptions {

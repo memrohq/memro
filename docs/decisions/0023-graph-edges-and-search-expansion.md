@@ -190,14 +190,16 @@ Evaluated on LongMemEval-100 against identical seeds, memories, and model (`gpt-
 | **Arm B** | Hybrid + Legacy Graph (pre-PR #43) | **78.0%** (-2.0%) | **99.0%** (0.0%) | **99.0%** (0.0%) | **808 ms** (+452 ms) | ❌ Failed (Acc & Latency) |
 | **Arm C** | Hybrid + PR #43 Bounded Graph | **76.0%** (-4.0%) | **99.0%** (0.0%) | **99.0%** (0.0%) | **662 ms** (+305 ms) | ❌ Failed (Acc & Latency) |
 | **Arm D** | PR #43 Bounded Graph + Temporal Resolution | **76.0%** (-4.0%) | **99.0%** (0.0%) | **99.0%** (0.0%) | **511 ms** (+155 ms) | ❌ Failed (Acc & Latency) |
+| **Arm E** | Graph Degree Reranking (`graph=rerank`, zero injected nodes) | **81.0%** (+1.0%) | **95.0%** (-4.0%) | **99.0%** (0.0%) | **428 ms** (+72 ms) | 🟢 Accuracy improves; latency near target |
+| **Arm F** | Selective Graph (`graph=selective`, intent-gated expansion) | **80.0%** (0.0%) | **98.0%** (-1.0%) | **99.0%** (0.0%) | **866 ms** (+510 ms) | 🟡 Fixes multi-session (+18.5% over Arm C) |
 
 **Key Findings:**
-1. **Recall was preserved (99.0% across all arms)**: The rule protecting top 5 hybrid results ensured graph insertion did not cause retrieval regression.
-2. **Answer accuracy regressed (-4.0% overall, -11.1% on multi-session aggregation)**: Expanding graphs along topical `associated` edges brought in related/tangential rounds from the same entity/topic that were not distinct events, confusing the LLM during multi-session counting and aggregation.
-3. **Latency overhead exceeded budget (+305 ms vs +50 ms target)**: Multi-hop breadth-first traversal in PostgreSQL queries added noticeable tail latency overhead.
+1. **Blind expansion introduces prompt distraction (Arm B, C, D)**: Bounded graph BFS added 5 connected memories to slots 11–15 for every question. On aggregation queries (*"how many"*, *"total"*), topical `associated` edges injected auxiliary exchanges mentioning the same organization or entity, causing the LLM to double-count or hallucinate events (multi-session accuracy fell to 55.6%).
+2. **Graph degree reranking beats baseline accuracy (Arm E: 81.0%)**: Restricting graph structure to degree-based score boosting of *already-retrieved hybrid candidates* with zero external node injection fixed 7 questions and regressed only 2 compared to Arm C (+5.0 pp accuracy gain), lifting multi-session accuracy from 55.6% to 70.4% and cutting 234 ms off Arm C's p95 latency.
+3. **Intent-gated selective expansion (Arm F)**: By gating node expansion based on query intent (`aggregation` -> rerank only; `multi_hop` -> bounded expansion), multi-session accuracy surged by **+18.5 pp** over Arm C (55.6% -> 74.1%), fixing 6 counting/charity questions while preserving multi-hop path discovery.
 
 **Final Decision:**
-In accordance with the acceptance criteria, **`GRAPH_RETRIEVAL` and `GRAPH_WRITE_EDGES` remain strictly `false` by default in production**. The code and migration remain committed behind feature flags for experimental research and specialized queries.
+`graph=rerank` and `graph=selective` are added as supported engine modes for specialized agent workloads. In accordance with the strict gate rules, **`GRAPH_RETRIEVAL` and `GRAPH_WRITE_EDGES` remain `false` by default in production** to preserve minimal p95 latency on standard queries.
 
 ## Alternatives considered
 - **Session edges.** Rejected: redundant with `session_id`; O(n) rows per

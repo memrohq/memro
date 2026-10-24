@@ -153,4 +153,110 @@ func TestExpandGraph(t *testing.T) {
 			t.Errorf("top 5 hybrid slot %d displaced: expected one of top 5, got %s", i, resBounded[i].MemoryID)
 		}
 	}
+
+	// 5. Test "rerank" mode: zero new nodes added, degree boost applied
+	// Add an edge between mem4 and mem3
+	_, err = pool.Exec(ctx, `INSERT INTO memory_relations (id, tenant_id, source_memory_id, target_memory_id, relation_type, confidence, created_by)
+		VALUES ($1, $2, $3, $4, 'associated', 1.0, $5)`,
+		uuid.New(), tenantID, mems[4], mems[3], agentID)
+	if err != nil {
+		t.Fatalf("insert relation for rerank: %v", err)
+	}
+
+	qRerank := domain.SearchQuery{
+		AgentID:               agentID,
+		Query:                 "Explain relationship between components",
+		Limit:                 7,
+		GraphMode:             "rerank",
+		GraphRetrievalEnabled: true,
+	}
+	resRerank, diagRerank := eng.ExpandGraph(ctx, qRerank, tenantID, hybridResults)
+	if !diagRerank.Applied || diagRerank.Mode != "rerank" {
+		t.Fatalf("expected rerank mode applied, got applied=%v mode=%s", diagRerank.Applied, diagRerank.Mode)
+	}
+	if diagRerank.NodesAdded != 0 {
+		t.Errorf("expected 0 nodes added in rerank mode, got %d", diagRerank.NodesAdded)
+	}
+	if len(resRerank) != len(hybridResults) {
+		t.Errorf("expected result length unchanged in rerank mode, got %d vs %d", len(resRerank), len(hybridResults))
+	}
+
+	// 6. Test "selective" mode on aggregation query: bypasses graph expansion, reranks only
+	qSelectiveAgg := domain.SearchQuery{
+		AgentID:               agentID,
+		Query:                 "How many times did the server fail?",
+		Limit:                 7,
+		GraphMode:             "selective",
+		GraphRetrievalEnabled: true,
+	}
+	resSelectiveAgg, diagSelectiveAgg := eng.ExpandGraph(ctx, qSelectiveAgg, tenantID, hybridResults)
+	if !diagSelectiveAgg.Applied || diagSelectiveAgg.Mode != "selective" {
+		t.Fatalf("expected selective mode applied, got applied=%v mode=%s", diagSelectiveAgg.Applied, diagSelectiveAgg.Mode)
+	}
+	if diagSelectiveAgg.QueryIntent != "aggregation" {
+		t.Errorf("expected query_intent=aggregation, got %s", diagSelectiveAgg.QueryIntent)
+	}
+	if diagSelectiveAgg.NodesAdded != 0 {
+		t.Errorf("expected 0 nodes added for aggregation query in selective mode, got %d", diagSelectiveAgg.NodesAdded)
+	}
+	if diagSelectiveAgg.Reason != "aggregation_query_rerank_only" {
+		t.Errorf("expected reason=aggregation_query_rerank_only, got %s", diagSelectiveAgg.Reason)
+	}
+	if len(resSelectiveAgg) != len(hybridResults) {
+		t.Errorf("expected result length unchanged in selective aggregation, got %d vs %d", len(resSelectiveAgg), len(hybridResults))
+	}
+
+	// 7. Test "selective" mode on multi-hop query: applies bounded expansion
+	qSelectiveHop := domain.SearchQuery{
+		AgentID:               agentID,
+		Query:                 "Trace the cause of the database issue",
+		Limit:                 7,
+		GraphMode:             "selective",
+		GraphRetrievalEnabled: true,
+	}
+	resSelectiveHop, diagSelectiveHop := eng.ExpandGraph(ctx, qSelectiveHop, tenantID, hybridResults)
+	if !diagSelectiveHop.Applied || diagSelectiveHop.Mode != "selective" {
+		t.Fatalf("expected selective mode applied, got applied=%v mode=%s", diagSelectiveHop.Applied, diagSelectiveHop.Mode)
+	}
+	if diagSelectiveHop.QueryIntent != "multi_hop" {
+		t.Errorf("expected query_intent=multi_hop, got %s", diagSelectiveHop.QueryIntent)
+	}
+	foundHopMem7 := false
+	for _, r := range resSelectiveHop {
+		if r.MemoryID == mems[7].String() {
+			foundHopMem7 = true
+			break
+		}
+	}
+	if !foundHopMem7 {
+		t.Errorf("expected selective mode to include terminal path to mem7 on multi-hop query")
+	}
+}
+
+func TestDetectQueryIntent(t *testing.T) {
+	aggCases := []string{
+		"How many sessions did Alice attend?",
+		"What is the total amount raised?",
+		"Count the number of items delivered",
+		"How much money was spent on marketing?",
+		"List all projects completed in 2025",
+		"How often does the worker cycle run?",
+	}
+	for _, c := range aggCases {
+		if intent := engine.DetectQueryIntent(c); intent != "aggregation" {
+			t.Errorf("expected aggregation for %q, got %q", c, intent)
+		}
+	}
+
+	hopCases := []string{
+		"Why did the build fail on Tuesday?",
+		"What is the capital of France?",
+		"Trace the relationship between Auth and Engine",
+		"Who is the manager of the DevOps team?",
+	}
+	for _, c := range hopCases {
+		if intent := engine.DetectQueryIntent(c); intent != "multi_hop" {
+			t.Errorf("expected multi_hop for %q, got %q", c, intent)
+		}
+	}
 }

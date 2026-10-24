@@ -182,6 +182,7 @@ type GraphDiagnostics struct {
 	Truncated     bool   `json:"truncated,omitempty"`
 	ElapsedMS     int64  `json:"elapsed_ms,omitempty"`
 	Reason        string `json:"reason,omitempty"`
+	QueryIntent   string `json:"query_intent,omitempty"`
 }
 
 type SearchResponse struct {

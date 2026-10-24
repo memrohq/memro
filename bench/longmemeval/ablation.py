@@ -24,7 +24,7 @@ import time
 from common import BENCH, ROOT, RUNS, RunTracker, set_run_tracker
 import run as base_run
 
-ARMS = [
+ALL_ARMS = [
     {
         "id": "arm-a",
         "name": "ablation-arm-a",
@@ -53,12 +53,29 @@ ARMS = [
         "graph": "bounded",
         "resolve_conflicts": True,
     },
+    {
+        "id": "arm-e",
+        "name": "ablation-arm-e",
+        "desc": "Arm E: Graph Degree Reranking (zero new injected nodes)",
+        "graph": "rerank",
+        "resolve_conflicts": False,
+    },
+    {
+        "id": "arm-f",
+        "name": "ablation-arm-f",
+        "desc": "Arm F: Selective Graph (query-intent gated expansion & rerank)",
+        "graph": "selective",
+        "resolve_conflicts": False,
+    },
 ]
+ARMS = ALL_ARMS
 
 
-def setup_arm_dirs(base_dir: pathlib.Path):
+def setup_arm_dirs(base_dir: pathlib.Path, arms=None):
+    if arms is None:
+        arms = ARMS
     arm_dirs = {}
-    for arm in ARMS:
+    for arm in arms:
         d = base_dir / arm["name"]
         d.mkdir(parents=True, exist_ok=True)
         meta = {
@@ -164,7 +181,7 @@ def run_question_all_arms(q, client, no_llm=False):
                 "embed_wait_s": round(embed_s, 1),
                 "search_ms": round(search_ms, 1),
                 "graph_diag": graph_diag,
-                "graph_result_count": sum(1 for h in hits if h.get("from_graph")),
+                "graph_result_count": sum(1 for h in hits if h.get("graph") or h.get("from_graph")),
             }
 
         return arm_results
@@ -191,15 +208,23 @@ def sample_created_edges(sample_size=20):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Controlled 4-Arm Ablation for Memro Graph Retrieval")
+    global ARMS
+    parser = argparse.ArgumentParser(description="Controlled Multi-Arm Ablation for Memro Graph Retrieval")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--pilot", action="store_true", help="12 questions (2 per category)")
     group.add_argument("--subset", nargs="?", const="subset_100.json", default=None, help="100-question subset")
     group.add_argument("--all", action="store_true", help="All 500 questions")
+    parser.add_argument("--arms", default="a,b,c,d,e,f", help="Comma-separated arm letters, e.g. 'a,c,e,f'")
     parser.add_argument("--workers", type=int, default=6, help="Concurrent worker count (default: 6)")
     parser.add_argument("--no-llm", action="store_true", help="Skip answer LLM (test retrieval & latency only)")
     parser.add_argument("--output-dir", default=str(RUNS), help="Base output directory for runs")
     args = parser.parse_args()
+
+    arm_letters = set(x.strip().lower() for x in args.arms.split(",") if x.strip())
+    ARMS = [a for a in ALL_ARMS if a["id"].split("-")[1] in arm_letters]
+    if not ARMS:
+        print(f"ERROR: No valid arms matched --arms={args.arms}", file=sys.stderr)
+        sys.exit(1)
 
     data = base_run.load_data()
     if args.pilot:
@@ -222,12 +247,12 @@ def main():
         questions = data
 
     base_dir = pathlib.Path(args.output_dir)
-    arm_dirs = setup_arm_dirs(base_dir)
+    arm_dirs = setup_arm_dirs(base_dir, arms=ARMS)
     all_done, _ = load_finished(arm_dirs)
     todo = [q for q in questions if q["question_id"] not in all_done]
 
     print(f"=== Memro Graph Ablation Benchmark ===")
-    print(f"Total questions: {len(questions)} | Already completed across all 4 arms: {len(all_done)} | To run: {len(todo)}")
+    print(f"Total questions: {len(questions)} | Already completed across active arms: {len(all_done)} | To run: {len(todo)}")
     print(f"Target arms: {[a['id'] for a in ARMS]}")
     print(f"Concurrency: {args.workers} workers | No-LLM mode: {args.no_llm}")
     print()
@@ -247,18 +272,17 @@ def main():
                 with open(hyp_path, "a") as f:
                     f.write(json.dumps(results[arm_id]) + "\n")
 
-            a_lat = results["arm-a"]["search_ms"]
-            b_lat = results["arm-b"]["search_ms"]
-            c_lat = results["arm-c"]["search_ms"]
-            d_lat = results["arm-d"]["search_ms"]
-            c_edges = results["arm-c"].get("graph_diag", {}).get("edges_evaluated", 0) if results["arm-c"].get("graph_diag") else 0
-            c_gcount = results["arm-c"].get("graph_result_count", 0)
+            lat_strs = " ".join(f"{arm['id'][-1].upper()}={results[arm['id']]['search_ms']:4.0f}ms" for arm in ARMS)
+            intent = ""
+            for arm in ARMS:
+                if results[arm["id"]].get("graph_diag", {}).get("query_intent"):
+                    intent = f"| intent={results[arm['id']]['graph_diag']['query_intent']} "
+                    break
 
             print(
                 f"[{q['question_id'][:8]}] {q['question_type']:22s} "
-                f"mem={results['arm-a']['memories']:3d} "
-                f"search: A={a_lat:5.1f}ms B={b_lat:5.1f}ms C={c_lat:5.1f}ms D={d_lat:5.1f}ms "
-                f"| C-graph: edges={c_edges} added={c_gcount} | total={elapsed:4.1f}s",
+                f"mem={results[ARMS[0]['id']]['memories']:3d} "
+                f"search: {lat_strs} {intent}| total={elapsed:4.1f}s",
                 flush=True,
             )
 

@@ -217,7 +217,7 @@ type RecallOptions struct {
 	Type     MemoryType
 	Mode     SearchMode // default hybrid
 	MinScore float64
-	Graph    string // "legacy" or "bounded"
+	Graph    string // "legacy", "bounded", "rerank", "selective"
 }
 
 // TemporalOptions are optional parameters for Agent.RecallTemporal.

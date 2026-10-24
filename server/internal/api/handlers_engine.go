@@ -88,10 +88,10 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	}
 	graphMode := q.Get("graph")
 	switch graphMode {
-	case "", "legacy", "bounded":
+	case "", "legacy", "bounded", "rerank", "selective":
 	default:
 		if s.cfg.GraphRetrieval {
-			httpError(w, http.StatusBadRequest, "graph must be one of legacy, bounded")
+			httpError(w, http.StatusBadRequest, "graph must be one of legacy, bounded, rerank, selective")
 			return
 		}
 	}

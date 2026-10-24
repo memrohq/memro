@@ -5,6 +5,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,6 +36,61 @@ type graphWalk struct {
 	Hops       int
 }
 
+// DetectQueryIntent classifies query into "aggregation" vs "multi_hop".
+func DetectQueryIntent(query string) string {
+	q := strings.ToLower(strings.TrimSpace(query))
+	aggregationPatterns := []string{
+		"how many", "how much", "how often", "total", "count",
+		"number of", "amount of", "list all", "sum of", "overall",
+	}
+	for _, p := range aggregationPatterns {
+		if strings.Contains(q, p) {
+			return "aggregation"
+		}
+	}
+	return "multi_hop"
+}
+
+func (e *Engine) rerankHybridResults(hybridResults []domain.SearchResult, edges []graphEdge) []domain.SearchResult {
+	if len(hybridResults) <= 1 || len(edges) == 0 {
+		return hybridResults
+	}
+
+	existingIDs := make(map[uuid.UUID]bool, len(hybridResults))
+	for _, r := range hybridResults {
+		if id, err := uuid.Parse(r.MemoryID); err == nil {
+			existingIDs[id] = true
+		}
+	}
+
+	degree := make(map[uuid.UUID]int, len(hybridResults))
+	for _, edge := range edges {
+		if existingIDs[edge.From] && existingIDs[edge.To] && edge.From != edge.To {
+			degree[edge.From]++
+			degree[edge.To]++
+		}
+	}
+
+	reranked := make([]domain.SearchResult, len(hybridResults))
+	copy(reranked, hybridResults)
+
+	for i := range reranked {
+		if id, err := uuid.Parse(reranked[i].MemoryID); err == nil {
+			deg := degree[id]
+			if deg > 0 {
+				boost := 1.0 + 0.15*min(1.0, float32(deg)/3.0)
+				reranked[i].Score *= boost
+			}
+		}
+	}
+
+	sort.SliceStable(reranked, func(i, j int) bool {
+		return reranked[i].Score > reranked[j].Score
+	})
+
+	return reranked
+}
+
 // ExpandGraph executes bounded graph expansion from hybrid search seeds.
 // It is strictly budgeted, tenant- and agent-scoped, and protects Recall@5 by never
 // displacing the top 5 hybrid results.
@@ -49,6 +105,7 @@ func (e *Engine) ExpandGraph(ctx context.Context, q domain.SearchQuery, tenantID
 		return hybridResults, &domain.GraphDiagnostics{Applied: false, Reason: "no_seeds"}
 	}
 
+	intent := DetectQueryIntent(q.Query)
 	start := time.Now()
 	timeoutCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
 	defer cancel()
@@ -75,11 +132,47 @@ func (e *Engine) ExpandGraph(ctx context.Context, q domain.SearchQuery, tenantID
 	if err != nil {
 		metrics.GraphExpansionErrors.Inc()
 		return hybridResults, &domain.GraphDiagnostics{
-			Applied:   false,
-			Mode:      q.GraphMode,
-			Seeds:     numSeeds,
-			ElapsedMS: time.Since(start).Milliseconds(),
-			Reason:    "edge_fetch_error",
+			Applied:     false,
+			Mode:        q.GraphMode,
+			Seeds:       numSeeds,
+			ElapsedMS:   time.Since(start).Milliseconds(),
+			Reason:      "edge_fetch_error",
+			QueryIntent: intent,
+		}
+	}
+
+	// 1. Rerank mode: degree/connectivity reranking with ZERO new nodes injected
+	if q.GraphMode == "rerank" {
+		reranked := e.rerankHybridResults(hybridResults, edges)
+		metrics.GraphExpansionApplied.WithLabelValues("rerank").Inc()
+		return reranked, &domain.GraphDiagnostics{
+			Applied:       true,
+			Mode:          "rerank",
+			Seeds:         numSeeds,
+			EdgesExamined: len(edges),
+			Paths:         0,
+			NodesAdded:    0,
+			Truncated:     truncatedEdges,
+			ElapsedMS:     time.Since(start).Milliseconds(),
+			QueryIntent:   intent,
+		}
+	}
+
+	// 2. Selective mode with aggregation query: bypass node injection to prevent context dilution
+	if q.GraphMode == "selective" && intent == "aggregation" {
+		reranked := e.rerankHybridResults(hybridResults, edges)
+		metrics.GraphExpansionApplied.WithLabelValues("selective").Inc()
+		return reranked, &domain.GraphDiagnostics{
+			Applied:       true,
+			Mode:          "selective",
+			Seeds:         numSeeds,
+			EdgesExamined: len(edges),
+			Paths:         0,
+			NodesAdded:    0,
+			Truncated:     truncatedEdges,
+			ElapsedMS:     time.Since(start).Milliseconds(),
+			Reason:        "aggregation_query_rerank_only",
+			QueryIntent:   intent,
 		}
 	}
 
@@ -134,6 +227,7 @@ func (e *Engine) ExpandGraph(ctx context.Context, q domain.SearchQuery, tenantID
 			Truncated:     truncatedEdges || truncatedPaths,
 			ElapsedMS:     time.Since(start).Milliseconds(),
 			Reason:        "no_new_nodes",
+			QueryIntent:   intent,
 		}
 	}
 
@@ -163,11 +257,12 @@ func (e *Engine) ExpandGraph(ctx context.Context, q domain.SearchQuery, tenantID
 	if err != nil {
 		metrics.GraphExpansionErrors.Inc()
 		return hybridResults, &domain.GraphDiagnostics{
-			Applied:   false,
-			Mode:      q.GraphMode,
-			Seeds:     numSeeds,
-			ElapsedMS: time.Since(start).Milliseconds(),
-			Reason:    "load_results_error",
+			Applied:     false,
+			Mode:        q.GraphMode,
+			Seeds:       numSeeds,
+			ElapsedMS:   time.Since(start).Milliseconds(),
+			Reason:      "load_results_error",
+			QueryIntent: intent,
 		}
 	}
 
@@ -227,6 +322,7 @@ func (e *Engine) ExpandGraph(ctx context.Context, q domain.SearchQuery, tenantID
 		NodesAdded:    len(candList),
 		Truncated:     truncatedEdges || truncatedPaths,
 		ElapsedMS:     time.Since(start).Milliseconds(),
+		QueryIntent:   intent,
 	}
 
 	return finalResults, diag
