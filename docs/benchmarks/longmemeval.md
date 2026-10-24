@@ -4,6 +4,8 @@
 
 This report publishes the methodology, evaluation results, latency metrics, and API costs for Memro evaluated on the public **LongMemEval** benchmark suite across 500 challenge questions.
 
+> **Benchmark Journal**: Every benchmark run, failure analysis, and experiment is tracked in the internal [Benchmark Journal](journal/README.md) to monitor progress over time.
+
 ---
 
 ## 1. Executive Summary & Full Runs Comparison
