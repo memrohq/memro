@@ -15,7 +15,7 @@ import pathlib
 import random
 import threading
 
-from common import BudgetExceeded, chat
+from common import BudgetExceeded, RunTracker, chat, set_run_tracker
 
 
 def get_anscheck_prompt(task, question, answer, response, abstention=False):
@@ -55,6 +55,8 @@ def main():
     ap.add_argument("--workers", type=int, default=10)
     args = ap.parse_args()
     run = pathlib.Path(args.run_dir)
+    tracker = RunTracker(run)
+    set_run_tracker(tracker)
     rows = [json.loads(l) for l in (run / "hyp.jsonl").read_text().splitlines() if l.strip()]
     if args.sample:
         rows = random.Random(0).sample(rows, min(args.sample, len(rows)))
