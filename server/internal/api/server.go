@@ -161,6 +161,7 @@ func (s *Server) Handler() http.Handler {
 	protected("POST /identity/{id}/keys", s.addAgentKey)
 	protected("DELETE /identity/{id}/keys/{key}", s.revokeAgentKey)
 	protected("POST /memory", s.createMemory)
+	protected("POST /memories/batch", s.createMemoriesBatch)
 	protected("GET /memory/agent/{agent_id}", s.listMemories)
 	protected("DELETE /memory/{id}", s.deleteMemory)
 	protected("GET /memory/chain/{id}", s.memoryChain)
