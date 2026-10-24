@@ -182,6 +182,8 @@ export interface RecallOptions {
   /** Drop results scoring below this (0..1). */
   minScore?: number;
   graph?: 'legacy' | 'bounded' | 'rerank' | 'selective';
+  adaptiveDiversity?: boolean;
+  maxPerSession?: number;
 }
 
 export interface TemporalOptions {

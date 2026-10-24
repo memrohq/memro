@@ -95,6 +95,10 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	adaptiveDiversity := s.cfg.SearchAggregatePerSession > 0
+	if adStr := q.Get("adaptive_diversity"); adStr != "" {
+		adaptiveDiversity = adStr == "true" || adStr == "1"
+	}
 	if !s.gate(w, r, a, extension.MetricQueries, 1) {
 		return
 	}
@@ -104,6 +108,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		Order: order, ResolveContradictions: resolveConflicts, IncludeLedger: includeLedger,
 		AnchorDate: anchorDate, TemporalWeight: temporalWeight,
 		GraphMode: graphMode, GraphRetrievalEnabled: s.cfg.GraphRetrieval,
+		AdaptiveDiversity: adaptiveDiversity, AggregatePerSession: s.cfg.SearchAggregatePerSession,
 	}, a.TenantID)
 	if err != nil {
 		slog.Error("search", "err", err)

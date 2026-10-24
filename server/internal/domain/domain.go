@@ -148,6 +148,10 @@ type SearchQuery struct {
 	GraphMode string
 	// GraphRetrievalEnabled indicates whether the server feature flag allows graph expansion.
 	GraphRetrievalEnabled bool
+	// AdaptiveDiversity, when true, automatically caps candidates per session for aggregation queries.
+	AdaptiveDiversity bool
+	// AggregatePerSession is the per-session cap applied when AdaptiveDiversity is active (default 3).
+	AggregatePerSession int
 }
 
 type ResultGraphInfo struct {

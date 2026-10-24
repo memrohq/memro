@@ -267,6 +267,8 @@ class MemroClient:
         anchor_date: Optional[str] = None,
         temporal_weight: Optional[float] = None,
         graph: Optional[str] = None,
+        adaptive_diversity: Optional[bool] = None,
+        max_per_session: Optional[int] = None,
         return_response: bool = False,
     ) -> Union[List[dict], dict]:
         """Search memories. mode is hybrid (default), semantic or keyword."""
@@ -283,6 +285,10 @@ class MemroClient:
             params["temporal_weight"] = str(temporal_weight)
         if graph:
             params["graph"] = graph
+        if adaptive_diversity is not None:
+            params["adaptive_diversity"] = str(adaptive_diversity).lower()
+        if max_per_session is not None:
+            params["max_per_session"] = str(max_per_session)
         res = self._json("GET", "/search", params=params, agent_id=agent_id, private_key=private_key)
         if return_response:
             return res

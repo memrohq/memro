@@ -77,6 +77,10 @@ type Config struct {
 	GraphWriteEdges bool
 	GraphRetrieval  bool
 
+	// SearchAggregatePerSession (ADR 0022). When > 0, automatically caps search
+	// results per conversation for aggregate queries ("how many", "total"...) to this value.
+	SearchAggregatePerSession int
+
 	// DevLogOTP writes dashboard sign-in codes to the server log (and still
 	// emails them when SMTP is configured), so local development and staging
 	// smoke tests can sign in. Never enable it in production.
@@ -92,6 +96,7 @@ func Load() Config {
 		MigrateOnStartup:      envBool("MIGRATE_ON_STARTUP", true),
 		GraphWriteEdges:       envBool("GRAPH_WRITE_EDGES", false),
 		GraphRetrieval:        envBool("GRAPH_RETRIEVAL", false),
+		SearchAggregatePerSession: envInt("SEARCH_AGGREGATE_PER_SESSION", 0),
 		RateLimitMax:          envInt("RATE_LIMIT_MAX", 200),
 		RateLimitWindow:       time.Duration(envInt("RATE_LIMIT_WINDOW_SECONDS", 60)) * time.Second,
 		TrustProxyHeaders:     envBool("TRUST_PROXY_HEADERS", false),

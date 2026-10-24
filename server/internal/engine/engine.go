@@ -103,7 +103,15 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 		}
 	}
 	order, scores := fuseRRF(semantic, keyword, depth*2)
-	order, err := e.diversify(ctx, order, q.Limit, q.PerSession)
+	perSession := q.PerSession
+	if perSession <= 0 && q.AdaptiveDiversity && DetectQueryIntent(q.Query) == "aggregation" {
+		if q.AggregatePerSession > 0 {
+			perSession = q.AggregatePerSession
+		} else {
+			perSession = 3
+		}
+	}
+	order, err := e.diversify(ctx, order, q.Limit, perSession)
 	if err != nil {
 		return nil, err
 	}

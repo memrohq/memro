@@ -217,7 +217,9 @@ type RecallOptions struct {
 	Type     MemoryType
 	Mode     SearchMode // default hybrid
 	MinScore float64
-	Graph    string // "legacy", "bounded", "rerank", "selective"
+	Graph             string // "legacy", "bounded", "rerank", "selective"
+	AdaptiveDiversity bool   // automatically cap candidates per session for aggregation queries
+	MaxPerSession     int    // explicit cap on candidates per conversation session
 }
 
 // TemporalOptions are optional parameters for Agent.RecallTemporal.

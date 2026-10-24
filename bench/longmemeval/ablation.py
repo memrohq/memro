@@ -67,6 +67,22 @@ ALL_ARMS = [
         "graph": "selective",
         "resolve_conflicts": False,
     },
+    {
+        "id": "arm-g",
+        "name": "ablation-arm-g",
+        "desc": "Arm G: Graph Rerank + Adaptive Session Diversity (PR 22)",
+        "graph": "rerank",
+        "adaptive_diversity": True,
+        "resolve_conflicts": False,
+    },
+    {
+        "id": "arm-h",
+        "name": "ablation-arm-h",
+        "desc": "Arm H: Selective Graph + Adaptive Session Diversity (PR 22)",
+        "graph": "selective",
+        "adaptive_diversity": True,
+        "resolve_conflicts": False,
+    },
 ]
 ARMS = ALL_ARMS
 
@@ -84,6 +100,7 @@ def setup_arm_dirs(base_dir: pathlib.Path, arms=None):
             "arm_id": arm["id"],
             "graph": arm["graph"],
             "resolve_conflicts": arm["resolve_conflicts"],
+            "adaptive_diversity": arm.get("adaptive_diversity", False),
             "commit": base_run.get_server_commit(),
             "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         }
@@ -155,6 +172,7 @@ def run_question_all_arms(q, client, no_llm=False):
                 order="score",
                 resolve_conflicts=arm["resolve_conflicts"],
                 graph=arm["graph"],
+                adaptive_diversity=arm.get("adaptive_diversity", False),
                 return_response=True,
             )
             search_ms = (time.time() - t_search) * 1000
