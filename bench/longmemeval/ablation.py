@@ -83,6 +83,14 @@ ALL_ARMS = [
         "adaptive_diversity": True,
         "resolve_conflicts": False,
     },
+    {
+        "id": "arm-i",
+        "name": "ablation-arm-i",
+        "desc": "Arm I: Selective Graph + Adaptive Diversity + Intent-Aware Supersession (PR 32)",
+        "graph": "selective",
+        "adaptive_diversity": True,
+        "resolve_conflicts": True,
+    },
 ]
 ARMS = ALL_ARMS
 
@@ -235,6 +243,7 @@ def main():
     parser.add_argument("--arms", default="a,b,c,d,e,f", help="Comma-separated arm letters, e.g. 'a,c,e,f'")
     parser.add_argument("--workers", type=int, default=6, help="Concurrent worker count (default: 6)")
     parser.add_argument("--no-llm", action="store_true", help="Skip answer LLM (test retrieval & latency only)")
+    parser.add_argument("--category", default=None, help="Filter to specific question_type (e.g. 'knowledge-update')")
     parser.add_argument("--output-dir", default=str(RUNS), help="Base output directory for runs")
     args = parser.parse_args()
 
@@ -263,6 +272,9 @@ def main():
         questions = [q for q in data if q["question_id"] in subset_ids]
     else:
         questions = data
+
+    if args.category:
+        questions = [q for q in questions if q["question_type"] == args.category]
 
     base_dir = pathlib.Path(args.output_dir)
     arm_dirs = setup_arm_dirs(base_dir, arms=ARMS)

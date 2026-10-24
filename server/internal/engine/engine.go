@@ -127,18 +127,32 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 	}
 
 	if len(results) > 1 {
-		relations, _ := e.relationsTouching(ctx, order)
-		resolveSearchContradictions(results, relations)
-		if q.ResolveContradictions {
-			for i := range results {
-				if results[i].IsSuperseded {
-					results[i].Score *= 0.5
-				}
+		var resultIDs []uuid.UUID
+		for _, r := range results {
+			if id, err := uuid.Parse(r.MemoryID); err == nil {
+				resultIDs = append(resultIDs, id)
 			}
-			if q.Order == "" || q.Order == "score" {
-				sort.SliceStable(results, func(i, j int) bool {
-					return results[i].Score > results[j].Score
-				})
+		}
+		relations, _ := e.relationsTouching(ctx, resultIDs)
+		intent := DetectQueryIntent(q.Query)
+		resolveSearchContradictions(results, relations, intent == "aggregation")
+		if q.ResolveContradictions {
+			// Intent-aware demotion:
+			// - "historical": user wants past state, do not demote superseded memories
+			// - "evolution": user wants both past and present, do not demote superseded memories
+			// - "aggregation": items are cumulative events, do not demote
+			// - "current" / default: demote superseded memories so current truth surfaces first
+			if intent != "historical" && intent != "evolution" && intent != "aggregation" {
+				for i := range results {
+					if results[i].IsSuperseded {
+						results[i].Score *= 0.2
+					}
+				}
+				if q.Order == "" || q.Order == "score" {
+					sort.SliceStable(results, func(i, j int) bool {
+						return results[i].Score > results[j].Score
+					})
+				}
 			}
 		}
 	}
@@ -450,7 +464,12 @@ func resultTime(r domain.SearchResult) time.Time {
 	return time.Time{}
 }
 
-func resolveSearchContradictions(results []domain.SearchResult, relations []domain.Relation) {
+func resolveSearchContradictions(results []domain.SearchResult, relations []domain.Relation, isAggregation ...bool) {
+	agg := false
+	if len(isAggregation) > 0 && isAggregation[0] {
+		agg = true
+	}
+
 	relMap := map[uuid.UUID]uuid.UUID{}
 	for _, rel := range relations {
 		if rel.Type == domain.RelUpdates {
@@ -470,7 +489,7 @@ func resolveSearchContradictions(results []domain.SearchResult, relations []doma
 
 	for i := 0; i < len(results); i++ {
 		for j := i + 1; j < len(results); j++ {
-			conf := DetectContradiction(results[i].Content, results[j].Content)
+			conf := DetectContradictionWithIntent(results[i].Content, results[j].Content, agg)
 			if conf >= 0.7 {
 				ti := resultTime(results[i])
 				tj := resultTime(results[j])

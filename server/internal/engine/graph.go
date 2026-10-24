@@ -36,18 +36,46 @@ type graphWalk struct {
 	Hops       int
 }
 
-// DetectQueryIntent classifies query into "aggregation" vs "multi_hop".
+// DetectQueryIntent classifies query into "evolution", "historical", "current", "aggregation", or "multi_hop".
 func DetectQueryIntent(query string) string {
 	q := strings.ToLower(strings.TrimSpace(query))
+
+	// 1. Evolution / change queries (asks about transition, past vs present, or state changes)
+	hasPast := strings.Contains(q, "previous") || strings.Contains(q, "initially") || strings.Contains(q, "formerly") || strings.Contains(q, "used to") || strings.Contains(q, "in the past") || strings.Contains(q, "prior to") || strings.Contains(q, "former")
+	hasPresent := strings.Contains(q, "now") || strings.Contains(q, "current") || strings.Contains(q, "today") || strings.Contains(q, "recent")
+	if hasPast && hasPresent {
+		return "evolution"
+	}
+	if strings.Contains(q, "switch") || strings.Contains(q, "increase or decrease") || strings.Contains(q, "now vs") || strings.Contains(q, "change from") {
+		return "evolution"
+	}
+
+	// 2. Historical queries (explicitly asking about former / previous state)
+	if hasPast {
+		return "historical"
+	}
+
+	// 3. Definite aggregation queries (totals, sums, listings across sessions)
+	if strings.Contains(q, "total") || strings.Contains(q, "sum of") || strings.Contains(q, "list all") {
+		return "aggregation"
+	}
+
+	// 4. Current truth queries ("so far", "as of", "currently", "current")
+	if strings.Contains(q, "so far") || strings.Contains(q, "as of") || hasPresent {
+		return "current"
+	}
+
+	// 5. Standard aggregation queries (how many, how much, how often, count)
 	aggregationPatterns := []string{
-		"how many", "how much", "how often", "total", "count",
-		"number of", "amount of", "list all", "sum of", "overall",
+		"how many", "how much", "how often", "count",
+		"number of", "amount of", "overall",
 	}
 	for _, p := range aggregationPatterns {
 		if strings.Contains(q, p) {
 			return "aggregation"
 		}
 	}
+
 	return "multi_hop"
 }
 

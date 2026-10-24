@@ -93,6 +93,13 @@ var reDurationOrNumber = regexp.MustCompile(`\b(\d+(?:\.\d+)?)\s*(years?|months?
 
 // DetectContradiction returns a 0..1 likelihood that a and b contradict.
 func DetectContradiction(a, b string) float32 {
+	return DetectContradictionWithIntent(a, b, false)
+}
+
+// DetectContradictionWithIntent returns contradiction likelihood, skipping number-based
+// contradiction if isAggregation is true (since differing numbers across dates in aggregation
+// queries are distinct additive items rather than contradictions).
+func DetectContradictionWithIntent(a, b string, isAggregation bool) float32 {
 	al, bl := cleanText(a), cleanText(b)
 	if al == bl || al == "" || bl == "" {
 		return 0
@@ -164,6 +171,10 @@ func DetectContradiction(a, b string) float32 {
 	}
 
 	// 4. Topic overlap with conflicting numbers/durations
+	// Skip if aggregation query (differing numbers across events are cumulative)
+	if isAggregation {
+		return 0
+	}
 	// e.g. "I lived in that apartment for 6 months" vs "I lived in that apartment for 2 years"
 	// e.g. "I collected 50 coins" vs "I collected 75 coins"
 	numsA := reDurationOrNumber.FindAllString(al, -1)

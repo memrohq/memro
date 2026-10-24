@@ -132,3 +132,64 @@ func TestRenderLedgerFromResults(t *testing.T) {
 		t.Errorf("missing superseded marker in ledger:\n%s", ledger)
 	}
 }
+
+func TestDetectQueryIntent(t *testing.T) {
+	cases := []struct {
+		query  string
+		expect string
+	}{
+		{"How often do I play tennis with my friends at the local park previously? How often do I play now?", "evolution"},
+		{"Did I mostly recently increase or decrease the limit on coffee?", "evolution"},
+		{"For coffee ratio, did I switch to more water or less?", "evolution"},
+		{"What day of the week did I meet with my previous language exchange tutor Juan?", "historical"},
+		{"What was my former manager Rachel's team size?", "historical"},
+		{"What is the total amount of money I earned from selling products at the markets?", "aggregation"},
+		{"How many sports have I played competitively in the past?", "historical"}, // "in the past" marks historical
+		{"How many tops have I bought from H&M?", "aggregation"},
+		{"How long have I been living in my current apartment in Harajuku?", "current"},
+		{"How many pages of A Short History have I read so far?", "current"},
+		{"What brand of BBQ sauce am I currently obsessed with?", "current"},
+		{"Tell me about Algernon's backstory", "multi_hop"},
+	}
+
+	for _, c := range cases {
+		got := DetectQueryIntent(c.query)
+		if got != c.expect {
+			t.Errorf("query %q: expected intent %q, got %q", c.query, c.expect, got)
+		}
+	}
+}
+
+func TestResolveSearchContradictionsAggregation(t *testing.T) {
+	id1 := uuid.New()
+	id2 := uuid.New()
+	t1 := "2023-01-15T10:00:00Z"
+	t2 := "2023-07-20T14:30:00Z"
+
+	results := []domain.SearchResult{
+		{
+			MemoryID:     id1.String(),
+			Content:      "I earned $400 at the Downtown Farmers Market",
+			Score:        0.9,
+			EventDate:    &t1,
+			DocumentDate: &t1,
+		},
+		{
+			MemoryID:     id2.String(),
+			Content:      "I earned $350 at the Uptown Farmers Market",
+			Score:        0.85,
+			EventDate:    &t2,
+			DocumentDate: &t2,
+		},
+	}
+
+	// In aggregation mode, differing amounts across dates should NOT supersede
+	resolveSearchContradictions(results, nil, true)
+
+	if results[0].IsSuperseded {
+		t.Errorf("expected older memory %s to NOT be superseded in aggregation mode", id1)
+	}
+	if results[1].IsSuperseded {
+		t.Errorf("expected newer memory %s to NOT be superseded in aggregation mode", id2)
+	}
+}
