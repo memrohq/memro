@@ -64,12 +64,51 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "mode must be one of hybrid, semantic, keyword")
 		return
 	}
+	order := q.Get("order")
+	switch order {
+	case "", "score", "chronological", "chronological_desc":
+	default:
+		httpError(w, http.StatusBadRequest, "order must be one of score, chronological, chronological_desc")
+		return
+	}
+	resolveConflicts, _ := strconv.ParseBool(q.Get("resolve_conflicts"))
+	if !resolveConflicts {
+		resolveConflicts, _ = strconv.ParseBool(q.Get("resolve_contradictions"))
+	}
+	includeLedger, _ := strconv.ParseBool(q.Get("include_ledger"))
+	var anchorDate *time.Time
+	if q.Get("anchor_date") != "" {
+		anchorDate = parseTime(q.Get("anchor_date"))
+	}
+	var temporalWeight float32
+	if twStr := q.Get("temporal_weight"); twStr != "" {
+		if tw, err := strconv.ParseFloat(twStr, 32); err == nil {
+			temporalWeight = float32(min(1.0, max(0.0, tw)))
+		}
+	}
+	graphMode := q.Get("graph")
+	switch graphMode {
+	case "", "legacy", "bounded", "rerank", "selective":
+	default:
+		if s.cfg.GraphRetrieval {
+			httpError(w, http.StatusBadRequest, "graph must be one of legacy, bounded, rerank, selective")
+			return
+		}
+	}
+	adaptiveDiversity := s.cfg.SearchAggregatePerSession > 0
+	if adStr := q.Get("adaptive_diversity"); adStr != "" {
+		adaptiveDiversity = adStr == "true" || adStr == "1"
+	}
 	if !s.gate(w, r, a, extension.MetricQueries, 1) {
 		return
 	}
 	resp, err := s.engine.Search(r.Context(), domain.SearchQuery{
 		AgentID: agentID, Query: query, Limit: intParam(r, "limit", 10, 50),
 		MemoryType: q.Get("memory_type"), Mode: mode, PerSession: perSession(q.Get("max_per_session")),
+		Order: order, ResolveContradictions: resolveConflicts, IncludeLedger: includeLedger,
+		AnchorDate: anchorDate, TemporalWeight: temporalWeight,
+		GraphMode: graphMode, GraphRetrievalEnabled: s.cfg.GraphRetrieval,
+		AdaptiveDiversity: adaptiveDiversity, AggregatePerSession: s.cfg.SearchAggregatePerSession,
 	}, a.TenantID)
 	if err != nil {
 		slog.Error("search", "err", err)

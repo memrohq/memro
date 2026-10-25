@@ -1,0 +1,26 @@
+{
+  "cost_usd": 0.172454,
+  "token_usage": {
+    "gpt-4o-mini": {
+      "usd": 0.172454,
+      "prompt_tokens": 1109620,
+      "completion_tokens": 10022,
+      "calls": 200
+    }
+  },
+  "name": "control-same-server-100",
+  "commit": "ac2c9d7a31746ac7953e613f197a8bd4667e7d3f",
+  "engine_options": {
+    "top_k": 15,
+    "mode": "hybrid",
+    "answer_model": "gpt-4o-mini",
+    "session_expansion": 3,
+    "format": "standard",
+    "write_time_supersession": "false",
+    "per_item_chars": 4000,
+    "resolve_conflicts": false,
+    "order": "score"
+  },
+  "created_at": "2026-10-24T07:29:37.319683Z",
+  "questions_total": 100
+}

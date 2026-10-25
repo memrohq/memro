@@ -21,13 +21,39 @@ export interface Memory {
   metadata?: Record<string, unknown> | null;
 }
 
+export interface ResultGraphInfo {
+  seed_id: string;
+  path: string[];
+  relation_types: string[];
+  hops: number;
+}
+
 export interface SearchResult {
   memory_id: string;
   content: string;
   score: number;
   memory_type: MemoryType;
   created_at: string;
+  document_date?: string | null;
+  event_date?: string | null;
+  session_id?: string | null;
   asset_url?: string | null;
+  is_superseded?: boolean;
+  superseded_by?: string | null;
+  graph?: ResultGraphInfo;
+}
+
+export interface GraphDiagnostics {
+  applied: boolean;
+  mode?: string;
+  seeds?: number;
+  edges_examined?: number;
+  paths?: number;
+  nodes_added?: number;
+  truncated?: boolean;
+  elapsed_ms?: number;
+  reason?: string;
+  query_intent?: string;
 }
 
 export interface SearchResponse {
@@ -35,6 +61,8 @@ export interface SearchResponse {
   mode: SearchMode;
   latency_ms: number;
   total: number;
+  ledger?: string | null;
+  graph?: GraphDiagnostics;
 }
 
 export interface TemporalResult {
@@ -163,6 +191,9 @@ export interface RecallOptions {
   mode?: SearchMode;
   /** Drop results scoring below this (0..1). */
   minScore?: number;
+  graph?: 'legacy' | 'bounded' | 'rerank' | 'selective';
+  adaptiveDiversity?: boolean;
+  maxPerSession?: number;
 }
 
 export interface TemporalOptions {

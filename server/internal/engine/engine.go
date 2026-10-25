@@ -103,7 +103,15 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 		}
 	}
 	order, scores := fuseRRF(semantic, keyword, depth*2)
-	order, err := e.diversify(ctx, order, q.Limit, q.PerSession)
+	perSession := q.PerSession
+	if perSession <= 0 && q.AdaptiveDiversity && DetectQueryIntent(q.Query) == "aggregation" {
+		if q.AggregatePerSession > 0 {
+			perSession = q.AggregatePerSession
+		} else {
+			perSession = 3
+		}
+	}
+	order, err := e.diversify(ctx, order, q.Limit, perSession)
 	if err != nil {
 		return nil, err
 	}
@@ -112,11 +120,96 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 	if err != nil {
 		return nil, err
 	}
+
+	var graphDiag *domain.GraphDiagnostics
+	if q.GraphMode != "" {
+		results, graphDiag = e.ExpandGraph(ctx, q, tenantID, results)
+	}
+
+	if len(results) > 1 {
+		var resultIDs []uuid.UUID
+		for _, r := range results {
+			if id, err := uuid.Parse(r.MemoryID); err == nil {
+				resultIDs = append(resultIDs, id)
+			}
+		}
+		relations, _ := e.relationsTouching(ctx, resultIDs)
+		intent := DetectQueryIntent(q.Query)
+		resolveSearchContradictions(results, relations, intent == "aggregation")
+		if q.ResolveContradictions {
+			// Intent-aware demotion:
+			// - "historical": user wants past state, do not demote superseded memories
+			// - "evolution": user wants both past and present, do not demote superseded memories
+			// - "aggregation": items are cumulative events, do not demote
+			// - "current" / default: demote superseded memories so current truth surfaces first
+			if intent != "historical" && intent != "evolution" && intent != "aggregation" {
+				for i := range results {
+					if results[i].IsSuperseded {
+						results[i].Score *= 0.2
+					}
+				}
+				if q.Order == "" || q.Order == "score" {
+					sort.SliceStable(results, func(i, j int) bool {
+						return results[i].Score > results[j].Score
+					})
+				}
+			}
+		}
+	}
+
+	if q.TemporalWeight > 0 {
+		now := e.now()
+		for i := range results {
+			t := resultTime(results[i])
+			if !t.IsZero() {
+				rec := RecencyScore(t, now)
+				results[i].Score = results[i].Score*(1.0-q.TemporalWeight) + rec*q.TemporalWeight
+			}
+		}
+		if q.Order == "" || q.Order == "score" {
+			sort.SliceStable(results, func(i, j int) bool {
+				return results[i].Score > results[j].Score
+			})
+		}
+	}
+
+	if q.Order == "chronological" {
+		sort.SliceStable(results, func(i, j int) bool {
+			ti, tj := resultTime(results[i]), resultTime(results[j])
+			if ti.Equal(tj) {
+				return results[i].Score > results[j].Score
+			}
+			return ti.Before(tj)
+		})
+	} else if q.Order == "chronological_desc" {
+		sort.SliceStable(results, func(i, j int) bool {
+			ti, tj := resultTime(results[i]), resultTime(results[j])
+			if ti.Equal(tj) {
+				return results[i].Score > results[j].Score
+			}
+			return ti.After(tj)
+		})
+	}
+
+	var ledger *string
+	if q.IncludeLedger && len(results) > 0 {
+		anchor := e.now()
+		if q.AnchorDate != nil && !q.AnchorDate.IsZero() {
+			anchor = *q.AnchorDate
+		}
+		rendered := RenderLedgerFromResults(anchor, results)
+		if rendered != "" {
+			ledger = &rendered
+		}
+	}
+
 	resp := &domain.SearchResponse{
 		Results:   results,
 		Mode:      mode,
 		LatencyMS: e.now().Sub(start).Milliseconds(),
 		Total:     len(results),
+		Ledger:    ledger,
+		Graph:     graphDiag,
 	}
 	e.cache.Set(q, tenantID, resp)
 	return resp, nil
@@ -225,6 +318,33 @@ func fuseRRF(semantic, keyword []uuid.UUID, limit int) ([]uuid.UUID, map[uuid.UU
 	return order, scores
 }
 
+// searchableFilter limits search to the last 90 days and leaves out task
+// coordination entries. Every search path, graph expansion included, uses it.
+const searchableFilter = `
+		  AND m.created_at > NOW() - INTERVAL '90 days'
+		  AND (m.metadata->>'action' IS NULL OR m.metadata->>'action' NOT IN ('claim', 'release', 'intent', 'handoff'))`
+
+// searchableIDs returns the ids that the search filters (agent, tenant,
+// searchableFilter, memory type) allow.
+func (e *Engine) searchableIDs(ctx context.Context, q domain.SearchQuery, tenantID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]bool, error) {
+	args := []any{q.AgentID, tenantID, ids}
+	rows, err := e.pool.Query(ctx, `SELECT m.id FROM memories m
+		WHERE m.agent_id = $1 AND m.tenant_id = $2 AND m.id = ANY($3)`+searchableFilter+typeFilter(q, &args), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ok := map[uuid.UUID]bool{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ok[id] = true
+	}
+	return ok, rows.Err()
+}
+
 func typeFilter(q domain.SearchQuery, args *[]any) string {
 	if q.MemoryType == "" {
 		return ""
@@ -236,9 +356,7 @@ func typeFilter(q domain.SearchQuery, args *[]any) string {
 func (e *Engine) semanticIDs(ctx context.Context, q domain.SearchQuery, tenantID uuid.UUID, vec []float32, limit int) ([]uuid.UUID, error) {
 	args := []any{q.AgentID, tenantID, pgvector.NewVector(vec), len(vec), limit}
 	sql := `SELECT m.id FROM memory_embeddings e JOIN memories m ON m.id = e.memory_id
-		WHERE m.agent_id = $1 AND m.tenant_id = $2 AND e.dims = $4
-		  AND m.created_at > NOW() - INTERVAL '90 days'
-		  AND (m.metadata->>'action' IS NULL OR m.metadata->>'action' NOT IN ('claim', 'release', 'intent', 'handoff'))` + typeFilter(q, &args) + `
+		WHERE m.agent_id = $1 AND m.tenant_id = $2 AND e.dims = $4` + searchableFilter + typeFilter(q, &args) + `
 		ORDER BY e.embedding <=> $3 LIMIT $5`
 	rows, err := e.pool.Query(ctx, sql, args...)
 	if err != nil {
@@ -269,9 +387,7 @@ func (e *Engine) keywordHits(ctx context.Context, q domain.SearchQuery, tenantID
 	}
 	sql := `SELECT m.id, ts_rank_cd(to_tsvector('english', m.content), ` + tsq + `) AS rank
 		FROM memories m
-		WHERE m.agent_id = $1 AND m.tenant_id = $2
-		  AND m.created_at > NOW() - INTERVAL '90 days'
-		  AND (m.metadata->>'action' IS NULL OR m.metadata->>'action' NOT IN ('claim', 'release', 'intent', 'handoff'))
+		WHERE m.agent_id = $1 AND m.tenant_id = $2` + searchableFilter + `
 		  AND to_tsvector('english', m.content) @@ ` + tsq + typeFilter(q, &args) + `
 		ORDER BY rank DESC LIMIT $4`
 	rows, err := e.pool.Query(ctx, sql, args...)
@@ -299,7 +415,7 @@ func (e *Engine) loadResults(ctx context.Context, ids []uuid.UUID, scores map[uu
 		last_accessed_at = NOW() WHERE id = ANY($1)`, ids); err != nil {
 		slog.Warn("access tracking failed", "err", err)
 	}
-	rows, err := e.pool.Query(ctx, `SELECT id, content, memory_type, created_at, asset_url FROM memories WHERE id = ANY($1)`, ids)
+	rows, err := e.pool.Query(ctx, `SELECT id, content, memory_type, created_at, asset_url, document_date, event_date, session_id FROM memories WHERE id = ANY($1)`, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -309,11 +425,26 @@ func (e *Engine) loadResults(ctx context.Context, ids []uuid.UUID, scores map[uu
 		var id uuid.UUID
 		var r domain.SearchResult
 		var created time.Time
-		if err := rows.Scan(&id, &r.Content, &r.MemoryType, &created, &r.AssetURL); err != nil {
+		var docDate *time.Time
+		var evDate *time.Time
+		var sessID *uuid.UUID
+		if err := rows.Scan(&id, &r.Content, &r.MemoryType, &created, &r.AssetURL, &docDate, &evDate, &sessID); err != nil {
 			return nil, err
 		}
 		r.MemoryID = id.String()
 		r.CreatedAt = created.UTC().Format(time.RFC3339Nano)
+		if docDate != nil {
+			s := docDate.UTC().Format(time.RFC3339Nano)
+			r.DocumentDate = &s
+		}
+		if evDate != nil {
+			s := evDate.UTC().Format(time.RFC3339Nano)
+			r.EventDate = &s
+		}
+		if sessID != nil {
+			s := sessID.String()
+			r.SessionID = &s
+		}
 		byID[id] = r
 	}
 	if err := rows.Err(); err != nil {
@@ -326,6 +457,88 @@ func (e *Engine) loadResults(ctx context.Context, ids []uuid.UUID, scores map[uu
 		}
 	}
 	return results, nil
+}
+
+func resultTime(r domain.SearchResult) time.Time {
+	if r.EventDate != nil && *r.EventDate != "" {
+		if t, err := time.Parse(time.RFC3339Nano, *r.EventDate); err == nil {
+			return t
+		}
+		if t, err := time.Parse(time.RFC3339, *r.EventDate); err == nil {
+			return t
+		}
+	}
+	if r.DocumentDate != nil && *r.DocumentDate != "" {
+		if t, err := time.Parse(time.RFC3339Nano, *r.DocumentDate); err == nil {
+			return t
+		}
+		if t, err := time.Parse(time.RFC3339, *r.DocumentDate); err == nil {
+			return t
+		}
+	}
+	if r.CreatedAt != "" {
+		if t, err := time.Parse(time.RFC3339Nano, r.CreatedAt); err == nil {
+			return t
+		}
+		if t, err := time.Parse(time.RFC3339, r.CreatedAt); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
+func resolveSearchContradictions(results []domain.SearchResult, relations []domain.Relation, isAggregation ...bool) {
+	agg := false
+	if len(isAggregation) > 0 && isAggregation[0] {
+		agg = true
+	}
+
+	// An updates edge points from the newer memory to the older one. Older
+	// Evolve runs wrote some edges in arbitrary order, so when both ends are
+	// in the results their dates decide which one is superseded.
+	byID := map[string]int{}
+	for i := range results {
+		byID[results[i].MemoryID] = i
+	}
+	for _, rel := range relations {
+		if rel.Type != domain.RelUpdates {
+			continue
+		}
+		newer, older := rel.From.String(), rel.To.String()
+		oi, ok := byID[older]
+		if !ok {
+			continue
+		}
+		if ni, ok := byID[newer]; ok {
+			tn, to := resultTime(results[ni]), resultTime(results[oi])
+			if !tn.IsZero() && !to.IsZero() && tn.Before(to) {
+				newer, oi = older, ni
+			}
+		}
+		results[oi].IsSuperseded = true
+		results[oi].SupersededBy = &newer
+	}
+
+	for i := 0; i < len(results); i++ {
+		for j := i + 1; j < len(results); j++ {
+			conf := DetectContradictionWithIntent(results[i].Content, results[j].Content, agg)
+			if conf >= 0.7 {
+				ti := resultTime(results[i])
+				tj := resultTime(results[j])
+				if !ti.IsZero() && !tj.IsZero() {
+					if ti.Before(tj) {
+						results[i].IsSuperseded = true
+						s := results[j].MemoryID
+						results[i].SupersededBy = &s
+					} else if tj.Before(ti) {
+						results[j].IsSuperseded = true
+						s := results[i].MemoryID
+						results[j].SupersededBy = &s
+					}
+				}
+			}
+		}
+	}
 }
 
 // --- Temporal search ---------------------------------------------------------
@@ -629,7 +842,7 @@ func (e *Engine) Evolve(ctx context.Context, agentID string, tenantID uuid.UUID)
 		patterns = append(patterns, "Consolidated episodic clusters into semantic core")
 	}
 
-	rows, err = tx.Query(ctx, `SELECT id, content FROM memories
+	rows, err = tx.Query(ctx, `SELECT id, content, COALESCE(event_date, document_date, created_at) FROM memories
 		WHERE agent_id = $1 AND tenant_id = $2 AND memory_type IN ('profile', 'semantic')
 		  AND COALESCE(confidence, 1.0) > 0.3`, agentID, tenantID)
 	if err != nil {
@@ -638,11 +851,12 @@ func (e *Engine) Evolve(ctx context.Context, agentID string, tenantID uuid.UUID)
 	type core struct {
 		id      uuid.UUID
 		content string
+		at      time.Time
 	}
 	var cores []core
 	for rows.Next() {
 		var c core
-		if err := rows.Scan(&c.id, &c.content); err != nil {
+		if err := rows.Scan(&c.id, &c.content, &c.at); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -665,12 +879,18 @@ func (e *Engine) Evolve(ctx context.Context, agentID string, tenantID uuid.UUID)
 			if exists {
 				continue
 			}
+			// An updates edge points from the newer memory to the one it
+			// replaces; search relies on that direction.
+			newer, older := cores[i], cores[j]
+			if newer.at.Before(older.at) {
+				newer, older = older, newer
+			}
 			if _, err := tx.Exec(ctx, `INSERT INTO memory_relations (id, tenant_id, source_memory_id, target_memory_id,
 					relation_type, confidence, created_by) VALUES ($1, $2, $3, $4, 'updates', $5, $6)`,
-				uuid.New(), tenantID, cores[i].id, cores[j].id, conf, agentID); err != nil {
+				uuid.New(), tenantID, newer.id, older.id, conf, agentID); err != nil {
 				return nil, err
 			}
-			patterns = append(patterns, fmt.Sprintf("Identified conflict between memories %s and %s", cores[i].id, cores[j].id))
+			patterns = append(patterns, fmt.Sprintf("Identified conflict between memories %s and %s", newer.id, older.id))
 		}
 	}
 
@@ -851,8 +1071,16 @@ const (
 
 func NewResultCache() *ResultCache { return &ResultCache{entries: map[string]cachedResponse{}} }
 
+// cacheKey must cover every SearchQuery field that changes the response.
 func cacheKey(q domain.SearchQuery, tenantID uuid.UUID) string {
-	return fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%d", tenantID, q.AgentID, q.Query, q.Limit, q.MemoryType, q.Mode, q.PerSession)
+	anchor := ""
+	if q.AnchorDate != nil {
+		anchor = q.AnchorDate.UTC().Format(time.RFC3339Nano)
+	}
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%s\x00%s\x00%d\x00%s\x00%t\x00%t\x00%s\x00%.2f\x00%s\x00%t\x00%t\x00%d",
+		tenantID, q.AgentID, q.Query, q.Limit, q.MemoryType, q.Mode, q.PerSession,
+		q.Order, q.ResolveContradictions, q.IncludeLedger, anchor, q.TemporalWeight,
+		q.GraphMode, q.GraphRetrievalEnabled, q.AdaptiveDiversity, q.AggregatePerSession)
 }
 
 func (c *ResultCache) Get(q domain.SearchQuery, tenantID uuid.UUID) (*domain.SearchResponse, bool) {

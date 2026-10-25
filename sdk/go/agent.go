@@ -180,8 +180,6 @@ func (a *Agent) RememberBatch(ctx context.Context, items []BatchMemoryItem) ([]s
 	return res.IDs, nil
 }
 
-
-
 // Recall searches memories (hybrid by default). opts may be nil.
 func (a *Agent) Recall(ctx context.Context, query string, opts *RecallOptions) ([]SearchResult, error) {
 	if opts == nil {
@@ -193,6 +191,15 @@ func (a *Agent) Recall(ctx context.Context, query string, opts *RecallOptions) (
 	}
 	if opts.Type != "" {
 		q.Set("memory_type", string(opts.Type))
+	}
+	if opts.Graph != "" {
+		q.Set("graph", opts.Graph)
+	}
+	if opts.AdaptiveDiversity != nil {
+		q.Set("adaptive_diversity", strconv.FormatBool(*opts.AdaptiveDiversity))
+	}
+	if opts.MaxPerSession > 0 {
+		q.Set("max_per_session", strconv.Itoa(opts.MaxPerSession))
 	}
 	res, err := a.Client.Search(ctx, q, a.signer)
 	if err != nil || opts.MinScore <= 0 {

@@ -174,6 +174,25 @@ func TestCreateIdentityWithoutPowEndpoint(t *testing.T) {
 	}
 }
 
+func TestRecallSendsSearchOptions(t *testing.T) {
+	var got []string
+	a := signedAgent(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		got = append(got, fmt.Sprintf("%s|%s|%s", q.Get("graph"), q.Get("adaptive_diversity"), q.Get("max_per_session")))
+		io.WriteString(w, `{"results":[],"total":0}`)
+	})
+	off, on := false, true
+	for _, opts := range []*RecallOptions{nil, {AdaptiveDiversity: &off}, {AdaptiveDiversity: &on, MaxPerSession: 2, Graph: "bounded"}} {
+		if _, err := a.Recall(context.Background(), "how many", opts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{"||", "|false|", "bounded|true|2"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("query params = %q, want %q", got, want)
+	}
+}
+
 func TestCreateMemoriesBatch(t *testing.T) {
 	var received []map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -209,4 +228,3 @@ func TestCreateMemoriesBatch(t *testing.T) {
 		t.Fatalf("unexpected payload sent: %v", received)
 	}
 }
-

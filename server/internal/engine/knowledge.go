@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 
@@ -77,9 +78,30 @@ var (
 		regexp.MustCompile(`(?i)^(.+?)\s+(?:is|was|are|were|be|has been)\s+(?:a|an|the\s+)?(.+)$`),
 		regexp.MustCompile(`(?i)^(.+?)\s+(?:prefers?|likes?|wants?|uses?|chose|switched to)\s+(.+)$`),
 		regexp.MustCompile(`(?i)^(?:(.+?)\s+)?(?:lives in|moved to|based in|located in)\s+(.+)$`),
-		regexp.MustCompile(`(?i)^(.+?)\s*:\s*(.+)$`),
+		regexp.MustCompile(`(?i)^(.+?)\s+(?:lived in|stayed in|rented|occupied|worked at)\s+(.+)$`),
+		regexp.MustCompile(`(?i)^(.+?)\s+(?:has|had|owns|collected|bought|possesses)\s+(\d+\s+.+)$`),
+		regexp.MustCompile(`(?i)^(.+?)\s+(?:plays with|uses|selected|drives|switched to|chose)\s+(.+)$`),
 	}
+
+	// reKeyValue matches one-line "key: value" facts ("favorite color: blue").
+	// The key is 1-4 words and can't end in a digit, so clock times ("at 10:30")
+	// don't match; speaker labels are excluded in keyValueSlot.
+	reKeyValue  = regexp.MustCompile(`(?i)^([a-z][a-z' -]{0,40}?[a-z])\s*:\s*([^\n]+)$`)
+	speakerKeys = []string{"user", "assistant", "system", "human", "ai", "me", "q", "a"}
 )
+
+// keyValueSlot returns the key and value of a one-line "key: value" fact.
+func keyValueSlot(s string) (key, val string, ok bool) {
+	m := reKeyValue.FindStringSubmatch(s)
+	if m == nil {
+		return "", "", false
+	}
+	key, val = strings.TrimSpace(m[1]), strings.TrimSpace(m[2])
+	if len(strings.Fields(key)) > 4 || slices.Contains(speakerKeys, key) || val == "" {
+		return "", "", false
+	}
+	return key, val, true
+}
 
 func cleanText(s string) string {
 	s = strings.TrimSpace(strings.ToLower(s))
@@ -87,8 +109,17 @@ func cleanText(s string) string {
 	return s
 }
 
+var reDurationOrNumber = regexp.MustCompile(`\b(\d+(?:\.\d+)?)\s*(years?|months?|weeks?|days?|hours?|coins?|dollars?|items?|percent|%)?\b`)
+
 // DetectContradiction returns a 0..1 likelihood that a and b contradict.
 func DetectContradiction(a, b string) float32 {
+	return DetectContradictionWithIntent(a, b, false)
+}
+
+// DetectContradictionWithIntent returns contradiction likelihood, skipping number-based
+// contradiction if isAggregation is true (since differing numbers across dates in aggregation
+// queries are distinct additive items rather than contradictions).
+func DetectContradictionWithIntent(a, b string, isAggregation bool) float32 {
 	al, bl := cleanText(a), cleanText(b)
 	if al == bl || al == "" || bl == "" {
 		return 0
@@ -108,6 +139,13 @@ func DetectContradiction(a, b string) float32 {
 					return 0.75
 				}
 			}
+		}
+	}
+
+	if kA, vA, ok := keyValueSlot(al); ok {
+		if kB, vB, ok := keyValueSlot(bl); ok && kA == kB && vA != vB &&
+			!strings.Contains(vA, vB) && !strings.Contains(vB, vA) {
+			return 0.75
 		}
 	}
 
@@ -159,7 +197,50 @@ func DetectContradiction(a, b string) float32 {
 		return 0.6
 	}
 
+	// 4. Topic overlap with conflicting numbers/durations
+	// Skip if aggregation query (differing numbers across events are cumulative)
+	if isAggregation {
+		return 0
+	}
+	// e.g. "I lived in that apartment for 6 months" vs "I lived in that apartment for 2 years"
+	// e.g. "I collected 50 coins" vs "I collected 75 coins"
+	// The statements must say nearly the same thing apart from the numbers:
+	// sharing a couple of words ("I ran 5 miles at the park" vs "I walked 2
+	// miles at the park") is not enough.
+	numsA := reDurationOrNumber.FindAllString(al, -1)
+	numsB := reDurationOrNumber.FindAllString(bl, -1)
+	if len(numsA) > 0 && len(numsB) > 0 && !slices.ContainsFunc(numsA, func(n string) bool { return slices.Contains(numsB, n) }) {
+		if wordJaccard(reDurationOrNumber.ReplaceAllString(al, " "), reDurationOrNumber.ReplaceAllString(bl, " ")) >= 0.6 {
+			return 0.75
+		}
+	}
+
 	return 0
+}
+
+// wordJaccard is the Jaccard similarity of the words of a and b longer than
+// two letters, ignoring punctuation.
+func wordJaccard(a, b string) float64 {
+	words := func(s string) map[string]bool {
+		out := map[string]bool{}
+		for _, w := range strings.FieldsFunc(s, func(r rune) bool { return !unicode.IsLetter(r) && r != '\'' }) {
+			if len(w) > 2 {
+				out[w] = true
+			}
+		}
+		return out
+	}
+	wa, wb := words(a), words(b)
+	if len(wa) == 0 || len(wb) == 0 {
+		return 0
+	}
+	inter := 0
+	for w := range wa {
+		if wb[w] {
+			inter++
+		}
+	}
+	return float64(inter) / float64(len(wa)+len(wb)-inter)
 }
 
 type ResolutionWeights struct {

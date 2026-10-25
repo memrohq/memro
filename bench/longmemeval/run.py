@@ -149,6 +149,8 @@ def get_engine_options():
         "format": os.environ.get("RECALL_FORMAT", "standard"),
         "write_time_supersession": os.environ.get("MEMRO_WRITE_TIME_SUPERSESSION", "false"),
         "per_item_chars": PER_ITEM_CHARS,
+        "resolve_conflicts": os.environ.get("RESOLVE_CONFLICTS", "true").lower() == "true",
+        "order": os.environ.get("SEARCH_ORDER", "score"),
     }
 
 
@@ -212,11 +214,15 @@ def context_ids(hits, meta, session_memories):
     return sorted(expanded_ids, key=lambda mid: meta[mid]["date"])
 
 
-def build_prompt(q, ids, meta):
+def build_prompt(q, ids, meta, superseded_ids=None):
+    if superseded_ids is None:
+        superseded_ids = set()
     ctx = []
     for mid in ids:
         m = meta[mid]
         header = format_session_header(m["date"], q["question_date"])
+        if mid in superseded_ids:
+            header += " [SUPERSEDED by newer update]"
         ctx.append(f"{header}\n{m['content'][:PER_ITEM_CHARS]}")
     return ANSWER_PROMPT.format(now=q["question_date"], context="\n\n---\n\n".join(ctx) or "(nothing found)",
                                 question=q["question"])
@@ -229,7 +235,8 @@ def ask(prompt, model=ANSWER_MODEL):
 
 
 def answer(q, hits, meta, session_memories):
-    return ask(build_prompt(q, context_ids(hits, meta, session_memories), meta))
+    superseded_ids = {h["memory_id"] for h in hits if h.get("is_superseded")}
+    return ask(build_prompt(q, context_ids(hits, meta, session_memories), meta, superseded_ids=superseded_ids))
 
 
 def retrieve(q, client, agent):
@@ -256,7 +263,17 @@ def retrieve(q, client, agent):
         raise RuntimeError(f"{left} memories still not embedded")
     embed_s = time.time() - t0 - ingest_s
     t1 = time.time()
-    hits = client.search(agent.agent_id, q["question"][:500], limit=TOP_K, private_key=agent._private_key, mode="hybrid")
+    resolve_conflicts = os.environ.get("RESOLVE_CONFLICTS", "true").lower() == "true"
+    search_order = os.environ.get("SEARCH_ORDER", "score")
+    hits = client.search(
+        agent.agent_id,
+        q["question"][:500],
+        limit=TOP_K,
+        private_key=agent._private_key,
+        mode="hybrid",
+        order=search_order,
+        resolve_conflicts=resolve_conflicts,
+    )
     search_ms = (time.time() - t1) * 1000
     return hits, meta, session_memories, {"ingest_s": round(ingest_s, 1), "embed_wait_s": round(embed_s, 1),
                                           "search_ms": round(search_ms, 1)}

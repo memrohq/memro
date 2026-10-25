@@ -107,9 +107,11 @@ type Tenant struct {
 type RelationType string
 
 const (
-	RelUpdates RelationType = "updates"
-	RelExtends RelationType = "extends"
-	RelDerives RelationType = "derives"
+	RelUpdates    RelationType = "updates"
+	RelExtends    RelationType = "extends"
+	RelDerives    RelationType = "derives"
+	RelAssociated RelationType = "associated"
+	RelCauses     RelationType = "causes"
 )
 
 type Relation struct {
@@ -131,22 +133,69 @@ type SearchQuery struct {
 	// file) in the first sweep. Off by default: on LongMemEval it found more
 	// of the right conversations but fewer of the exchanges holding answers.
 	PerSession int
+	// Order controls result sequencing: "score" (default), "chronological", or "chronological_desc".
+	Order string
+	// ResolveContradictions, when true, detects contradicting facts among top hits
+	// and marks older superseded versions with IsSuperseded=true.
+	ResolveContradictions bool
+	// IncludeLedger, when true, generates a deterministic chronological timeline ledger.
+	IncludeLedger bool
+	// AnchorDate is the reference timestamp for relative day calculations in the ledger.
+	AnchorDate *time.Time
+	// TemporalWeight (0..1), when > 0, blends similarity score with recency decay.
+	TemporalWeight float32
+	// GraphMode controls optional graph expansion: "" (disabled), "legacy", or "bounded".
+	GraphMode string
+	// GraphRetrievalEnabled indicates whether the server feature flag allows graph expansion.
+	GraphRetrievalEnabled bool
+	// AdaptiveDiversity, when true, automatically caps candidates per session for aggregation queries.
+	AdaptiveDiversity bool
+	// AggregatePerSession is the per-session cap applied when AdaptiveDiversity is active (default 3).
+	AggregatePerSession int
+}
+
+type ResultGraphInfo struct {
+	SeedID        string   `json:"seed_id"`
+	Path          []string `json:"path"`
+	RelationTypes []string `json:"relation_types"`
+	Hops          int      `json:"hops"`
 }
 
 type SearchResult struct {
-	MemoryID   string  `json:"memory_id"`
-	Content    string  `json:"content"`
-	Score      float32 `json:"score"`
-	MemoryType string  `json:"memory_type"`
-	CreatedAt  string  `json:"created_at"`
-	AssetURL   *string `json:"asset_url"`
+	MemoryID     string           `json:"memory_id"`
+	Content      string           `json:"content"`
+	Score        float32          `json:"score"`
+	MemoryType   string           `json:"memory_type"`
+	CreatedAt    string           `json:"created_at"`
+	DocumentDate *string          `json:"document_date,omitempty"`
+	EventDate    *string          `json:"event_date,omitempty"`
+	SessionID    *string          `json:"session_id,omitempty"`
+	AssetURL     *string          `json:"asset_url"`
+	IsSuperseded bool             `json:"is_superseded,omitempty"`
+	SupersededBy *string          `json:"superseded_by,omitempty"`
+	Graph        *ResultGraphInfo `json:"graph,omitempty"`
+}
+
+type GraphDiagnostics struct {
+	Applied       bool   `json:"applied"`
+	Mode          string `json:"mode,omitempty"`
+	Seeds         int    `json:"seeds,omitempty"`
+	EdgesExamined int    `json:"edges_examined,omitempty"`
+	Paths         int    `json:"paths,omitempty"`
+	NodesAdded    int    `json:"nodes_added,omitempty"`
+	Truncated     bool   `json:"truncated,omitempty"`
+	ElapsedMS     int64  `json:"elapsed_ms,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+	QueryIntent   string `json:"query_intent,omitempty"`
 }
 
 type SearchResponse struct {
-	Results   []SearchResult `json:"results"`
-	Mode      string         `json:"mode"`
-	LatencyMS int64          `json:"latency_ms"`
-	Total     int            `json:"total"`
+	Results   []SearchResult    `json:"results"`
+	Mode      string            `json:"mode"`
+	LatencyMS int64             `json:"latency_ms"`
+	Total     int               `json:"total"`
+	Ledger    *string           `json:"ledger,omitempty"`
+	Graph     *GraphDiagnostics `json:"graph,omitempty"`
 }
 
 // --- Memory engine results ----------------------------------------------------

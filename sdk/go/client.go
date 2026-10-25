@@ -271,7 +271,6 @@ func (c *Client) CreateMemoriesBatch(ctx context.Context, memories []map[string]
 	return &out, c.call(ctx, http.MethodPost, "/memories/batch", nil, memories, signer, &out)
 }
 
-
 // ListMemories returns an agent's recent memories.
 func (c *Client) ListMemories(ctx context.Context, agentID string, query url.Values, signer *Signer) ([]Memory, error) {
 	var out []Memory
