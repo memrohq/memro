@@ -7,7 +7,7 @@
  */
 import { MemroClient, type MemroClientOptions, type Signer } from './client.js';
 import type {
-  AgentIdentity, ExportData, FileInput, GetRecentOptions, Memory, MemoryChain, MemoryTimeline,
+  AgentIdentity, BatchMemoryItem, ExportData, FileInput, GetRecentOptions, Memory, MemoryChain, MemoryTimeline,
   ReasoningResult, RecallOptions, RememberOptions, ResolutionResult, SearchResult, TemporalOptions,
   TemporalResult, TemporalStats, UploadedFile, Usage, EvolutionResult, ConflictAnalysis, MemoryType,
 } from './types.js';
@@ -87,6 +87,29 @@ export class Agent {
     if (options.metadata) body.metadata = options.metadata;
     return this.client.createMemory(body, this.signer);
   }
+
+  /** Store up to 500 memories in a single transaction. Returns the IDs in input order. */
+  async rememberBatch(items: (string | BatchMemoryItem)[]): Promise<string[]> {
+    const formatted = items.map((item) => {
+      if (typeof item === 'string') {
+        return { agent_id: this.agentId, content: item, visibility: 'private' };
+      }
+      const body: Record<string, unknown> = {
+        agent_id: this.agentId,
+        content: item.content,
+        visibility: item.visibility ?? 'private',
+      };
+      if (item.type) body.memory_type = item.type;
+      if (item.eventDate) body.event_date = item.eventDate;
+      if (item.sessionId) body.session_id = item.sessionId;
+      if (item.isAtomic !== undefined) body.is_atomic = item.isAtomic;
+      if (item.metadata) body.metadata = item.metadata;
+      return body;
+    });
+    const res = await this.client.createMemoriesBatch(formatted, this.signer);
+    return res.ids;
+  }
+
 
   /** Search memories (hybrid by default). */
   async recall(query: string, options: RecallOptions = {}): Promise<SearchResult[]> {

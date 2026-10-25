@@ -133,4 +133,3 @@ func TestSearchTemporalOrderingAndContradictions(t *testing.T) {
 		t.Errorf("expected ledger markdown table to be present")
 	}
 }
-

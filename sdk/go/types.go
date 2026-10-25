@@ -59,6 +59,13 @@ type ResultGraphInfo struct {
 	Hops          int      `json:"hops"`
 }
 
+// BatchMemoryResponse is returned by CreateMemoriesBatch.
+type BatchMemoryResponse struct {
+	IDs      []string `json:"ids"`
+	Count    int      `json:"count"`
+	Memories []Memory `json:"memories"`
+}
+
 // SearchResult is one search hit.
 type SearchResult struct {
 	MemoryID     string           `json:"memory_id"`
@@ -213,10 +220,10 @@ type RememberOptions struct {
 
 // RecallOptions are optional parameters for Agent.Recall.
 type RecallOptions struct {
-	Limit    int // default 10, max 50
-	Type     MemoryType
-	Mode     SearchMode // default hybrid
-	MinScore float64
+	Limit             int // default 10, max 50
+	Type              MemoryType
+	Mode              SearchMode // default hybrid
+	MinScore          float64
 	Graph             string // "legacy", "bounded", "rerank", "selective"
 	AdaptiveDiversity *bool  // cap results per session for count/total/list queries; nil uses the server default
 	MaxPerSession     int    // explicit cap on candidates per conversation session

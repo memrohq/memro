@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -284,6 +285,161 @@ func (s *Server) createMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
+}
+
+func (s *Server) createMemoriesBatch(w http.ResponseWriter, r *http.Request) {
+	a := agentFrom(r)
+	b := bytes.TrimSpace(body(r))
+	if len(b) == 0 {
+		httpError(w, http.StatusBadRequest, "request body cannot be empty")
+		return
+	}
+
+	var items []createMemoryRequest
+	if b[0] == '[' {
+		if err := decodeJSON(b, &items); err != nil {
+			httpError(w, http.StatusBadRequest, "Invalid JSON array: "+err.Error())
+			return
+		}
+	} else {
+		var wrapper struct {
+			Memories []createMemoryRequest `json:"memories"`
+			Items    []createMemoryRequest `json:"items"`
+		}
+		if err := decodeJSON(b, &wrapper); err != nil {
+			httpError(w, http.StatusBadRequest, "Invalid JSON: "+err.Error())
+			return
+		}
+		if len(wrapper.Memories) > 0 {
+			items = wrapper.Memories
+		} else {
+			items = wrapper.Items
+		}
+	}
+
+	if len(items) == 0 {
+		httpError(w, http.StatusBadRequest, "batch cannot be empty")
+		return
+	}
+	if len(items) > 500 {
+		httpError(w, http.StatusBadRequest, "batch exceeds limit of 500 memories")
+		return
+	}
+
+	now := time.Now().UTC()
+	memories := make([]*domain.Memory, len(items))
+	var totalTokens int64
+
+	for i, req := range items {
+		if req.AgentID != "" && req.AgentID != a.ID {
+			httpError(w, http.StatusForbidden, fmt.Sprintf("item %d: agent_id does not match authenticated identity", i))
+			return
+		}
+		if strings.TrimSpace(req.Content) == "" {
+			httpError(w, http.StatusBadRequest, fmt.Sprintf("item %d: content cannot be empty", i))
+			return
+		}
+		if utf8.RuneCountInString(req.Content) > maxContentChars {
+			httpError(w, http.StatusBadRequest, fmt.Sprintf("item %d: content exceeds 10,000 character limit", i))
+			return
+		}
+
+		memType := domain.MemoryType("")
+		if req.MemoryType == nil || isAutoType(*req.MemoryType) {
+			memType = engine.Classify(req.Content)[0].Type
+		} else if t, ok := domain.ParseMemoryType(*req.MemoryType); ok {
+			memType = t
+		} else {
+			httpError(w, http.StatusBadRequest, fmt.Sprintf("item %d: invalid memory_type: '%s'", i, *req.MemoryType))
+			return
+		}
+
+		vis := domain.Private
+		if req.Visibility != nil && *req.Visibility != "" {
+			v, ok := domain.ParseVisibility(*req.Visibility)
+			if !ok {
+				httpError(w, http.StatusBadRequest, fmt.Sprintf("item %d: invalid visibility: '%s'", i, *req.Visibility))
+				return
+			}
+			vis = v
+		}
+
+		m := &domain.Memory{
+			ID: uuid.New(), AgentID: a.ID, TenantID: a.TenantID, Content: req.Content,
+			MemoryType: memType, Visibility: vis, CreatedAt: now, DocumentDate: now, LastAccessedAt: now,
+			Confidence: 1, EntityTags: extract.Entities(req.Content), RelationshipTypes: []string{},
+			Metadata: req.Metadata,
+		}
+
+		if req.EventDate != nil {
+			if t, err := time.Parse(time.RFC3339, *req.EventDate); err == nil {
+				t = t.UTC()
+				m.EventDate = &t
+			} else {
+				httpError(w, http.StatusBadRequest, fmt.Sprintf("item %d: invalid event_date format (must be RFC3339): %v", i, err))
+				return
+			}
+		} else {
+			m.EventDate = extract.EventDate(req.Content, now)
+		}
+
+		if req.SessionID != nil {
+			if sid, err := uuid.Parse(*req.SessionID); err == nil {
+				m.SessionID = &sid
+			} else {
+				httpError(w, http.StatusBadRequest, fmt.Sprintf("item %d: invalid session_id (must be UUID): %v", i, err))
+				return
+			}
+		}
+
+		if req.IsAtomic != nil {
+			m.IsAtomic = *req.IsAtomic
+		}
+
+		memories[i] = m
+		totalTokens += extension.EstimateTokens(m.Content)
+	}
+
+	if !s.allowWrite(w, r, a, len(memories)) {
+		return
+	}
+	if !s.gate(w, r, a, extension.MetricStoredTokens, totalTokens) {
+		return
+	}
+
+	if err := s.store.InsertMemories(r.Context(), memories); err != nil {
+		slog.Error("store batch memories", "err", err, "count", len(memories))
+		httpError(w, http.StatusInternalServerError, "Failed to store batch memories")
+		return
+	}
+
+	for _, m := range memories {
+		s.indexer.Enqueue(m.ID, m.AgentID, m.TenantID, m.Content)
+	}
+	s.engine.Cache().InvalidateAgent(a.ID)
+	metrics.MemoriesCreated.Add(float64(len(memories)))
+	s.recordUsage(r, a, extension.MetricMemoriesStored, int64(len(memories)))
+	s.recordUsage(r, a, extension.MetricStoredTokens, totalTokens)
+	s.audit(r, a, "memory.create_batch", nil)
+
+	if urls, err := s.store.GetHooks(r.Context(), a.ID, "memory_created"); err == nil && len(urls) > 0 {
+		for _, m := range memories {
+			hooks.Notify(urls, "memory_created", map[string]any{
+				"event": "memory_created", "memory_id": m.ID, "agent_id": m.AgentID,
+				"content": m.Content, "memory_type": m.MemoryType,
+			})
+		}
+	}
+
+	ids := make([]uuid.UUID, len(memories))
+	for i, m := range memories {
+		ids[i] = m.ID
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ids":      ids,
+		"count":    len(ids),
+		"memories": memories,
+	})
 }
 
 // saveMemory enforces the soft cap, stores m, queues it for embedding and

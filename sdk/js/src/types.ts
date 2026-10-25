@@ -175,6 +175,16 @@ export interface RememberOptions {
   metadata?: Record<string, unknown>;
 }
 
+export interface BatchMemoryItem extends RememberOptions {
+  content: string;
+}
+
+export interface BatchMemoryResponse {
+  ids: string[];
+  count: number;
+  memories: Memory[];
+}
+
 export interface RecallOptions {
   limit?: number;
   type?: MemoryType;

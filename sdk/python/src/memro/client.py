@@ -225,6 +225,22 @@ class MemroClient:
             body["metadata"] = metadata
         return self._json("POST", "/memory", json_body=body, agent_id=agent_id, private_key=private_key)
 
+    def create_memories_batch(
+        self,
+        agent_id: str,
+        private_key: Optional[str],
+        memories: List[Dict[str, Any]],
+    ) -> dict:
+        """Store up to 500 memories in a single transaction. Returns {'ids': [...], 'count': N, 'memories': [...]}."""
+        formatted = []
+        for item in memories:
+            entry = dict(item)
+            if "agent_id" not in entry:
+                entry["agent_id"] = agent_id
+            formatted.append(entry)
+        return self._json("POST", "/memories/batch", json_body=formatted, agent_id=agent_id, private_key=private_key)
+
+
     def get_memories(
         self,
         agent_id: str,

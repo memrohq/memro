@@ -13,7 +13,6 @@ import datetime as dt
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
 import threading
@@ -77,11 +76,9 @@ def rounds(session):
 def psql(sql):
     db_url = os.environ.get("MEMRO_DATABASE_URL")
     if db_url:
-        psql_bin = shutil.which("psql") or "/opt/homebrew/bin/psql"
-        out = subprocess.run([psql_bin, db_url, "-tAc", sql], capture_output=True, text=True, check=True)
+        out = subprocess.run(["psql", db_url, "-tAc", sql], capture_output=True, text=True, check=True)
         return out.stdout.strip()
-    docker_bin = shutil.which("docker") or "/Applications/Docker.app/Contents/Resources/bin/docker"
-    out = subprocess.run([docker_bin, "exec", DB_CONTAINER, "psql", "-U", "memro", "-d", "memro", "-tAc", sql],
+    out = subprocess.run(["docker", "exec", DB_CONTAINER, "psql", "-U", "memro", "-d", "memro", "-tAc", sql],
                          capture_output=True, text=True, check=True)
     return out.stdout.strip()
 
