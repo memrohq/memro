@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Login from "./components/Login";
 import CommandPalette from "./components/CommandPalette";
 import ExtensionView from "./views/ExtensionView";
@@ -15,6 +15,9 @@ import Connect from "./views/Connect";
 import Keys from "./views/Keys";
 import Integrations from "./views/Integrations";
 
+// The 3D graph brings in three.js; load it only when the page is opened.
+const Graph = lazy(() => import("./views/Graph"));
+
 const store = {
   get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* storage blocked */ } },
@@ -24,6 +27,7 @@ const NAV = [
   { group: "Memory", items: [
     { id: "overview", label: "Overview", icon: "space_dashboard" },
     { id: "memories", label: "Memories", icon: "stacks" },
+    { id: "graph", label: "Graph", icon: "bubble_chart" },
     { id: "search", label: "Search", icon: "search" },
   ] },
   { group: "Connect", items: [
@@ -428,8 +432,8 @@ export default function App() {
         </header>
 
         <main className="flex-1 overflow-y-auto scroll-thin">
-          {/* The connector catalog uses the full width; other pages keep a reading width. */}
-          <div className={`${view === "integrations" ? "max-w-[1680px]" : "max-w-[1240px]"} mx-auto px-4 md:px-8 py-6 md:py-8`}>
+          {/* The connector catalog and the graph use the full width; other pages keep a reading width. */}
+          <div className={`${view === "integrations" || view === "graph" ? "max-w-[1680px]" : "max-w-[1240px]"} mx-auto px-4 md:px-8 py-6 md:py-8`}>
             <div key={view} className="fade-in">
               {activeExtension ? (
                 <ExtensionView view={activeExtension} dark={dark} />
@@ -448,6 +452,10 @@ export default function App() {
               ) : view === "memories" ? (
                 <Memories memories={memories} loaded={loaded} onAdd={() => setAddOpen(true)} onDelete={deleteMemory}
                   onUploadFiles={uploadFiles} uploading={uploading} onCopy={copy} />
+              ) : view === "graph" ? (
+                <Suspense fallback={<p className="text-[13px] text-muted">Loading graph…</p>}>
+                  <Graph apiBase={apiBase} auth={auth} dark={dark} onOpenMemories={() => go("memories")} />
+                </Suspense>
               ) : view === "search" ? (
                 <Search key={searchSeed.n} initialQuery={searchSeed.q} onSearch={search} onDelete={deleteMemory} onCopy={copy} />
               ) : view === "agent" ? (

@@ -442,7 +442,6 @@ func (s *Server) createMemoriesBatch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
 // saveMemory enforces the soft cap, stores m, queues it for embedding and
 // fires side effects. It writes the error response and returns false on failure.
 func (s *Server) saveMemory(w http.ResponseWriter, r *http.Request, a Agent, m *domain.Memory, action string) bool {

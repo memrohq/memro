@@ -225,4 +225,3 @@ func TestBatchMemoryIngest(t *testing.T) {
 		}
 	})
 }
-
