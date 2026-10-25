@@ -1,4 +1,4 @@
-# 0021. Cloudflare Credits for Embedding-Model Evaluation (benchmark only)
+# 0024. Cloudflare Credits for Embedding-Model Evaluation (benchmark only)
 Date: 2026-10-23 · Status: Accepted
 
 ## Context

@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/memrohq/memro/server/internal/domain"
 )
 
 // TimelineEvent is a single chronologically sorted point in time extracted from memories.
@@ -158,4 +160,46 @@ func (l *TemporalLedger) RenderLedger() string {
 	}
 
 	return b.String()
+}
+
+// RenderLedgerFromResults builds and renders a temporal ledger directly from SearchResult objects.
+func RenderLedgerFromResults(anchor time.Time, results []domain.SearchResult) string {
+	inputs := make([]TimelineInput, 0, len(results))
+	for _, r := range results {
+		var t time.Time
+		if r.EventDate != nil && *r.EventDate != "" {
+			t, _ = time.Parse(time.RFC3339Nano, *r.EventDate)
+			if t.IsZero() {
+				t, _ = time.Parse(time.RFC3339, *r.EventDate)
+			}
+		}
+		if t.IsZero() && r.DocumentDate != nil && *r.DocumentDate != "" {
+			t, _ = time.Parse(time.RFC3339Nano, *r.DocumentDate)
+			if t.IsZero() {
+				t, _ = time.Parse(time.RFC3339, *r.DocumentDate)
+			}
+		}
+		if t.IsZero() && r.CreatedAt != "" {
+			t, _ = time.Parse(time.RFC3339Nano, r.CreatedAt)
+			if t.IsZero() {
+				t, _ = time.Parse(time.RFC3339, r.CreatedAt)
+			}
+		}
+		if !t.IsZero() {
+			summary := r.Content
+			if r.IsSuperseded {
+				summary = "[SUPERSEDED] " + summary
+			}
+			inputs = append(inputs, TimelineInput{
+				MemoryID: r.MemoryID,
+				Date:     t,
+				Summary:  summary,
+			})
+		}
+	}
+	if len(inputs) == 0 {
+		return ""
+	}
+	ledger := BuildTemporalLedger(anchor, inputs)
+	return ledger.RenderLedger()
 }

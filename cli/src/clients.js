@@ -22,6 +22,15 @@ function appSupport(...parts) {
 
 const bearer = (key) => ({ Authorization: `Bearer ${key}` });
 
+/** The MCP URL for one tool, tagged with ?session_id=<tool id>. The hosted MCP
+ * is stateless, so this is how it tells tools on the same key apart when they
+ * claim work (memro ADR 0019): each tool is its own lease holder. */
+export function withSession(mcpUrl, sessionId) {
+  const u = new URL(mcpUrl);
+  if (!u.searchParams.has("session_id")) u.searchParams.set("session_id", sessionId);
+  return u.toString();
+}
+
 // --- JSON helpers ----------------------------------------------------------------
 
 /** Read a JSON config. Missing → {}. Unparseable (e.g. JSONC) → throws. */

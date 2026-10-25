@@ -479,6 +479,24 @@ func TestCognitiveEngine(t *testing.T) {
 		t.Fatalf("chain = %s", body)
 	}
 
+	code, body = e.do(&a, "v2", "GET", "/memory/graph", nil, nil)
+	e.must(200, code, body, "memory graph")
+	var g struct {
+		Nodes []struct{ ID, Kind string } `json:"nodes"`
+		Links []struct{ Source, Target, Type string }
+	}
+	_ = json.Unmarshal(body, &g)
+	ids := map[string]bool{}
+	for _, n := range g.Nodes {
+		ids[n.ID] = true
+	}
+	if !ids[love] || !ids[hate] || ids[foreign] {
+		t.Fatalf("graph nodes must be this agent's memories only: %s", body)
+	}
+	if !strings.Contains(string(body), `"type":"updates"`) {
+		t.Fatalf("graph is missing the evolve conflict edge: %s", body)
+	}
+
 	code, body = e.do(&a, "v2", "POST", "/mee/resolve", j(map[string]string{"memory_a_id": love, "memory_b_id": hate}), nil)
 	e.must(200, code, body, "resolve")
 	if !strings.Contains(string(body), "Resolved") && !strings.Contains(string(body), "Ambiguous") {

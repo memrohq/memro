@@ -10,7 +10,9 @@
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "simple-icons": "^16.35.0"
+    "react-force-graph-3d": "^1.29.2",
+    "simple-icons": "^16.35.0",
+    "three": "^0.183.2"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",

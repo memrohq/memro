@@ -4,6 +4,8 @@
 
 This report publishes the methodology, evaluation results, latency metrics, and API costs for Memro evaluated on the public **LongMemEval** benchmark suite across 500 challenge questions.
 
+> **Benchmark Journal**: Every benchmark run, failure analysis, and experiment is tracked in the internal [Benchmark Journal](journal/README.md) to monitor progress over time.
+
 ---
 
 ## 1. Executive Summary & Full Runs Comparison
@@ -65,30 +67,36 @@ All LLM and embedding calls were tracked through a deterministic token ledger (`
    Single-session facts achieved 95.7%–96.4% QA accuracy, and knowledge updates reached 82.1%.
 
 ### Synthesis vs. Retrieval Bottleneck:
-- The answer generation step receives TOP_K=15 (`run.py:28`).
-- **94 of 112 failed questions (84%) had every gold session among the 15 memories given to the answering model**.
-  - At top-5 cutoff: 61 of the 84 failed questions with available gold evidence had every gold session in the top 5.
-  - At top-10 cutoff: 84 of 112 failed questions had every gold session in the top 10.
-- This demonstrates that retrieval is rarely the failure cause; the bottleneck is primarily synthesis: the answering model failing to aggregate multiple disjoint session turns or compute date differences across conversations.
+- The answer generation step receives TOP_K=15 (`run.py:42`).
+- On a coarse session level, Recall@15 is high: 94 of the 112 failed questions (84%) in the full 500-question run and 17 of 22 failures in the 100-question subset had an evidence-bearing session in the retrieved context.
+- **However, measuring recall at the session level masks exchange-level gaps**:
+  - In practice, conversations span many turns, while Memro retrieves individual exchanges.
+  - When evaluated by exact answer-bearing exchange, **9 of the 22 baseline-100 failures were actually missing evidence** (7 had only partial evidence retrieved, and 2 had zero evidence retrieved).
+  - The remaining 13 failures had all necessary evidence retrieved in context, where the failure was synthesis (e.g. 8 questions the answering model failed to reason over, 2 stale knowledge updates, 1 preference abstention, 1 unanswerable question answered anyway, and 1 dataset quirk).
+- Therefore, both retrieval granularity (ensuring all answer-bearing exchanges are included) and synthesis (handling updates, temporal ordering, and reasoning) are active areas of improvement.
 
 ---
 
 ## 5. How to Reproduce
 
-The complete benchmark harness, dataset loaders, and run outputs are included in [`bench/longmemeval/`](../../bench/longmemeval/):
+The complete benchmark harness, dataset loaders, subset definitions, and run outputs are included in [`bench/longmemeval/`](../../bench/longmemeval/):
 
 ```bash
-# 1. Start PostgreSQL with pgvector and Memro API
-docker compose up -d
+# 1. Start PostgreSQL with pgvector (using port 55434 or custom DATABASE_URL)
+docker run -d --name memro-bench-db -p 55434:5432 \
+  -e POSTGRES_USER=memro -e POSTGRES_PASSWORD=memro -e POSTGRES_DB=memro \
+  pgvector/pgvector:pg16
 
-# 2. Navigate to benchmark directory
-cd bench/longmemeval
+# 2. Run Memro API Server locally
+DATABASE_URL="postgres://memro:memro@127.0.0.1:55434/memro?sslmode=disable" \
+  PORT=18090 go run ./server/cmd/memro-api
 
-# 3. Run pilot or full evaluation
-python run.py --pilot   # Fast 12-question pilot run
-python run.py --all     # Full 500-question run (supports resume)
+# 3. Run evaluation (supports --subset, --pilot, or --all)
+python bench/longmemeval/run.py --subset bench/longmemeval/subset_100.json --name ci-subset
+python bench/longmemeval/judge.py bench/longmemeval/runs/ci-subset
+python bench/longmemeval/report.py bench/longmemeval/runs/ci-subset
 
-# 4. Grade with LLM judge and view report
-python judge.py runs/full-continuity
-python report.py runs/full-continuity
+# 4. Compare against baseline with CI quality gate
+python bench/longmemeval/compare.py bench/longmemeval/runs/baseline-100 bench/longmemeval/runs/ci-subset --ci-gate
 ```
+

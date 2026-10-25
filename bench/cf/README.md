@@ -1,6 +1,6 @@
 # Embedding-model evaluation with Workers AI
 
-Benchmark-only tooling (ADR 0021). It answers one question: **would another
+Benchmark-only tooling (ADR 0024). It answers one question: **would another
 embedding model retrieve Memro's memories as well as OpenAI
 `text-embedding-3-small`?** Everything else stays fixed: the same Memro
 server, Postgres + pgvector, hybrid search, questions, answer model and judge.

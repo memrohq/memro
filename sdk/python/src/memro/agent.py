@@ -157,6 +157,28 @@ class Agent:
         )
         return Memory(**data)
 
+    def remember_batch(
+        self,
+        memories: List[Dict[str, Any]],
+    ) -> List[str]:
+        """
+        Store up to 500 memories in a single transaction.
+
+        Args:
+            memories: List of memory dicts (each with content, optional type,
+                      event_date, session_id, metadata, visibility, is_atomic).
+
+        Returns:
+            List of created memory IDs in input order.
+        """
+        data = self.client.create_memories_batch(
+            agent_id=self.agent_id,
+            private_key=self._private_key,
+            memories=memories,
+        )
+        return data.get("ids", [])
+
+
     def recall(
         self,
         query: str,

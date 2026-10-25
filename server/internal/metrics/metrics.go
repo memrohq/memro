@@ -30,6 +30,9 @@ var (
 	CoordinationClaims      = promauto.NewCounterVec(prometheus.CounterOpts{Name: "memro_coordination_claims_total", Help: "Total coordination claims by outcome"}, []string{"outcome"})
 	CoordinationExpirations = counter("memro_coordination_expirations_total", "Total expired coordination leases reaped")
 	CoordinationHandoffs    = counter("memro_coordination_handoffs_total", "Total coordination task handoffs")
+	GraphEdgesCreated       = promauto.NewCounterVec(prometheus.CounterOpts{Name: "memro_graph_edges_created_total", Help: "Total graph edges created by relation type"}, []string{"type"})
+	GraphExpansionErrors    = counter("memro_graph_expansion_errors_total", "Total graph expansion queries that failed or timed out")
+	GraphExpansionApplied   = promauto.NewCounterVec(prometheus.CounterOpts{Name: "memro_graph_expansion_applied_total", Help: "Search graph expansions applied by mode"}, []string{"mode"})
 )
 
 func counter(name, help string) prometheus.Counter {

@@ -189,6 +189,23 @@ Rate limit: 10 per minute.
   "related_memories": [ { "memory_id": "1a2b…", "content": "…", "relation_type": "updates", "confidence": 0.9 } ] }
 ```
 
+### 🔒 `GET /memory/graph`
+
+The caller's newest memories as a graph, for the dashboard's 3D view. Query: `limit` (default 300, max 1000). Coordination entries (claims, handoffs) are left out.
+
+Links have one of these types:
+- a stored relation: `updates` (newer → older), `extends`, `derives`, and so on;
+- `mentions`, from a memory to an entity node (`entity:<tag>`) that at least two of the memories mention;
+- `same_session`, between consecutive memories of one conversation.
+
+```json
+{ "nodes": [ { "id": "8d0e…", "kind": "memory", "label": "Deploy runs on GCP…", "content": "Deploy runs on GCP Cloud Run",
+               "memory_type": "semantic", "confidence": 1, "session_id": "5f1c…", "at": "2026-10-20T09:00:00Z", "val": 3 },
+             { "id": "entity:deploy", "kind": "entity", "label": "deploy", "val": 2.5 } ],
+  "links": [ { "source": "8d0e…", "target": "entity:deploy", "type": "mentions" } ],
+  "truncated": false }
+```
+
 ### 🔒 `GET /analyze/conflicts`
 
 `{"total_conflicts": 3, "unresolved_conflicts": 1, "avg_resolution_time_sec": 0}`

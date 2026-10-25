@@ -265,6 +265,12 @@ func (c *Client) CreateMemory(ctx context.Context, body map[string]any, signer *
 	return &out, c.call(ctx, http.MethodPost, "/memory", nil, body, signer, &out)
 }
 
+// CreateMemoriesBatch stores up to 500 memories in a single transaction (POST /memories/batch).
+func (c *Client) CreateMemoriesBatch(ctx context.Context, memories []map[string]any, signer *Signer) (*BatchMemoryResponse, error) {
+	var out BatchMemoryResponse
+	return &out, c.call(ctx, http.MethodPost, "/memories/batch", nil, memories, signer, &out)
+}
+
 // ListMemories returns an agent's recent memories.
 func (c *Client) ListMemories(ctx context.Context, agentID string, query url.Values, signer *Signer) ([]Memory, error) {
 	var out []Memory

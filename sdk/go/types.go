@@ -51,14 +51,35 @@ type Memory struct {
 	Metadata     json.RawMessage `json:"metadata,omitempty"`
 }
 
+// ResultGraphInfo contains provenance when a search result was discovered through graph expansion.
+type ResultGraphInfo struct {
+	SeedID        string   `json:"seed_id"`
+	Path          []string `json:"path"`
+	RelationTypes []string `json:"relation_types"`
+	Hops          int      `json:"hops"`
+}
+
+// BatchMemoryResponse is returned by CreateMemoriesBatch.
+type BatchMemoryResponse struct {
+	IDs      []string `json:"ids"`
+	Count    int      `json:"count"`
+	Memories []Memory `json:"memories"`
+}
+
 // SearchResult is one search hit.
 type SearchResult struct {
-	MemoryID   string     `json:"memory_id"`
-	Content    string     `json:"content"`
-	Score      float64    `json:"score"`
-	MemoryType MemoryType `json:"memory_type"`
-	CreatedAt  string     `json:"created_at"`
-	AssetURL   *string    `json:"asset_url,omitempty"`
+	MemoryID     string           `json:"memory_id"`
+	Content      string           `json:"content"`
+	Score        float64          `json:"score"`
+	MemoryType   MemoryType       `json:"memory_type"`
+	CreatedAt    string           `json:"created_at"`
+	DocumentDate *string          `json:"document_date,omitempty"`
+	EventDate    *string          `json:"event_date,omitempty"`
+	SessionID    *string          `json:"session_id,omitempty"`
+	AssetURL     *string          `json:"asset_url,omitempty"`
+	IsSuperseded bool             `json:"is_superseded,omitempty"`
+	SupersededBy *string          `json:"superseded_by,omitempty"`
+	Graph        *ResultGraphInfo `json:"graph,omitempty"`
 }
 
 // TemporalResult is one temporal search hit.
@@ -199,10 +220,13 @@ type RememberOptions struct {
 
 // RecallOptions are optional parameters for Agent.Recall.
 type RecallOptions struct {
-	Limit    int // default 10, max 50
-	Type     MemoryType
-	Mode     SearchMode // default hybrid
-	MinScore float64
+	Limit             int // default 10, max 50
+	Type              MemoryType
+	Mode              SearchMode // default hybrid
+	MinScore          float64
+	Graph             string // "legacy", "bounded", "rerank", "selective"
+	AdaptiveDiversity *bool  // cap results per session for count/total/list queries; nil uses the server default
+	MaxPerSession     int    // explicit cap on candidates per conversation session
 }
 
 // TemporalOptions are optional parameters for Agent.RecallTemporal.

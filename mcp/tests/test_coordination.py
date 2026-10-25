@@ -311,3 +311,23 @@ def test_limits_are_clamped():
     call(agent, "get_recent_memories", limit=10_000)
     call(agent, "get_recent_memories", limit="nonsense")
     assert agent.calls == [srv.MAX_LIMIT, 10]
+
+
+def test_block_message_names_the_holding_tool_and_overlapping_folder():
+    """Tools on one account share an agent id, so the message names the session."""
+    agent = SimpleNamespace(claim=lambda **kw: {
+        "granted": False, "holder": "ff87", "holder_session": "claude-code",
+        "holder_resource": "memro/bench", "intent": "refactor harness",
+        "expires_at": "2026-10-23T21:07:32Z"})
+    out = call(agent, "claim_task", resource="memro/bench/run.py", intent="edit")
+    text = out.content[0].text
+    assert out.isError
+    assert "'memro/bench', which overlaps 'memro/bench/run.py'" in text
+    assert "claimed by claude-code" in text and "refactor harness" in text
+
+
+def test_session_from_user_agent():
+    assert srv._session_from_user_agent("claude-code/2.1.4 (external, cli)") == "ua:claude-code"
+    assert srv._session_from_user_agent("Antigravity/1.11 Electron") == "ua:antigravity"
+    for generic in ("node", "python-httpx/0.27", "Mozilla/5.0 (Macintosh)", "", "  "):
+        assert srv._session_from_user_agent(generic) is None

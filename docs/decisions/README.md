@@ -25,7 +25,10 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0017](0017-webhook-replay-protection.md) | Webhook replay protection for GitHub, Linear and Sentry | 2026-10-22 | Accepted |
 | [0018](0018-tenant-agent-scoping-audit.md) | Tenant and agent scoping audit & cross-agent isolation | 2026-10-22 | Accepted |
 | [0019](0019-server-side-coordination.md) | Server-side multi-agent coordination leases and intents | 2026-10-22 | Accepted |
-| [0021](0021-cloudflare-embedding-evaluation.md) | Cloudflare credits for embedding-model evaluation (benchmark only) | 2026-10-23 | Accepted |
+| [0020](0020-batch-memory-ingest.md) | Batch memory ingest endpoint (`POST /memories/batch`) | 2026-10-23 | Accepted |
+| [0021](0021-temporal-ordering-and-contradiction-resolution.md) | Temporal ordering and contradiction resolution in search | 2026-10-23 | Accepted |
+| [0023](0023-graph-edges-and-search-expansion.md) | Graph edge semantics, save-time edges, and optional graph expansion in search | 2026-10-24 | Proposed |
+| [0024](0024-cloudflare-embedding-evaluation.md) | Cloudflare credits for embedding-model evaluation (benchmark only) | 2026-10-23 | Accepted |
 
 Template:
 

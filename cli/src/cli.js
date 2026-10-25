@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { CLIENTS, findClient } from "./clients.js";
+import { CLIENTS, findClient, withSession } from "./clients.js";
 import { pick, pickOne, promptText } from "./picker.js";
 import { installInstructions, uninstallInstructions } from "./instructions.js";
 import * as ui from "./ui.js";
@@ -435,7 +435,7 @@ async function connect(opts) {
   let ok = 0;
   for (const c of targets) {
     try {
-      c.add(conn, { scope, cwd });
+      c.add({ ...conn, mcpUrl: withSession(conn.mcpUrl, c.id) }, { scope, cwd });
       ok++;
       const configFile = c.file(scope, cwd);
       let note = "";
