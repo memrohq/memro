@@ -33,9 +33,13 @@ type SearchResult struct {
 
 ### 2. Pairwise Contradiction Detection & Superseding in Search
 In `Search`, when multiple candidate memories are returned:
-1. **Explicit Relations**: The engine queries `memory_relations` for `updates` edges between returned memories. Any memory targeted by an update is flagged `IsSuperseded = true` and `SupersededBy = sourceID`.
-2. **Dynamic Contradiction Detection**: Pairs of results are evaluated with `DetectContradiction`. When contradiction likelihood $\ge 0.7$, the engine compares `event_date`, `document_date`, and `created_at`. The older memory is flagged `IsSuperseded = true` and `SupersededBy = newerID`.
-3. **Optional Score Demotion**: When `q.ResolveContradictions` is true (or query parameter `resolve_conflicts=true`), superseded memories have their ranking scores halved, ensuring the latest fact surfaces first.
+1. **Explicit Relations**: The engine queries `memory_relations` for `updates` edges touching returned memories. An `updates` edge points from the newer memory to the older one; the save-time linker and `Evolve()` both write it that way. The target is flagged `IsSuperseded = true` and `SupersededBy = sourceID`. Earlier `Evolve()` runs wrote some edges in arbitrary order, so when both ends are in the results, their dates decide which one is superseded.
+2. **Dynamic Contradiction Detection**: Pairs of results are evaluated with `DetectContradiction`. When contradiction likelihood $\ge 0.7$, the engine compares `event_date`, `document_date`, and `created_at`. The older memory is flagged `IsSuperseded = true` and `SupersededBy = newerID`. The detector's rules:
+   - Slot patterns ("X is Y", "X prefers Y", "lives in", "has N items", and so on) with the same subject and a different value.
+   - One-line `key: value` facts with the same key and a different value. The key is 1–4 words, and speaker labels (`User:`, `Assistant:`) don't count, so chat exchanges don't all share a key.
+   - Negation and sentiment flips on a shared topic.
+   - Different numbers in statements that otherwise say nearly the same thing (word Jaccard ≥ 0.6 once numbers are removed). Sharing a couple of words isn't enough: "I ran 5 miles at the park today" and "I walked 2 miles at the park yesterday" don't conflict.
+3. **Optional Score Demotion**: When `q.ResolveContradictions` is true (or query parameter `resolve_conflicts=true`), superseded memories have their scores multiplied by 0.2, so the latest fact surfaces first. Steps 1 and 2 run on every search with more than one result; without this flag they only set `is_superseded` and `superseded_by`.
 
 ### 3. Chronological Sequencing (`order`)
 `SearchQuery` and `GET /search` accept an `order` parameter:
@@ -58,5 +62,5 @@ When `include_ledger=true` is requested, the engine invokes `RenderLedgerFromRes
 ## Consequences
 - **Positive**: Directly solves knowledge update conflicts on LongMemEval without requiring expensive external re-ranking models.
 - **Positive**: Provides verifiable, deterministic arithmetic for temporal reasoning tasks.
-- **Positive**: Fully backward-compatible; default search behavior remains unchanged when new parameters are omitted.
-- **Positive**: Cache keys in `ResultCache` incorporate all new parameters, ensuring isolation across distinct ordering and conflict modes.
+- **Positive**: Ranking is unchanged when new parameters are omitted. Results do gain `is_superseded` / `superseded_by` on every search.
+- **Positive**: Cache keys in `ResultCache` include every parameter that changes the response, including `anchor_date`, `adaptive_diversity` and its per-session cap.

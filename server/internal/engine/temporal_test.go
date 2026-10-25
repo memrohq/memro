@@ -193,3 +193,61 @@ func TestResolveSearchContradictionsAggregation(t *testing.T) {
 		t.Errorf("expected newer memory %s to NOT be superseded in aggregation mode", id2)
 	}
 }
+
+func TestContradictionDetectionFalsePositives(t *testing.T) {
+	for _, tc := range []struct{ a, b string }{
+		{"I ran 5 miles at the park today", "I walked 2 miles at the park yesterday"},
+		{"User: I bought 3 plants for the garden", "User: the garden needs 2 hours of watering"},
+		{"User: hi there", "User: how are you"},
+	} {
+		if c := DetectContradiction(tc.a, tc.b); c >= 0.7 {
+			t.Errorf("DetectContradiction(%q, %q) = %v, want < 0.7", tc.a, tc.b, c)
+		}
+	}
+}
+
+func TestContradictionDetectionKeyValue(t *testing.T) {
+	if c := DetectContradiction("Favorite color: blue", "Favorite color: red"); c < 0.7 {
+		t.Errorf("key: value conflict = %v, want >= 0.7", c)
+	}
+	if c := DetectContradiction("Favorite color: blue", "Favorite color: light blue"); c >= 0.7 {
+		t.Errorf("refined value = %v, want < 0.7", c)
+	}
+}
+
+func TestResolveSearchContradictionsBackwardsEdge(t *testing.T) {
+	idOld, idNew := uuid.New(), uuid.New()
+	tOld, tNew := "2023-01-15T10:00:00Z", "2023-07-20T14:30:00Z"
+	results := []domain.SearchResult{
+		{MemoryID: idNew.String(), Content: "Team offsite is in Lisbon", EventDate: &tNew},
+		{MemoryID: idOld.String(), Content: "Remote work days are Fridays", EventDate: &tOld},
+	}
+	// Written by an old Evolve run in arbitrary order: older -> newer.
+	relations := []domain.Relation{{From: idOld, To: idNew, Type: domain.RelUpdates}}
+	resolveSearchContradictions(results, relations)
+	if results[0].IsSuperseded {
+		t.Error("newer memory marked superseded by a backwards edge")
+	}
+	if !results[1].IsSuperseded || results[1].SupersededBy == nil || *results[1].SupersededBy != idNew.String() {
+		t.Errorf("older memory = %+v, want superseded by %s", results[1], idNew)
+	}
+}
+
+func TestCacheKeyCoversResponseFields(t *testing.T) {
+	tenant := uuid.New()
+	a1, a2 := time.Date(2023, 5, 1, 0, 0, 0, 0, time.UTC), time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	base := domain.SearchQuery{AgentID: "agent", Query: "x", Limit: 5, IncludeLedger: true}
+	variants := []domain.SearchQuery{base, base, base, base, base}
+	variants[1].AnchorDate = &a1
+	variants[2].AnchorDate = &a2
+	variants[3].AdaptiveDiversity = true
+	variants[4].AdaptiveDiversity, variants[4].AggregatePerSession = true, 2
+	seen := map[string]int{}
+	for i, q := range variants {
+		k := cacheKey(q, tenant)
+		if j, ok := seen[k]; ok {
+			t.Errorf("variants %d and %d share a cache key", j, i)
+		}
+		seen[k] = i
+	}
+}

@@ -268,13 +268,32 @@ func (e *Engine) ExpandGraph(ctx context.Context, q domain.SearchQuery, tenantID
 		return candList[i].finalScore > candList[j].finalScore
 	})
 
+	// Graph neighbours must pass the same filters as search results.
+	candIDs := make([]uuid.UUID, len(candList))
+	for i, c := range candList {
+		candIDs[i] = c.targetID
+	}
+	allowed, err := e.searchableIDs(timeoutCtx, q, tenantID, candIDs)
+	if err != nil {
+		metrics.GraphExpansionErrors.Inc()
+		return hybridResults, &domain.GraphDiagnostics{
+			Applied:     false,
+			Mode:        q.GraphMode,
+			Seeds:       numSeeds,
+			ElapsedMS:   time.Since(start).Milliseconds(),
+			Reason:      "filter_error",
+			QueryIntent: intent,
+		}
+	}
+	candList = slices.DeleteFunc(candList, func(c candidateScore) bool { return !allowed[c.targetID] })
+
 	// Max graph additions: ceil(limit / 3)
 	maxGraphSlots := int(math.Ceil(float64(q.Limit) / 3.0))
 	if len(candList) > maxGraphSlots {
 		candList = candList[:maxGraphSlots]
 	}
 
-	candIDs := make([]uuid.UUID, len(candList))
+	candIDs = make([]uuid.UUID, len(candList))
 	candScoreMap := make(map[uuid.UUID]float32, len(candList))
 	for i, c := range candList {
 		candIDs[i] = c.targetID
@@ -313,17 +332,18 @@ func (e *Engine) ExpandGraph(ctx context.Context, q domain.SearchQuery, tenantID
 		}
 	}
 
-	// Slot replacement preserving top 5 hybrid results
-	keepHybridCount := max(5, q.Limit-len(candList))
-	if keepHybridCount > len(hybridResults) {
-		keepHybridCount = len(hybridResults)
-	}
+	// Slot replacement preserving the top 5 hybrid results (or all of them
+	// when limit is below 5); the total never exceeds limit.
+	keepHybridCount := min(max(min(5, q.Limit), q.Limit-len(candList)), len(hybridResults))
 
 	finalResults := make([]domain.SearchResult, 0, q.Limit)
 	finalResults = append(finalResults, hybridResults[:keepHybridCount]...)
 
 	// Append graph results that were loaded
 	for _, c := range candList {
+		if len(finalResults) >= q.Limit {
+			break
+		}
 		if res, ok := loadedMap[c.targetID]; ok {
 			finalResults = append(finalResults, res)
 		}

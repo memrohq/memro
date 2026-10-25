@@ -156,6 +156,12 @@ func (a *Agent) Recall(ctx context.Context, query string, opts *RecallOptions) (
 	if opts.Graph != "" {
 		q.Set("graph", opts.Graph)
 	}
+	if opts.AdaptiveDiversity {
+		q.Set("adaptive_diversity", "true")
+	}
+	if opts.MaxPerSession > 0 {
+		q.Set("max_per_session", strconv.Itoa(opts.MaxPerSession))
+	}
 	res, err := a.Client.Search(ctx, q, a.signer)
 	if err != nil || opts.MinScore <= 0 {
 		return res, err

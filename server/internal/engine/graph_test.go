@@ -154,6 +154,46 @@ func TestExpandGraph(t *testing.T) {
 		}
 	}
 
+	// 4b. Graph neighbours pass the search filters, and the total respects limit.
+	claimID, oldID := uuid.New(), uuid.New()
+	for _, m := range []struct {
+		id       uuid.UUID
+		at       time.Time
+		metadata string
+	}{{claimID, now, `{"action":"claim"}`}, {oldID, now.Add(-100 * 24 * time.Hour), `{}`}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO memories (id, agent_id, tenant_id, content, memory_type, visibility, created_at, document_date, last_accessed_at, confidence, metadata)
+			VALUES ($1, $2, $3, 'filtered neighbour', 'episodic', 'private', $4, $4, $4, 1.0, $5)`,
+			m.id, agentID, tenantID, m.at, m.metadata); err != nil {
+			t.Fatalf("insert filtered memory: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO memory_relations (id, tenant_id, source_memory_id, target_memory_id, relation_type, confidence, created_by)
+			VALUES ($1, $2, $3, $4, 'associated', 1.0, $5)`, uuid.New(), tenantID, mems[1], m.id, agentID); err != nil {
+			t.Fatalf("insert filtered relation: %v", err)
+		}
+	}
+	resFiltered, _ := eng.ExpandGraph(ctx, qBounded, tenantID, hybridResults)
+	for _, r := range resFiltered {
+		if r.MemoryID == claimID.String() || r.MemoryID == oldID.String() {
+			t.Errorf("graph expansion returned %s, which search filters exclude", r.MemoryID)
+		}
+	}
+	qProcedural := qBounded
+	qProcedural.MemoryType = "procedural"
+	resProcedural, _ := eng.ExpandGraph(ctx, qProcedural, tenantID, hybridResults)
+	for _, r := range resProcedural {
+		if r.Graph != nil {
+			t.Errorf("memory_type=procedural added episodic graph neighbour %s", r.MemoryID)
+		}
+	}
+	for _, limit := range []int{3, 5} {
+		qSmall := qBounded
+		qSmall.Limit = limit
+		resSmall, _ := eng.ExpandGraph(ctx, qSmall, tenantID, hybridResults[:limit])
+		if len(resSmall) > limit {
+			t.Errorf("limit=%d returned %d results", limit, len(resSmall))
+		}
+	}
+
 	// 5. Test "rerank" mode: zero new nodes added, degree boost applied
 	// Add an edge between mem4 and mem3
 	_, err = pool.Exec(ctx, `INSERT INTO memory_relations (id, tenant_id, source_memory_id, target_memory_id, relation_type, confidence, created_by)
