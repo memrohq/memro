@@ -156,8 +156,8 @@ func (a *Agent) Recall(ctx context.Context, query string, opts *RecallOptions) (
 	if opts.Graph != "" {
 		q.Set("graph", opts.Graph)
 	}
-	if opts.AdaptiveDiversity {
-		q.Set("adaptive_diversity", "true")
+	if opts.AdaptiveDiversity != nil {
+		q.Set("adaptive_diversity", strconv.FormatBool(*opts.AdaptiveDiversity))
 	}
 	if opts.MaxPerSession > 0 {
 		q.Set("max_per_session", strconv.Itoa(opts.MaxPerSession))

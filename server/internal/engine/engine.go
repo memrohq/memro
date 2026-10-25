@@ -842,7 +842,7 @@ func (e *Engine) Evolve(ctx context.Context, agentID string, tenantID uuid.UUID)
 		patterns = append(patterns, "Consolidated episodic clusters into semantic core")
 	}
 
-	rows, err = tx.Query(ctx, `SELECT id, content, COALESCE(event_date, created_at) FROM memories
+	rows, err = tx.Query(ctx, `SELECT id, content, COALESCE(event_date, document_date, created_at) FROM memories
 		WHERE agent_id = $1 AND tenant_id = $2 AND memory_type IN ('profile', 'semantic')
 		  AND COALESCE(confidence, 1.0) > 0.3`, agentID, tenantID)
 	if err != nil {

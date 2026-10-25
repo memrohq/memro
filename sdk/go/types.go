@@ -218,7 +218,7 @@ type RecallOptions struct {
 	Mode     SearchMode // default hybrid
 	MinScore float64
 	Graph             string // "legacy", "bounded", "rerank", "selective"
-	AdaptiveDiversity bool   // automatically cap candidates per session for aggregation queries
+	AdaptiveDiversity *bool  // cap results per session for count/total/list queries; nil uses the server default
 	MaxPerSession     int    // explicit cap on candidates per conversation session
 }
 
