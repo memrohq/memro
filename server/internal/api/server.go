@@ -165,6 +165,7 @@ func (s *Server) Handler() http.Handler {
 	protected("GET /memory/agent/{agent_id}", s.listMemories)
 	protected("DELETE /memory/{id}", s.deleteMemory)
 	protected("GET /memory/chain/{id}", s.memoryChain)
+	protected("GET /memory/graph", s.memoryGraph)
 	protected("POST /memory/generate-atoms", s.generateAtoms)
 	protected("POST /memory/from-file", s.memoryFromFile)
 	protected("GET /export/{agent_id}", s.export)

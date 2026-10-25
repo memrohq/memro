@@ -181,6 +181,20 @@ func (s *Server) memoryChain(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, chain)
 }
 
+// memoryGraph returns the caller's newest memories as a graph for the
+// dashboard's 3D view (limit, default 300, at most 1000).
+func (s *Server) memoryGraph(w http.ResponseWriter, r *http.Request) {
+	a := agentFrom(r)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	g, err := s.engine.MemoryGraph(r.Context(), a.ID, a.TenantID, limit)
+	if err != nil {
+		slog.Error("memory graph", "err", err)
+		httpError(w, http.StatusInternalServerError, "Failed to load memory graph")
+		return
+	}
+	writeJSON(w, http.StatusOK, g)
+}
+
 func (s *Server) generateAtoms(w http.ResponseWriter, r *http.Request) {
 	a := agentFrom(r)
 	var req struct {
