@@ -11,6 +11,7 @@ import argparse
 import concurrent.futures as cf
 import datetime as dt
 import json
+import re
 import os
 import pathlib
 import subprocess
@@ -43,6 +44,13 @@ TOP_K = int(os.environ.get("TOP_K", "15"))
 PER_ITEM_CHARS = int(os.environ.get("PER_ITEM_CHARS", "4000"))   # each retrieved memory, as shown to the answering model
 MAX_MEMORY_CHARS = 9500  # Memro accepts up to 10,000 characters per memory
 ANSWER_MODEL = os.environ.get("ANSWER_MODEL", "gpt-4o-mini")
+# Experiment switches for session-diverse retrieval (the server's
+# max_per_session cap). PER_SESSION_SCOPE "aggregate" applies it only to
+# questions that ask to count, total or list things across conversations.
+PER_SESSION = int(os.environ.get("PER_SESSION", "0"))
+PER_SESSION_SCOPE = os.environ.get("PER_SESSION_SCOPE", "all")
+AGGREGATE = re.compile(r"\b(how many|how much|in total|total|altogether|combined|sum of|number of|list|"
+                       r"all the|each of|every|both)\b", re.I)
 SESSION_EXPANSION = 3  # answer() adds every exchange from the top N retrieved sessions
 NS_SESSION = uuid.UUID("6f1c2a8e-5b8f-4c4e-9d55-0a4f7d1c3b21")
 
@@ -71,6 +79,29 @@ def rounds(session):
         for start in range(0, len(text), MAX_MEMORY_CHARS):
             pieces.append(text[start:start + MAX_MEMORY_CHARS])
     return pieces
+
+
+def answer_texts(q):
+    """Exchange texts holding an answer turn, split exactly like run.rounds."""
+    out = set()
+    for session in q["haystack_sessions"]:
+        i = 0
+        while i < len(session):
+            t = session[i]
+            has = bool(t.get("has_answer"))
+            if t["role"] == "user":
+                text = "User: " + t["content"]
+                if i + 1 < len(session) and session[i + 1]["role"] == "assistant":
+                    text += "\nAssistant: " + session[i + 1]["content"]
+                    has = has or bool(session[i + 1].get("has_answer"))
+                    i += 1
+            else:
+                text = "Assistant: " + t["content"]
+            if has:
+                for start in range(0, len(text), MAX_MEMORY_CHARS):
+                    out.add(text[start:start + MAX_MEMORY_CHARS])
+            i += 1
+    return out
 
 
 def psql(sql):
@@ -146,11 +177,14 @@ def get_engine_options():
         "mode": "hybrid",
         "answer_model": ANSWER_MODEL,
         "session_expansion": SESSION_EXPANSION,
+        "per_session": PER_SESSION, "per_session_scope": PER_SESSION_SCOPE,
         "format": os.environ.get("RECALL_FORMAT", "standard"),
         "write_time_supersession": os.environ.get("MEMRO_WRITE_TIME_SUPERSESSION", "false"),
         "per_item_chars": PER_ITEM_CHARS,
         "resolve_conflicts": os.environ.get("RESOLVE_CONFLICTS", "true").lower() == "true",
         "order": os.environ.get("SEARCH_ORDER", "score"),
+        # Set by whoever started the server (bench/cf/eval_embeddings.py does).
+        "embedding_model": os.environ.get("BENCH_EMBEDDING_MODEL", "text-embedding-3-small"),
     }
 
 
@@ -265,6 +299,9 @@ def retrieve(q, client, agent):
     t1 = time.time()
     resolve_conflicts = os.environ.get("RESOLVE_CONFLICTS", "true").lower() == "true"
     search_order = os.environ.get("SEARCH_ORDER", "score")
+    per_session = None
+    if PER_SESSION and (PER_SESSION_SCOPE == "all" or AGGREGATE.search(q["question"])):
+        per_session = PER_SESSION
     hits = client.search(
         agent.agent_id,
         q["question"][:500],
@@ -273,6 +310,7 @@ def retrieve(q, client, agent):
         mode="hybrid",
         order=search_order,
         resolve_conflicts=resolve_conflicts,
+        max_per_session=per_session,
     )
     search_ms = (time.time() - t1) * 1000
     return hits, meta, session_memories, {"ingest_s": round(ingest_s, 1), "embed_wait_s": round(embed_s, 1),
@@ -285,11 +323,17 @@ def run_one(q):
     try:
         hits, meta, session_memories, timings = retrieve(q, client, agent)
         hyp = "(no LLM: dry run)" if os.environ.get("BENCH_NO_LLM") else answer(q, hits, meta, session_memories)
+        # Exchange-level evidence: which hits are exchanges LongMemEval marks
+        # as holding the answer, and how many of those reached the prompt.
+        gold = answer_texts(q)
+        shown = {meta[i]["content"] for i in context_ids(hits, meta, session_memories)}
         return {
             "question_id": q["question_id"], "question_type": q["question_type"], "question": q["question"],
             "answer": q["answer"], "hypothesis": hyp,
             "retrieved_sessions": [meta[h["memory_id"]]["session"] for h in hits],
             "answer_session_ids": q["answer_session_ids"], "memories": len(meta),
+            "hit_evidence": [meta[h["memory_id"]]["content"] in gold for h in hits],
+            "evidence_total": len(gold), "evidence_in_context": len(gold & shown),
             **timings,
         }
     finally:

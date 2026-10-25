@@ -17,31 +17,8 @@ import pathlib
 from common import RunTracker, set_run_tracker
 from compare import NO_INFO_PHRASES
 from judge import grade
-from run import (API, MAX_MEMORY_CHARS, MemroClient, ask, build_prompt, context_ids, drop_agent, load_data,
+from run import (API, MemroClient, answer_texts, ask, build_prompt, context_ids, drop_agent, load_data,
                  new_agent, retrieve)
-
-
-def answer_texts(q):
-    """Exchange texts holding an answer turn, split exactly like run.rounds."""
-    out = set()
-    for session in q["haystack_sessions"]:
-        i = 0
-        while i < len(session):
-            t = session[i]
-            has = bool(t.get("has_answer"))
-            if t["role"] == "user":
-                text = "User: " + t["content"]
-                if i + 1 < len(session) and session[i + 1]["role"] == "assistant":
-                    text += "\nAssistant: " + session[i + 1]["content"]
-                    has = has or bool(session[i + 1].get("has_answer"))
-                    i += 1
-            else:
-                text = "Assistant: " + t["content"]
-            if has:
-                for start in range(0, len(text), MAX_MEMORY_CHARS):
-                    out.add(text[start:start + MAX_MEMORY_CHARS])
-            i += 1
-    return out
 
 
 def abstained(hyp):

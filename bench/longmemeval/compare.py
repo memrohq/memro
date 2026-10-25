@@ -6,6 +6,7 @@ and questions flipped wrong->right or right->wrong.
 """
 import argparse
 import json
+import math
 import pathlib
 import statistics
 import sys
@@ -32,6 +33,32 @@ def load_run(run_path: pathlib.Path, judge_model: str = "gpt-4o-mini"):
     meta = json.loads(meta_file.read_text()) if meta_file.exists() else {}
 
     return rows, labels, meta
+
+
+def mcnemar_p(fixed: int, broke: int) -> float:
+    """Exact two-sided McNemar test on paired flips: how likely a split this
+    uneven is if the change did nothing (answers flip both ways at random)."""
+    n = fixed + broke
+    if n == 0:
+        return 1.0
+    k = min(fixed, broke)
+    tail = sum(math.comb(n, i) for i in range(k + 1)) / 2 ** n
+    return min(1.0, 2 * tail)
+
+
+def evidence_metrics(rows: dict) -> dict | None:
+    """Exchange-level evidence from rows that record it (deterministic: no LLM)."""
+    ev = [r for r in rows.values() if r.get("evidence_total")]
+    if not ev or "hit_evidence" not in ev[0]:
+        return None
+    hits = [h for r in rows.values() if "hit_evidence" in r for h in r["hit_evidence"]]
+    return {
+        "recall15": statistics.mean(sum(r["hit_evidence"]) / r["evidence_total"] for r in ev),
+        "precision15": sum(hits) / len(hits) if hits else 0.0,
+        "all_in_prompt": sum(r["evidence_in_context"] == r["evidence_total"] for r in ev),
+        "n": len(ev),
+        "missing": {r["question_id"]: r["evidence_total"] - r["evidence_in_context"] for r in ev},
+    }
 
 
 def compute_metrics(rows, labels):
@@ -103,7 +130,9 @@ def main():
     parser.add_argument("run_a", type=pathlib.Path, help="Baseline run directory")
     parser.add_argument("run_b", type=pathlib.Path, help="New/comparison run directory")
     parser.add_argument("--model", default="gpt-4o-mini", help="Judge model (default: gpt-4o-mini)")
-    parser.add_argument("--ci-gate", action="store_true", help="Exit with code 1 if accuracy regresses >2%% overall or >5%% per category")
+    parser.add_argument("--ci-gate", action="store_true",
+                        help="Exit 1 on a significant paired accuracy regression or on lost evidence")
+    parser.add_argument("--targets", type=pathlib.Path, help="target question set (bench/longmemeval/targets/*.json)")
     args = parser.parse_args()
 
     rows_a, labels_a, meta_a = load_run(args.run_a, args.model)
@@ -164,13 +193,9 @@ def main():
         else:
             delta_str = f"{delta_str} ⚪"
 
-        # Check CI regression thresholds: >2% overall, >5% category
-        if cat == "overall" and delta < -0.02:
-            gate_failed = True
-            regressions.append(f"Overall accuracy dropped by {delta * 100:.1f}% (threshold: -2.0%)")
-        elif cat != "overall" and delta < -0.05:
-            gate_failed = True
-            regressions.append(f"Category '{cat}' accuracy dropped by {delta * 100:.1f}% (threshold: -5.0%)")
+        # Accuracy is gated below with a paired test on the flips. A rerun of an
+        # identical config moved overall 3 points and categories up to 19, so
+        # per-category deltas are reported, not gated.
 
         lines.append(
             f"| {cat} | {sb['total']} | {sa['acc'] * 100:5.1f}% | {sb['acc'] * 100:5.1f}% | {delta_str} | "
@@ -194,6 +219,37 @@ def main():
     common_ids = sorted(set(labels_a.keys()) & set(labels_b.keys()))
     fixed = [i for i in common_ids if not labels_a[i] and labels_b[i]]
     broke = [i for i in common_ids if labels_a[i] and not labels_b[i]]
+    p = mcnemar_p(len(fixed), len(broke))
+    lines.extend(["", f"Paired test on flips: {len(fixed)} fixed vs {len(broke)} regressed, "
+                      f"McNemar p = {p:.3f} ({'significant' if p < 0.05 else 'not significant'} at 0.05)."])
+    if len(broke) > len(fixed) and p < 0.05:
+        gate_failed = True
+        regressions.append(f"Accuracy regressed significantly: {len(broke)} right->wrong vs {len(fixed)} wrong->right (p = {p:.3f})")
+
+    ev_a, ev_b = evidence_metrics(rows_a), evidence_metrics(rows_b)
+    if ev_a and ev_b:
+        lines.extend(["", "## Evidence (exact answer-bearing exchanges; deterministic, no LLM)", "",
+                      "| Metric | A | B |", "|---|---|---|",
+                      f"| Evidence recall@15 | {ev_a['recall15'] * 100:.1f}% | {ev_b['recall15'] * 100:.1f}% |",
+                      f"| Evidence precision@15 | {ev_a['precision15'] * 100:.1f}% | {ev_b['precision15'] * 100:.1f}% |",
+                      f"| Questions with all evidence in the prompt | {ev_a['all_in_prompt']}/{ev_a['n']} | {ev_b['all_in_prompt']}/{ev_b['n']} |"])
+        lost = sorted(i for i in ev_b["missing"] if ev_b["missing"][i] > ev_a["missing"].get(i, 0))
+        gained = sorted(i for i in ev_b["missing"] if ev_b["missing"][i] < ev_a["missing"].get(i, 0))
+        lines.append(f"\nEvidence gained on {len(gained)} questions, lost on {len(lost)}"
+                     + (f": {', '.join(lost[:15])}" if lost else "."))
+        if ev_b["all_in_prompt"] < ev_a["all_in_prompt"]:
+            gate_failed = True
+            regressions.append(f"Fewer questions have all their evidence in the prompt: "
+                               f"{ev_b['all_in_prompt']} vs {ev_a['all_in_prompt']}")
+
+    if args.targets:
+        target_ids = [t["question_id"] for t in json.loads(args.targets.read_text())["questions"]]
+        lines.extend(["", f"## Target set `{args.targets.stem}` ({len(target_ids)} questions)", "",
+                      "| | A | B |", "|---|---|---|",
+                      f"| Correct | {sum(labels_a.get(i, False) for i in target_ids)} | {sum(labels_b.get(i, False) for i in target_ids)} |"])
+        if ev_a and ev_b:
+            lines.append(f"| All evidence in prompt | {sum(ev_a['missing'].get(i, 1) == 0 for i in target_ids)} "
+                         f"| {sum(ev_b['missing'].get(i, 1) == 0 for i in target_ids)} |")
 
     lines.extend([
         "",

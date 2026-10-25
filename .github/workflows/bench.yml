@@ -104,7 +104,7 @@ jobs:
       - name: Compare Against Baseline & Enforce Quality Gate
         id: compare
         run: |
-          python bench/longmemeval/compare.py bench/longmemeval/runs/baseline-100 bench/longmemeval/runs/ci-subset --ci-gate | tee compare_report.md
+          python bench/longmemeval/compare.py bench/longmemeval/runs/baseline-100-v2 bench/longmemeval/runs/ci-subset --ci-gate | tee compare_report.md
 
       - name: Post PR Comment
         if: github.event_name == 'pull_request' && always()
