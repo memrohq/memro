@@ -1056,6 +1056,16 @@ func (e *Engine) AnalyzeConflicts(ctx context.Context, agentID string, tenantID 
 type ResultCache struct {
 	mu      sync.Mutex
 	entries map[string]cachedResponse
+	graphs  map[string]cachedGraph
+}
+
+// cachedGraph is a dashboard memory graph (MemoryGraph). It lives in the
+// search cache so every write that invalidates an agent's search results
+// (saves, deletes, edges, connector syncs) also drops its graph.
+type cachedGraph struct {
+	graph   *GraphView
+	agent   string
+	expires time.Time
 }
 
 type cachedResponse struct {
@@ -1067,9 +1077,14 @@ type cachedResponse struct {
 const (
 	resultCacheTTL = 5 * time.Minute
 	resultCacheMax = 1000
+	// A graph is up to GraphViewMaxLimit memories plus entities, so far fewer
+	// are kept than search results.
+	graphCacheMax = 200
 )
 
-func NewResultCache() *ResultCache { return &ResultCache{entries: map[string]cachedResponse{}} }
+func NewResultCache() *ResultCache {
+	return &ResultCache{entries: map[string]cachedResponse{}, graphs: map[string]cachedGraph{}}
+}
 
 // cacheKey must cover every SearchQuery field that changes the response.
 func cacheKey(q domain.SearchQuery, tenantID uuid.UUID) string {
@@ -1115,4 +1130,38 @@ func (c *ResultCache) InvalidateAgent(agentID string) {
 			delete(c.entries, k)
 		}
 	}
+	for k, g := range c.graphs {
+		if g.agent == agentID {
+			delete(c.graphs, k)
+		}
+	}
+}
+
+func graphCacheKey(agentID string, tenantID uuid.UUID, limit int) string {
+	return fmt.Sprintf("%s\x00%s\x00%d", tenantID, agentID, limit)
+}
+
+// GetGraph returns a cached memory graph. The caller must not modify it.
+func (c *ResultCache) GetGraph(agentID string, tenantID uuid.UUID, limit int) (*GraphView, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	g, ok := c.graphs[graphCacheKey(agentID, tenantID, limit)]
+	if !ok || time.Now().After(g.expires) {
+		return nil, false
+	}
+	return g.graph, true
+}
+
+func (c *ResultCache) SetGraph(agentID string, tenantID uuid.UUID, limit int, g *GraphView) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	if len(c.graphs) >= graphCacheMax {
+		for k, e := range c.graphs {
+			if now.After(e.expires) || len(c.graphs) >= graphCacheMax {
+				delete(c.graphs, k)
+			}
+		}
+	}
+	c.graphs[graphCacheKey(agentID, tenantID, limit)] = cachedGraph{graph: g, agent: agentID, expires: now.Add(resultCacheTTL)}
 }

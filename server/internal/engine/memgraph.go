@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/memrohq/memro/server/internal/metrics"
 )
 
 // --- Memory graph (dashboard) ------------------------------------------------
@@ -70,6 +72,11 @@ func (e *Engine) MemoryGraph(ctx context.Context, agentID string, tenantID uuid.
 		limit = GraphViewDefaultLimit
 	}
 	limit = min(limit, GraphViewMaxLimit)
+	if g, ok := e.cache.GetGraph(agentID, tenantID, limit); ok {
+		metrics.GraphViewCacheHits.Inc()
+		return g, nil
+	}
+	metrics.GraphViewCacheMisses.Inc()
 	rows, err := e.pool.Query(ctx, `SELECT id, content, memory_type, COALESCE(confidence, 1.0)::REAL,
 			COALESCE(entity_tags, '{}'), session_id, COALESCE(event_date, document_date, created_at)
 		FROM memories
@@ -123,6 +130,7 @@ func (e *Engine) MemoryGraph(ctx context.Context, agentID string, tenantID uuid.
 	}
 	g := buildGraphView(mems, rels)
 	g.Truncated = truncated
+	e.cache.SetGraph(agentID, tenantID, limit, g)
 	return g, nil
 }
 

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -58,5 +59,38 @@ func TestTruncateRunes(t *testing.T) {
 	}
 	if got := truncateRunes("abcdef", 4); got != "abc…" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestGraphCache(t *testing.T) {
+	c := NewResultCache()
+	t1, t2 := uuid.New(), uuid.New()
+	g := &GraphView{}
+	c.SetGraph("a", t1, 300, g)
+	if got, ok := c.GetGraph("a", t1, 300); !ok || got != g {
+		t.Fatal("cached graph not returned")
+	}
+	for _, k := range []struct {
+		agent  string
+		tenant uuid.UUID
+		limit  int
+	}{{"b", t1, 300}, {"a", t2, 300}, {"a", t1, 100}} {
+		if _, ok := c.GetGraph(k.agent, k.tenant, k.limit); ok {
+			t.Errorf("graph leaked to %+v", k)
+		}
+	}
+	c.SetGraph("b", t1, 300, &GraphView{})
+	c.InvalidateAgent("a")
+	if _, ok := c.GetGraph("a", t1, 300); ok {
+		t.Error("InvalidateAgent left the agent's graph")
+	}
+	if _, ok := c.GetGraph("b", t1, 300); !ok {
+		t.Error("InvalidateAgent dropped another agent's graph")
+	}
+	for i := range graphCacheMax + 10 {
+		c.SetGraph(fmt.Sprint("x", i), t1, 300, &GraphView{})
+	}
+	if n := len(c.graphs); n > graphCacheMax {
+		t.Errorf("graph cache holds %d, max %d", n, graphCacheMax)
 	}
 }
