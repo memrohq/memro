@@ -15,6 +15,8 @@ var (
 	TenantsCreated          = counter("memro_tenants_created_total", "Total tenants created")
 	SearchCacheHits         = counter("memro_search_cache_hits_total", "Search result cache hits")
 	SearchCacheMisses       = counter("memro_search_cache_misses_total", "Search result cache misses")
+	GraphViewCacheHits      = counter("memro_graph_view_cache_hits_total", "Dashboard memory graph cache hits")
+	GraphViewCacheMisses    = counter("memro_graph_view_cache_misses_total", "Dashboard memory graph cache misses")
 	RateLimitHits           = counter("memro_rate_limit_hits_total", "Requests rejected by the rate limiter")
 	LegacySignatureRequests = counter("memro_legacy_signature_requests_total", "Requests accepted with legacy v1 signatures")
 	HTTPErrors              = promauto.NewCounterVec(prometheus.CounterOpts{Name: "memro_http_errors_total", Help: "HTTP error responses"}, []string{"status"})
