@@ -27,6 +27,7 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0019](0019-server-side-coordination.md) | Server-side multi-agent coordination leases and intents | 2026-10-22 | Accepted |
 | [0020](0020-batch-memory-ingest.md) | Batch memory ingest endpoint (`POST /memories/batch`) | 2026-10-23 | Accepted |
 | [0021](0021-temporal-ordering-and-contradiction-resolution.md) | Temporal ordering and contradiction resolution in search | 2026-10-23 | Accepted |
+| [0022](0022-session-diverse-search-for-aggregate-questions.md) | Session-diverse search for aggregate questions (off by default) | 2026-10-23 | Accepted |
 | [0023](0023-graph-edges-and-search-expansion.md) | Graph edge semantics, save-time edges, and optional graph expansion in search | 2026-10-24 | Proposed |
 
 Template:
