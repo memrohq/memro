@@ -472,7 +472,6 @@ func (s *Store) InsertMemories(ctx context.Context, memories []*domain.Memory) e
 	return tx.Commit(ctx)
 }
 
-
 func (s *Store) CountMemories(ctx context.Context, agentID string) (int, error) {
 	var n int
 	err := s.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM memories WHERE agent_id = $1`, agentID).Scan(&n)
