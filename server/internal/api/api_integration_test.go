@@ -1220,3 +1220,55 @@ func TestLegacyV1Signatures(t *testing.T) {
 		t.Fatalf("expected counter to increment by 1, before=%f, after=%f", initialCount, finalCount)
 	}
 }
+
+// The dashboard graph: newest memories only up to limit, coordination
+// records left out, and a save or delete shows up despite the graph cache.
+func TestMemoryGraphCacheAndFilters(t *testing.T) {
+	e := setup(t)
+	a := newAgent(t)
+	e.register(a)
+	first := e.remember(a, "Deploys run on Thursdays", "semantic")
+	e.remember(a, "Deploys moved to Fridays", "semantic")
+	if _, err := e.st.Pool.Exec(context.Background(), `INSERT INTO memories (id, agent_id, tenant_id, content, memory_type, visibility, metadata)
+		SELECT gen_random_uuid(), agent_id, tenant_id, 'claim: server/', 'episodic', visibility, '{"action":"claim"}'
+		FROM memories WHERE id = $1`, first); err != nil {
+		t.Fatal(err)
+	}
+
+	graph := func(query string) (ids map[string]bool, truncated bool) {
+		code, body := e.do(&a, "v2", "GET", "/memory/graph"+query, nil, nil)
+		e.must(200, code, body, "memory graph")
+		var g struct {
+			Nodes     []struct{ ID, Kind, Label string } `json:"nodes"`
+			Truncated bool                               `json:"truncated"`
+		}
+		_ = json.Unmarshal(body, &g)
+		ids = map[string]bool{}
+		for _, n := range g.Nodes {
+			if n.Kind == "memory" {
+				ids[n.ID] = true
+				if strings.HasPrefix(n.Label, "claim:") {
+					t.Fatalf("coordination record in the graph: %s", body)
+				}
+			}
+		}
+		return ids, g.Truncated
+	}
+
+	if ids, truncated := graph(""); len(ids) != 2 || truncated {
+		t.Fatalf("graph = %v (truncated %v), want 2 memories", ids, truncated)
+	}
+	if ids, truncated := graph("?limit=1"); len(ids) != 1 || ids[first] || !truncated {
+		t.Fatalf("limit=1 graph = %v (truncated %v), want only the newest memory, truncated", ids, truncated)
+	}
+
+	third := e.remember(a, "Deploys need a second reviewer", "semantic")
+	if ids, _ := graph(""); !ids[third] {
+		t.Fatal("a new memory is missing from the cached graph")
+	}
+	code, body := e.do(&a, "v2", "DELETE", "/memory/"+third, nil, nil)
+	e.must(204, code, body, "delete memory")
+	if ids, _ := graph(""); ids[third] {
+		t.Fatal("a deleted memory is still in the cached graph")
+	}
+}

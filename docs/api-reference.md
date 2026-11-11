@@ -193,6 +193,8 @@ Rate limit: 10 per minute.
 
 The caller's newest memories as a graph, for the dashboard's 3D view. Query: `limit` (default 300, max 1000). Coordination entries (claims, handoffs) are left out.
 
+Results are cached per agent and `limit` for up to 5 minutes. Saving or deleting a memory, new relations and connector syncs clear the cache, so the graph shows them on the next request. The `memro_graph_view_cache_hits_total` and `memro_graph_view_cache_misses_total` metrics count cache use.
+
 Links have one of these types:
 - a stored relation: `updates` (newer → older), `extends`, `derives`, and so on;
 - `mentions`, from a memory to an entity node (`entity:<tag>`) that at least two of the memories mention;
