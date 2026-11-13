@@ -64,6 +64,17 @@ test('API keys are sent as a bearer token, never signed', async () => {
   assert.equal(fetch.calls[0].headers['X-Signature'], undefined);
 });
 
+test('tenant keys name the end user on every request', async () => {
+  const fetch = fakeFetch([200, '{"agent_id":"u1agent","tenant_id":"t","user_id":null,"auth":"api_key"}'], [204, '']);
+  const agent = await Agent.fromApiKey('memro_sk_tenant', { baseUrl: 'http://x.test', endUser: 'u_123', fetch });
+  assert.equal(agent.agentId, 'u1agent');
+  await agent.client.deleteEndUser();
+  for (const call of fetch.calls) assert.equal(call.headers['X-Memro-User'], 'u_123');
+  assert.equal(fetch.calls[1].method, 'DELETE');
+  assert.equal(fetch.calls[1].url, 'http://x.test/end-user');
+  assert.throws(() => new MemroClient({ apiKey: undefined, endUser: 'u_123' }));
+});
+
 test('rejects keys that are not API keys, defaults to Memro Cloud', () => {
   assert.throws(() => new MemroClient({ apiKey: 'a'.repeat(64) }));
   delete process.env.MEMRO_BASE_URL;
