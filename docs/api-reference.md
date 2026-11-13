@@ -24,7 +24,7 @@ optional, it defaults to the authenticated agent.
 { "agent_id": "3f9a…", "tenant_id": "00000000-…", "user_id": "b1c2…", "auth": "api_key" }
 ```
 
-`auth` is `api_key`, `signature` or `session`.
+`auth` is `api_key`, `signature` or `session`. Dashboard sessions also get `platform_admin` (Memro staff).
 
 ### 🔒 `GET /usage`
 
@@ -74,7 +74,7 @@ Returns the stored [memory](concepts.md#memories):
   "file_id": null, "asset_url": null }
 ```
 
-`403` when the agent has reached its memory limit.
+`403` when the agent has reached its memory limit. For an organisation with a plan (ADR 0028), limit refusals are `403` with `Memro-Limit`: `stored_tokens_per_user`, `stored_tokens_total`, `queries_monthly`, `images`, `members` or `trial_ended`; from 80% of a limit, responses carry `Memro-Limit-Warning`.
 
 ### 🔒 `GET /memory/agent/{agent_id}`
 
@@ -365,7 +365,8 @@ default tenant and get `403` from all of these.
 | 🔒 `GET /tenant/{id}/api-keys` | The tenant's active keys (no secrets). Owners, admins, platform admins. |
 | 🔒 `DELETE /tenant/{id}/api-keys/{key_id}` | Revokes a tenant key and the webhooks it registered. Owners, admins, platform admins. |
 | 🔒 `DELETE /end-user` | With a tenant key and `X-Memro-User`: deletes that end user, their memories and their files → `204` (`404` if there's no such user). |
-| 🔒 `GET /tenant/{id}/usage/members?month=2026-11` | Usage per end user for a month (default: this one): `{"month", "active_members", "members": [{"user", "agent_id", "metrics", "cost_usd"}], "totals", "cost_usd", "embedding_model"}`. `cost_usd` is an estimate from list prices. The organisation's members, platform admins, or the tenant's own key. Never memory content. |
+| 🔒 `GET /tenant/{id}/usage/members?month=2026-11` | Usage per end user for a month (default: this one): `{"month", "active_members", "members": [{"user", "agent_id", "metrics", "cost_usd"}], "totals", "cost_usd", "embedding_model"}`. `cost_usd` is an estimate from list prices. The organisation's members, platform admins, or the tenant's own key. No memory content (owners and admins read that with the endpoint below). |
+| 🔒 `GET /tenant/{id}/end-users/{agent_id}/memories?limit=` · `…/graph?limit=` | Owners and admins (and platform admins): one end user's memories (newest, at most 100) or memory graph, read-only. Each view is written to the organisation's audit log (`end_user.memories.view`, `end_user.graph.view`). `404` for anyone not an end user of this organisation (ADR 0030). |
 | 🔒 `GET /orgs` | Dashboard session: the organisations you belong to, `[{"tenant_id", "name", "role"}]`. |
 | 🔒 `GET /tenant/{id}/members` | Members and roles. Any member. |
 | 🔒 `PATCH /tenant/{id}/members/{user_id}` | Body `{"role"}`: `owner`, `admin`, `billing` or `viewer`. Owners and admins; only owners make or change owners. `409` if it would leave no owner. |
@@ -373,6 +374,26 @@ default tenant and get `403` from all of these.
 | 🔒 `POST /tenant/{id}/invites` | Body `{"email", "role"}` → `201 {"invite", "link", "emailed"}`. Owners and admins; only owners invite owners. Emailed when email is set up; the link works once, for that address, for 7 days. |
 | 🔒 `GET /tenant/{id}/invites` · `DELETE /tenant/{id}/invites/{invite_id}` | Pending invitations; cancel one. Owners and admins. |
 | 🔒 `POST /invites/accept` | Dashboard session, body `{"token"}` → `{"tenant_id", "name", "role"}`. `403` if signed in with a different address than the one invited. |
+| 🔒 `GET /orgs/discover` | Dashboard session: `{"email", "domain", "work_email", "orgs": [{"tenant_id", "name", "requested"}]}`, the organisations holding your email's domain verified that take join requests (ADR 0027). |
+| 🔒 `POST /orgs` | Dashboard session with a work email, body `{"name"}` → `201 {"tenant_id", "name", "role": "owner", "trial_started"}`, on the trial (ADR 0028); `trial_started` is false when the creator's email domain already had one, and the trial starts ended. `403` for free or throwaway mailboxes; at most 5 per person (`429`). |
+| 🔒 `POST /orgs/{id}/join-requests` | Ask to join → `202`. Only for organisations listed by `/orgs/discover`; `404` otherwise. |
+| 🔒 `PATCH /tenant/{id}` | Body `{"join_policy": "invite" \| "request"}`. Owners and admins; `request` needs a verified domain (`409`). |
+| 🔒 `GET /tenant/{id}/join-requests` | Pending requests `[{"id", "user_id", "email", "created_at"}]`. Owners and admins. |
+| 🔒 `POST /tenant/{id}/join-requests/{request_id}` · `DELETE …` | Approve with body `{"role"}` (default `viewer`; only owners grant `owner`), or decline → `204`. |
+| 🔒 `GET /tenant/{id}/domains` | `{"domains": [{"domain", "verified", "verified_at", "checked_at", "txt_name"?, "txt_value"?}], "join_policy"}`. Owners and admins. |
+| 🔒 `POST /tenant/{id}/domains` | Body `{"domain"}` → `201` with the TXT record to add (`_memro-challenge.<domain>`, `memro-verify=<token>`). Free and throwaway domains get `400`; at most 10 per organisation. |
+| 🔒 `POST /tenant/{id}/domains/{domain}/verify` | Looks up the TXT record now → the domain. `422` until the record is found, `409` if another organisation holds the domain verified, `502` if DNS failed. Re-checked weekly afterwards. |
+| 🔒 `DELETE /tenant/{id}/domains/{domain}` | Removes a claim or a verified domain → `204`. |
+| 🔒 `GET /tenant/{id}/limits` | `{"limits": {"plan", "max_stored_tokens_per_user", "max_stored_tokens_total", "max_queries_monthly", "max_members", "allow_images", "trial_ends_at", "trial_notice"?, "updated_at"} \| null, "stored_tokens", "queries_this_month", "seats", "data_deleted_at"?}`; `null` limits means the server default applies (ADR 0028). Any member, platform admins. |
+| 🔒 `PUT /tenant/{id}/limits` · `DELETE …` | Platform admins only. Body `{"plan": "trial" \| "enterprise" \| "custom"}` plus any of the fields above to replace the plan's preset (`null` = no limit or no end). Trial: 100k stored tokens and 5k queries a month shared, 3 seats, no images, 30 days; enterprise: none. `DELETE` restores the server default (on Memro Cloud, the tier the organisation bought). |
+| 🔒 `GET /admin/tenants` | Platform admins: the newest 500 organisations `[{"id", "name", "created_at", "self_serve", "limits", "stored_tokens", "queries_this_month", "end_users", "members", "domains"}]`. |
+| 🔒 `GET /admin/overview` | Platform admins: Memro-wide counts `{"users", "staff", "active_users_30d", "organisations", "orgs_on_trial", "orgs_trial_ended", "orgs_trial_ending_7d", "orgs_on_contract", "agents", "end_users", "memories", "stored_tokens", "queries_this_month"}` (ADR 0029). |
+| 🔒 `GET /admin/users?q=` | Platform admins: the newest 500 people, or those whose email contains `q`: `[{"id", "email", "created_at", "last_sign_in", "agents", "memories", "stored_tokens", "staff", "orgs"}]`. |
+| 🔒 `PUT /admin/staff/{user_id}` · `DELETE …` | Platform admins: grant or revoke staff rights → `204`. `409` for your own rights or the last staff member. |
+| 🔒 `GET /admin/users/{id}` · `GET /admin/tenants/{id}` | Platform admins: everything about a person (agents, keys, sign-ins, organisations, usage by month, audit log) or an organisation (members, invitations, domains, keys, limits, usage by month, audit log). |
+| 🔒 `POST /admin/users/{id}/{action}` · `POST /admin/tenants/{id}/{action}` | Platform admins. `suspend` (body `{"reason"}`), `unsuspend`, `revoke-keys`, and for people `sign-out`. A suspended account's every request gets `403` with `Memro-Account: suspended`. Not for yourself, or for staff. |
+| 🔒 `DELETE /admin/users/{id}` · `DELETE /admin/tenants/{id}` | Platform admins, body `{"confirm": "<email or name>"}`: deletes the person (their own agents' data; `409` while they're an organisation's only owner) or the organisation with all its users' data. Irreversible. |
+| 🔒 `GET /admin/activity?action=` | Platform admins: `{"sign_ups", "organisations"}` per day for 30 days, `"queries"` per month, and `"feed"`: the newest 100 audit events, optionally those whose action starts with `action`. |
 
 Platform admins act only through a dashboard session; their API keys and
 signed requests get `403`.

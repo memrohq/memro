@@ -114,3 +114,10 @@ var inviteHTML = template.Must(template.New("invite").Parse(`<!doctype html>
 <p style="margin:0 0 20px"><a href="{{.Link}}" style="background:#18181b;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-size:14px">Accept invitation</a></p>
 <p style="font-size:12px;color:#71717a;margin:0">The link works once and expires in 7 days. Didn't expect this? You can ignore it.</p>
 </body></html>`))
+
+var noticeHTML = template.Must(template.New("notice").Parse(`<!doctype html>
+<html><body style="margin:0;padding:24px;font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#18181b">
+<p style="font-size:16px;font-weight:600;margin:0 0 12px">{{.Subject}}</p>
+<p style="font-size:14px;margin:0 0 20px">{{.Text}}</p>
+<p style="margin:0"><a href="{{.Link}}" style="background:#18181b;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-size:14px">Open your organisation</a></p>
+</body></html>`))

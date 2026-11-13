@@ -15,8 +15,9 @@ import Connect from "./views/Connect";
 import Keys from "./views/Keys";
 import Integrations from "./views/Integrations";
 import Organization from "./views/Organization";
+import AdminConsole from "./views/Admin";
 
-// The 3D graph brings in three.js; load it only when the page is opened.
+// The graph brings in sigma.js (WebGL); load it only when the page is opened.
 const Graph = lazy(() => import("./views/Graph"));
 
 const store = {
@@ -43,6 +44,10 @@ const NAV = [
     { id: "settings", label: "Settings", icon: "tune" },
   ] },
 ];
+// Shown only to Memro staff (whoami.platform_admin); opens the staff console
+// at /admin. The server enforces it.
+const ADMIN_NAV = { group: "Memro staff", items: [{ id: "admin", label: "Staff console", icon: "admin_panel_settings" }] };
+const ADMIN_ROUTE = typeof window !== "undefined" && window.location.pathname.startsWith("/admin");
 const DOCS_URL = "https://github.com/memrohq/memro/tree/main/docs#readme";
 
 // Files the server can turn into memories: images are described, documents chunked.
@@ -85,7 +90,7 @@ export default function App() {
   // Deep links: /connect from `memro connect`, /integrations after Slack or GitHub sign-in.
   const [view, setView] = useState(() => {
     const path = window.location.pathname;
-    return path.startsWith("/connect") ? "connect" : path.startsWith("/integrations") ? "integrations" : path.startsWith("/invite") ? "org" : "overview";
+    return path.startsWith("/connect") ? "connect" : path.startsWith("/integrations") ? "integrations" : path.startsWith("/invite") || path.startsWith("/org") ? "org" : "overview";
   });
   const [inviteToken, setInviteToken] = useState(initialInviteToken);
   const [navOpen, setNavOpen] = useState(false);
@@ -154,6 +159,16 @@ export default function App() {
       .catch((err) => { if (err.status === 401) signOut(); });
   }, [apiBase, sessionToken, agentId, signOut]);
 
+  const [platformAdmin, setPlatformAdmin] = useState(null); // null until known
+  const [userId, setUserId] = useState(null);
+  useEffect(() => {
+    if (!sessionToken) { setPlatformAdmin(null); return; }
+    api(apiBase, "/auth/whoami", { auth: { sessionToken } })
+      .then((who) => { setPlatformAdmin(!!who.platform_admin); setUserId(who.user_id); })
+      .catch(() => setPlatformAdmin(false));
+  }, [apiBase, sessionToken]);
+  useEffect(() => { if (view === "admin") window.location.assign("/admin"); }, [view]);
+
   const load = useCallback(async () => {
     if (!sessionToken || !initialized) return;
     try {
@@ -198,7 +213,7 @@ export default function App() {
     });
     return () => { alive = false; };
   }, []);
-  const nav = useMemo(() => withExtensions(NAV, extensions), [extensions]);
+  const nav = useMemo(() => withExtensions(platformAdmin ? [...NAV, ADMIN_NAV] : NAV, extensions), [extensions, platformAdmin]);
   const titles = useMemo(() => Object.fromEntries(nav.flatMap((g) => g.items.map((i) => [i.id, i.label]))), [nav]);
   const activeExtension = extensions.find((v) => `x:${v.id}` === view);
 
@@ -335,6 +350,25 @@ export default function App() {
     );
   }
 
+  const toastView = toast && (
+        <div key={toast.id} role="status" className="fixed bottom-5 left-1/2 -translate-x-1/2 md:left-auto md:translate-x-0 md:right-5 z-50 bg-elevated rounded-xl shadow-pop pl-3 pr-4 py-3 max-w-sm flex gap-3 items-start pop-in">
+          <Icon name={toast.error ? "error" : "check_circle"} fill className={`!text-[20px] ${toast.error ? "text-danger" : "text-ok"}`} />
+          <div className="min-w-0">
+            <p className="text-[13px] font-medium">{toast.title}</p>
+            {toast.detail && <p className="text-[12.5px] text-muted line-clamp-2 mt-0.5">{toast.detail}</p>}
+          </div>
+        </div>
+  );
+
+  if (ADMIN_ROUTE) {
+    return (
+      <>
+        <AdminConsole apiBase={apiBase} auth={auth} notify={notify} onCopy={copy} email={email} allowed={platformAdmin} me={userId} onSignOut={signOut} />
+        {toastView}
+      </>
+    );
+  }
+
   const initial = (email || "M").charAt(0).toUpperCase();
 
   return (
@@ -463,7 +497,7 @@ export default function App() {
                   onUploadFiles={uploadFiles} uploading={uploading} onCopy={copy} />
               ) : view === "graph" ? (
                 <Suspense fallback={<p className="text-[13px] text-muted">Loading graph…</p>}>
-                  <Graph apiBase={apiBase} auth={auth} dark={dark} onOpenMemories={() => go("memories")} />
+                  <Graph apiBase={apiBase} auth={auth} onOpenMemories={() => go("memories")} />
                 </Suspense>
               ) : view === "search" ? (
                 <Search key={searchSeed.n} initialQuery={searchSeed.q} onSearch={search} onDelete={deleteMemory} onCopy={copy} />
@@ -538,15 +572,7 @@ export default function App() {
           <p className="text-[13px]">Reading <span className="font-medium">{uploading}</span>…</p>
         </div>
       )}
-      {toast && !uploading && (
-        <div key={toast.id} role="status" className="fixed bottom-5 left-1/2 -translate-x-1/2 md:left-auto md:translate-x-0 md:right-5 z-50 bg-elevated rounded-xl shadow-pop pl-3 pr-4 py-3 max-w-sm flex gap-3 items-start pop-in">
-          <Icon name={toast.error ? "error" : "check_circle"} fill className={`!text-[20px] ${toast.error ? "text-danger" : "text-ok"}`} />
-          <div className="min-w-0">
-            <p className="text-[13px] font-medium">{toast.title}</p>
-            {toast.detail && <p className="text-[12.5px] text-muted line-clamp-2 mt-0.5">{toast.detail}</p>}
-          </div>
-        </div>
-      )}
+      {!uploading && toastView}
     </div>
   );
 }

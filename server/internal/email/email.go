@@ -221,3 +221,30 @@ func (s *Sender) SendInvite(to, org, role, link string) error {
 	}
 	return s.send(envelope, to, msg)
 }
+
+// SendNotice emails an account notice to an organisation owner, such as a
+// limit nearly reached or a trial ending (ADR 0028). appURL links to the
+// dashboard.
+func (s *Sender) SendNotice(to, subject, text, appURL string) error {
+	if !s.Configured() {
+		return errors.New("email is not configured (set EMAIL_HOST and EMAIL_HOST_USER)")
+	}
+	if _, err := mail.ParseAddress(to); err != nil || strings.ContainsAny(to, "\r\n") {
+		return errors.New("invalid recipient")
+	}
+	subject = strings.NewReplacer("\r", " ", "\n", " ").Replace(subject)
+	link := strings.TrimRight(appURL, "/") + "/org"
+	var html bytes.Buffer
+	if err := noticeHTML.Execute(&html, map[string]string{"Subject": subject, "Text": text, "Link": link}); err != nil {
+		return fmt.Errorf("render notice email: %w", err)
+	}
+	from, envelope, err := s.fromAddress()
+	if err != nil {
+		return err
+	}
+	msg, err := buildMessage(from, envelope, to, subject, text+"\n\nYour organisation: "+link, html.String(), time.Now())
+	if err != nil {
+		return err
+	}
+	return s.send(envelope, to, msg)
+}

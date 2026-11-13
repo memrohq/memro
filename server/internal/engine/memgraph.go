@@ -21,8 +21,8 @@ import (
 
 const (
 	GraphViewDefaultLimit = 300
-	GraphViewMaxLimit     = 1000
-	graphViewMaxEntities  = 80
+	GraphViewMaxLimit     = 5000 // a WebGL view draws this smoothly; beyond it, summaries (ADR 0031)
+	graphViewMinEntities  = 80
 	graphViewContentChars = 280
 )
 
@@ -138,6 +138,9 @@ func (e *Engine) MemoryGraph(ctx context.Context, agentID string, tenantID uuid.
 // Entities mentioned by only one memory are left out: they add a node without
 // connecting anything.
 func buildGraphView(mems []graphViewMemory, rels []graphViewRelation) *GraphView {
+	// More memories get more people and companies: one per 12 memories, at
+	// least 80 and at most 400.
+	maxEntities := min(max(graphViewMinEntities, len(mems)/12), 400)
 	g := &GraphView{Nodes: []GraphViewNode{}, Links: []GraphViewLink{}}
 	for _, m := range mems {
 		n := GraphViewNode{
@@ -183,8 +186,8 @@ func buildGraphView(mems []graphViewMemory, rels []graphViewRelation) *GraphView
 		}
 		return entities[i] < entities[j]
 	})
-	if len(entities) > graphViewMaxEntities {
-		entities = entities[:graphViewMaxEntities]
+	if len(entities) > maxEntities {
+		entities = entities[:maxEntities]
 	}
 	for _, t := range entities {
 		id := "entity:" + t

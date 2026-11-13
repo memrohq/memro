@@ -27,7 +27,13 @@ func requireSession(w http.ResponseWriter, a Agent) bool {
 // GET /auth/whoami — who this credential acts as.
 func (s *Server) whoami(w http.ResponseWriter, r *http.Request) {
 	a := agentFrom(r)
-	writeJSON(w, http.StatusOK, map[string]any{"agent_id": a.ID, "tenant_id": a.TenantID, "user_id": a.UserID, "auth": a.Via})
+	res := map[string]any{"agent_id": a.ID, "tenant_id": a.TenantID, "user_id": a.UserID, "auth": a.Via}
+	// The dashboard shows the admin portal to Memro staff (ADR 0028).
+	if a.Via == "session" && a.UserID != nil {
+		admin, _ := s.store.IsPlatformAdmin(r.Context(), *a.UserID)
+		res["platform_admin"] = admin
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 // --- Device-code login (used by `memro connect`) ------------------------------------

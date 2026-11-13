@@ -32,6 +32,11 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0024](0024-cloudflare-embedding-evaluation.md) | Cloudflare credits for embedding-model evaluation (benchmark only) | 2026-10-23 | Accepted |
 | [0025](0025-tenant-keys-and-end-users.md) | Tenant keys and end users for B2B customers | 2026-11-13 | Accepted |
 | [0026](0026-organisation-accounts-and-member-usage.md) | Organisation accounts and usage per end user | 2026-11-14 | Accepted |
+| [0027](0027-work-email-and-verified-domains.md) | Work email, self-service organisations and verified domains | 2026-11-14 | Accepted |
+| [0028](0028-organisation-limits.md) | Organisation plans, trials and the admin portal | 2026-11-14 | Accepted |
+| [0029](0029-staff-console.md) | A staff console for running Memro | 2026-11-14 | Accepted |
+| [0030](0030-owners-read-end-users-memories.md) | Organisation owners can read their users' memories | 2026-11-14 | Accepted |
+| [0031](0031-graph-view-at-scale.md) | The memory graph in 2D WebGL, then summaries for millions | 2026-11-14 | Accepted |
 
 Template:
 

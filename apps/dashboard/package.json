@@ -8,11 +8,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2",
+    "graphology-layout-forceatlas2": "^0.10.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-force-graph-3d": "^1.29.2",
-    "simple-icons": "^16.35.0",
-    "three": "^0.183.2"
+    "sigma": "^3.0.3",
+    "simple-icons": "^16.35.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
