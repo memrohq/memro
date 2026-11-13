@@ -20,6 +20,12 @@ const (
 	MetricQueries      = "queries"       // search, temporal search, reason, conflict analysis, atom generation: 1 each
 	MetricIngestBytes  = "ingest_bytes"  // size of each uploaded file
 	MetricStoredTokens = "stored_tokens" // estimated tokens of memory text written (see EstimateTokens)
+
+	// Model usage, reported per end user (ADR 0026). Embedding tokens are
+	// stored_tokens plus query_tokens.
+	MetricQueryTokens        = "query_tokens"         // estimated tokens of each search query
+	MetricVisionInputTokens  = "vision_input_tokens"  // image analysis, as reported by the model
+	MetricVisionOutputTokens = "vision_output_tokens" //
 )
 
 // EstimateTokens approximates the tokens in text as one per four bytes,

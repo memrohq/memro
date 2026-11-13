@@ -187,3 +187,37 @@ func (s *Sender) send(envelopeFrom, to string, msg []byte) error {
 	}
 	return c.Quit()
 }
+
+// SendInvite emails an invitation to join an organisation (ADR 0026). link
+// is the one-time accept link.
+func (s *Sender) SendInvite(to, org, role, link string) error {
+	if !s.Configured() {
+		return errors.New("email is not configured (set EMAIL_HOST and EMAIL_HOST_USER)")
+	}
+	if _, err := mail.ParseAddress(to); err != nil || strings.ContainsAny(to, "\r\n") {
+		return errors.New("invalid recipient")
+	}
+	org = strings.NewReplacer("\r", " ", "\n", " ").Replace(org)
+	text := strings.Join([]string{
+		"You're invited to " + org + " on Memro, as " + role + ".",
+		"",
+		"Accept the invitation (sign in as " + to + "):",
+		"",
+		"    " + link,
+		"",
+		"The link works once and expires in 7 days. Didn't expect this? You can ignore it.",
+	}, "\n")
+	var html bytes.Buffer
+	if err := inviteHTML.Execute(&html, map[string]string{"Org": org, "Role": role, "To": to, "Link": link}); err != nil {
+		return fmt.Errorf("render invite email: %w", err)
+	}
+	from, envelope, err := s.fromAddress()
+	if err != nil {
+		return err
+	}
+	msg, err := buildMessage(from, envelope, to, "You're invited to "+org+" on Memro", text, html.String(), time.Now())
+	if err != nil {
+		return err
+	}
+	return s.send(envelope, to, msg)
+}

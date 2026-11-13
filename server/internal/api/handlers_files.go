@@ -100,6 +100,18 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// describeImage runs image analysis and records the model tokens it used for
+// the caller (ADR 0026).
+func (s *Server) describeImage(r *http.Request, data []byte, mimeType string) (string, error) {
+	desc, use, err := s.embed.DescribeImage(r.Context(), base64.StdEncoding.EncodeToString(data), mimeType)
+	if use.Input+use.Output > 0 {
+		a := agentFrom(r)
+		s.recordUsage(r, a, extension.MetricVisionInputTokens, use.Input)
+		s.recordUsage(r, a, extension.MetricVisionOutputTokens, use.Output)
+	}
+	return desc, err
+}
+
 // extractText returns nil when the file type has no extractor or extraction
 // fails; the upload still succeeds.
 func (s *Server) extractText(r *http.Request, fileType, name, mimeType string, data []byte) *string {
@@ -107,7 +119,7 @@ func (s *Server) extractText(r *http.Request, fileType, name, mimeType string, d
 	var err error
 	switch fileType {
 	case "image":
-		text, err = s.embed.DescribeImage(r.Context(), base64.StdEncoding.EncodeToString(data), mimeType)
+		text, err = s.describeImage(r, data, mimeType)
 		if err == nil {
 			text = "[IMAGE ANALYSIS] " + text
 		}
@@ -257,7 +269,7 @@ func (s *Server) uploadImage(w http.ResponseWriter, r *http.Request) {
 	if mimeType == "application/octet-stream" {
 		mimeType = "image/jpeg"
 	}
-	desc, err := s.embed.DescribeImage(r.Context(), base64.StdEncoding.EncodeToString(data), mimeType)
+	desc, err := s.describeImage(r, data, mimeType)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "Vision analysis failed: "+err.Error())
 		return

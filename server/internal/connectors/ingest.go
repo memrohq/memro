@@ -214,9 +214,15 @@ func (m *Manager) afterWrite(ctx context.Context, c *conn, created []domain.Memo
 		return
 	}
 	if m.deps.Usage != nil {
-		if err := m.deps.Usage.Record(ctx, extension.UsageEvent{TenantID: c.TenantID, AgentID: c.AgentID,
-			Metric: extension.MetricMemoriesStored, Value: int64(len(created))}); err != nil {
-			slog.Warn("record connector usage", "err", err)
+		var tokens int64
+		for _, mem := range created {
+			tokens += extension.EstimateTokens(mem.Content)
+		}
+		for metric, v := range map[string]int64{extension.MetricMemoriesStored: int64(len(created)), extension.MetricStoredTokens: tokens} {
+			if err := m.deps.Usage.Record(ctx, extension.UsageEvent{TenantID: c.TenantID, AgentID: c.AgentID,
+				Metric: metric, Value: v}); err != nil {
+				slog.Warn("record connector usage", "err", err)
+			}
 		}
 	}
 	if urls, err := m.deps.Store.GetHooks(ctx, c.AgentID, "memory_created"); err == nil && len(urls) > 0 {

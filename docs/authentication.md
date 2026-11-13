@@ -29,7 +29,9 @@ code, use one per tool or machine, and revoke any that leak. Keys start with
 ## Tenant keys (one key for all your users)
 
 For a product that gives each of its own users a separate memory. Memro staff
-create a tenant for your company and give you a tenant key (`memro_sk_…`).
+create an organisation (tenant) for your company and invite its first owner; owners
+and admins create server keys (`memro_sk_…`) on the dashboard's **Organization** page,
+invite colleagues, and see usage and estimated cost per user there.
 Send it from your backend with your user's ID:
 
 ```

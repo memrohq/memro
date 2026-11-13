@@ -162,13 +162,19 @@ func (p *Provider) EmbedBatch(ctx context.Context, texts []string) ([][]float32,
 	return vecs, nil
 }
 
+// ChatUsage is the tokens a chat completion used, as the model reports them.
+type ChatUsage struct {
+	Input  int64 `json:"prompt_tokens"`
+	Output int64 `json:"completion_tokens"`
+}
+
 // DescribeImage asks GPT-4o for a short description (OpenAI only).
-func (p *Provider) DescribeImage(ctx context.Context, base64Image, mime string) (string, error) {
+func (p *Provider) DescribeImage(ctx context.Context, base64Image, mime string) (string, ChatUsage, error) {
 	if p.name != "openai" {
-		return "", errors.New("vision analysis requires EMBEDDING_PROVIDER=openai")
+		return "", ChatUsage{}, errors.New("vision analysis requires EMBEDDING_PROVIDER=openai")
 	}
 	if !p.Enabled() {
-		return "", ErrDisabled
+		return "", ChatUsage{}, ErrDisabled
 	}
 	body := map[string]any{
 		"model": "gpt-4o",
@@ -187,14 +193,15 @@ func (p *Provider) DescribeImage(ctx context.Context, base64Image, mime string) 
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage ChatUsage `json:"usage"`
 	}
 	if err := p.postJSON(ctx, p.base+"/v1/chat/completions", body, &out); err != nil {
-		return "", err
+		return "", ChatUsage{}, err
 	}
 	if len(out.Choices) == 0 {
-		return "", errors.New("no vision description returned")
+		return "", out.Usage, errors.New("no vision description returned")
 	}
-	return out.Choices[0].Message.Content, nil
+	return out.Choices[0].Message.Content, out.Usage, nil
 }
 
 // Transcribe sends audio to Whisper (OpenAI only).

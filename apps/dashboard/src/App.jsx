@@ -14,6 +14,7 @@ import Settings from "./views/Settings";
 import Connect from "./views/Connect";
 import Keys from "./views/Keys";
 import Integrations from "./views/Integrations";
+import Organization from "./views/Organization";
 
 // The 3D graph brings in three.js; load it only when the page is opened.
 const Graph = lazy(() => import("./views/Graph"));
@@ -37,6 +38,7 @@ const NAV = [
   ] },
   { group: "Account", items: [
     { id: "agent", label: "Account", icon: "person" },
+    { id: "org", label: "Organization", icon: "corporate_fare" },
     { id: "activity", label: "Activity", icon: "history" },
     { id: "settings", label: "Settings", icon: "tune" },
   ] },
@@ -46,6 +48,9 @@ const DOCS_URL = "https://github.com/memrohq/memro/tree/main/docs#readme";
 // Files the server can turn into memories: images are described, documents chunked.
 const IMAGE_TYPES = /^image\//;
 const DOC_EXT = /\.(pdf|docx|pptx|xlsx|txt|md|markdown|csv|json|ya?ml|html?)$/i;
+
+// Organisation invitations link to /invite?token=… (ADR 0026).
+const initialInviteToken = () => (window.location.pathname.startsWith("/invite") ? new URLSearchParams(window.location.search).get("token") : null);
 
 // `npx memro-cli connect` opens /connect?code=XXXX-XXXX or /connect?user_code=XXXX-XXXX.
 const initialConnectCode = () => {
@@ -80,8 +85,9 @@ export default function App() {
   // Deep links: /connect from `memro connect`, /integrations after Slack or GitHub sign-in.
   const [view, setView] = useState(() => {
     const path = window.location.pathname;
-    return path.startsWith("/connect") ? "connect" : path.startsWith("/integrations") ? "integrations" : "overview";
+    return path.startsWith("/connect") ? "connect" : path.startsWith("/integrations") ? "integrations" : path.startsWith("/invite") ? "org" : "overview";
   });
+  const [inviteToken, setInviteToken] = useState(initialInviteToken);
   const [navOpen, setNavOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [health, setHealth] = useState({});
@@ -439,6 +445,9 @@ export default function App() {
                 <ExtensionView view={activeExtension} dark={dark} />
               ) : view === "connect" ? (
                 <Connect apiBase={apiBase} auth={auth} code={connectCode} onDone={() => go("overview")} onCopy={copy} notify={notify} />
+              ) : view === "org" ? (
+                <Organization apiBase={apiBase} auth={auth} onCopy={copy} notify={notify} inviteToken={inviteToken}
+                  onInviteDone={() => { setInviteToken(null); window.history.replaceState(null, "", "/"); }} />
               ) : view === "keys" ? (
                 <Keys apiBase={apiBase} auth={auth} onCopy={copy} notify={notify} />
               ) : view === "integrations" ? (

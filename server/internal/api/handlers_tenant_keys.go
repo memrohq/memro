@@ -14,13 +14,15 @@ import (
 
 	"github.com/memrohq/memro/server/internal/auth"
 	"github.com/memrohq/memro/server/internal/domain"
+	"github.com/memrohq/memro/server/internal/store"
 )
 
 // Tenant keys (ADR 0025): a customer gets one server key for its tenant and
 // names the end user each request is for in X-Memro-User. Each end user is
 // its own agent, created on first use, so memories never mix between them.
-// Platform admins issue and revoke tenant keys; the keys themselves act only
-// as an end user, with the same limits as any API key.
+// The tenant's owners and admins (and platform admins) issue and revoke
+// tenant keys (ADR 0026); the keys themselves act only as an end user, with
+// the same limits as any API key.
 
 const endUserHeader = "X-Memro-User"
 
@@ -52,37 +54,9 @@ func (s *Server) endUser(ctx context.Context, tenantID uuid.UUID, externalID str
 	return s.store.EnsureEndUser(ctx, tenantID, externalID, hex.EncodeToString(pub))
 }
 
-// tenantForAdmin parses {id} and checks the caller is a platform admin and the
-// tenant is a dedicated one, or writes the error and returns false.
-func (s *Server) tenantForAdmin(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	if !s.requirePlatformAdmin(w, r, agentFrom(r)) {
-		return uuid.Nil, false
-	}
-	tid, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httpError(w, http.StatusBadRequest, "Invalid tenant ID format")
-		return uuid.Nil, false
-	}
-	// The shared default tenant holds every self-signup user (ADR 0012).
-	if tid == domain.DefaultTenantID {
-		httpError(w, http.StatusBadRequest, "The default tenant cannot have tenant keys")
-		return uuid.Nil, false
-	}
-	t, err := s.store.GetTenant(r.Context(), tid)
-	if err != nil {
-		httpError(w, http.StatusInternalServerError, "Database error")
-		return uuid.Nil, false
-	}
-	if t == nil {
-		httpError(w, http.StatusNotFound, "Tenant not found")
-		return uuid.Nil, false
-	}
-	return tid, true
-}
-
 // GET /tenant/{id}/api-keys
 func (s *Server) listTenantKeys(w http.ResponseWriter, r *http.Request) {
-	tid, ok := s.tenantForAdmin(w, r)
+	tid, _, ok := s.tenantAccess(w, r, store.RoleOwner, store.RoleAdmin)
 	if !ok {
 		return
 	}
@@ -96,7 +70,7 @@ func (s *Server) listTenantKeys(w http.ResponseWriter, r *http.Request) {
 
 // POST /tenant/{id}/api-keys {"name": "…"} — the key is returned once and never again.
 func (s *Server) createTenantKey(w http.ResponseWriter, r *http.Request) {
-	tid, ok := s.tenantForAdmin(w, r)
+	tid, _, ok := s.tenantAccess(w, r, store.RoleOwner, store.RoleAdmin)
 	if !ok {
 		return
 	}
@@ -130,7 +104,7 @@ func (s *Server) createTenantKey(w http.ResponseWriter, r *http.Request) {
 
 // DELETE /tenant/{id}/api-keys/{key_id}
 func (s *Server) revokeTenantKey(w http.ResponseWriter, r *http.Request) {
-	tid, ok := s.tenantForAdmin(w, r)
+	tid, _, ok := s.tenantAccess(w, r, store.RoleOwner, store.RoleAdmin)
 	if !ok {
 		return
 	}

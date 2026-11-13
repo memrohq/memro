@@ -57,8 +57,8 @@ credential could act for the many users inside it.
   tenant key exposes all of that customer's users. Keys stay server-side; the
   customer should revoke and reissue on any leak.
 - Rate limits apply per end user. There is no per-tenant cap yet.
-- Customers can't issue or rotate their own tenant keys yet. A platform admin
-  does it (see memro-cloud `docs/operations.md`).
+- Customers couldn't issue or rotate their own tenant keys at first; ADR 0026
+  lets the organisation's owners and admins do it.
 - Not built yet: a team level between tenant and user (e.g. "has anyone at
   Acme emailed this person?"), Postgres row-level security as a backstop, and
   per-tenant usage billing in memro-cloud.
