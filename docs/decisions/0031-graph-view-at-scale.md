@@ -21,6 +21,17 @@ So the graph shows a capped view, and a summary when there is more.
      (300 / 600 / 1,000; 1,000 is the server's maximum), zoom and fit.
    - Hover labels follow the theme.
    - three.js and react-force-graph-3d are removed from the dashboard.
+   - **Look** (chosen from five directions):
+     - **Light is Studio Mono:** neutral greys at rest, and the accent
+       only on the focus, its first ring and search hits.
+     - **Dark is Observatory:** a deep background, white names, a soft
+       glow on the labelled names and the focus, and faint hazes behind
+       the three biggest clusters (a 2D canvas under the WebGL layers).
+     - **Colour by:** Calm (the default), Clusters (three accessible
+       colours) or Types.
+     - **Faded colours are solid,** mixed into the background: WebGL adds
+       transparent colours onto dark backgrounds, so they would glare.
+       Tokens like `#fff` are expanded to 6-digit hex before mixing.
 2. **Filters (next):** date range, memory type, person or company, and
    conversation, applied on the server, plus growing the graph outward from
    a chosen node one ring at a time.

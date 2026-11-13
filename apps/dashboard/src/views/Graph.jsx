@@ -38,7 +38,11 @@ const LINK_INFO = {
   same_session: { label: "Same conversation", color: "--muted" },
 };
 
-const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#888888";
+// Browsers may shorten a token to #rgb; colours here are mixed as #rrggbb.
+const cssVar = (name) => {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#888888";
+  return /^#[0-9a-f]{3}$/i.test(v) ? `#${[...v.slice(1)].map((c) => c + c).join("")}` : v;
+};
 const endId = (end) => (typeof end === "object" ? end.id : end);
 // #rrggbb as rgba() with an alpha, for faint links and dimmed nodes (WebGL
 // doesn't take 8-digit hex).
@@ -79,9 +83,25 @@ const hoverDrawer = (pal) => (ctx, data, settings) => {
   }
 };
 
-const readPalette = () => ({
-  clusters: CLUSTER_COLORS[document.documentElement.classList.contains("dark") ? "dark" : "light"],
-  highlight: cssVar("--accent"),
+// Two looks (ADR 0031): Studio Mono in light (neutral at rest, the accent only
+// where you look) and Observatory in dark (deep background, glowing names,
+// faint hazes behind clusters, drawn by the glow layer below).
+const readPalette = () => {
+  const dark = document.documentElement.classList.contains("dark");
+  const muted = cssVar("--muted"), surface = cssVar("--surface"), ink = cssVar("--ink"), accent = cssVar("--accent");
+  return {
+    dark,
+    clusters: CLUSTER_COLORS[dark ? "dark" : "light"],
+    highlight: dark ? "#ffffff" : accent,
+    glow: accent,
+    bg: dark ? "#06070c" : surface,
+    calm: dark
+      ? { memory: "#7d88b8", entity: "#e8ecff", edge: mix("#06070c", "#96aaff", 0.16) }
+      : { memory: mix(muted, surface, 0.68), entity: mix(ink, surface, 0.22), edge: mix(surface, ink, 0.1) },
+    ...readTokens(),
+  };
+};
+const readTokens = () => ({
   type: Object.fromEntries(Object.keys(TYPE_INFO).map((t) => [t, cssVar(`--t-${t}`)])),
   entity: cssVar("--muted"),
   ink: cssVar("--ink"),
@@ -90,6 +110,45 @@ const readPalette = () => ({
   line: cssVar("--line-strong"),
   link: Object.fromEntries(Object.entries(LINK_INFO).map(([k, v]) => [k, cssVar(v.color)])),
 });
+
+// Observatory's glow, on a 2D canvas under sigma's WebGL layers: a faint haze
+// behind each coloured cluster and a soft halo on the labelled names and the
+// focus. Dark mode only; drawn after every frame, so it follows pan and zoom.
+function drawGlow(renderer, canvas, model, palette, focus) {
+  const { width, height } = renderer.getDimensions();
+  const dpr = window.devicePixelRatio || 1;
+  if (canvas.width !== width * dpr) { canvas.width = width * dpr; canvas.height = height * dpr; }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  if (!palette.dark) return;
+  const halo = (x, y, r, color, a) => {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, alpha(color, a));
+    g.addColorStop(1, alpha(color, 0));
+    ctx.fillStyle = g;
+    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  };
+  for (const c of model.getAttribute("clusters") || []) {
+    let sx = 0, sy = 0, n = 0;
+    const pts = [];
+    model.forEachNode((id, a) => {
+      if (a.community !== c.community) return;
+      const p = renderer.graphToViewport(a);
+      pts.push(p); sx += p.x; sy += p.y; n++;
+    });
+    if (!n) continue;
+    const cx = sx / n, cy = sy / n;
+    const spread = Math.sqrt(pts.reduce((t, p) => t + (p.x - cx) ** 2 + (p.y - cy) ** 2, 0) / n);
+    halo(cx, cy, Math.max(60, spread * 1.6), c.color, 0.1);
+  }
+  model.forEachNode((id, a) => {
+    if (!(a.forceLabel || id === focus)) return;
+    const p = renderer.graphToViewport(a);
+    const r = renderer.scaleSize(a.size) * (id === focus ? 9 : 5);
+    halo(p.x, p.y, r, id === focus ? palette.glow : "#9fb4ff", id === focus ? 0.55 : 0.22);
+  });
+}
 
 /** Theme colors, re-read whenever the page's theme class changes (the app
  * switches it after this view has rendered, so a prop alone is too early). */
@@ -151,7 +210,7 @@ export default function Graph({ apiBase, auth, onOpenMemories, path = "/memory/g
   const [selected, setSelected] = useState(null);
   const [query, setQuery] = useState("");
   const [laying, setLaying] = useState(false);
-  const [colorBy, setColorBy] = useState("cluster");
+  const [colorBy, setColorBy] = useState("calm");
   const colorRef = useRef(colorBy);
   const ringsRef = useRef(null); // { focus, near: Set, far: Set } for hover or selection
   const matchRef = useRef(new Set()); // search hits, highlighted while typing
@@ -190,7 +249,7 @@ export default function Graph({ apiBase, auth, onOpenMemories, path = "/memory/g
       const deg = g.degree(id);
       const entity = a.kind === "entity";
       g.mergeNodeAttributes(id, {
-        size: entity ? Math.min(3.5 + Math.sqrt(deg) * 1.1, 13) : 2.5 + Math.min(Math.sqrt(deg), 2.5),
+        size: entity ? Math.min(3.5 + Math.sqrt(deg) * 0.9, 10) : 2.5 + Math.min(Math.sqrt(deg), 2),
         color: entity ? palette.entity : palette.type[a.memory_type] || palette.muted,
         label: entity ? a.label : short(a.content || a.label),
         forceLabel: false, // set below for the most connected names
@@ -222,7 +281,9 @@ export default function Graph({ apiBase, auth, onOpenMemories, path = "/memory/g
     g.forEachEdge((e, a) => {
       const c = palette.link[a.linkType] || palette.faint;
       // Sizes are pixels: thinner than ~1px and the line disappears.
-      g.mergeEdgeAttributes(e, { color: alpha(c, a.linkType === "mentions" ? 0.45 : a.linkType === "same_session" ? 0.55 : 0.85), size: a.linkType === "updates" || a.linkType === "causes" ? 2 : 1, zIndex: 0 });
+      // Solid colours faded into the background: WebGL adds transparent lines
+      // onto a dark background, so they would glare instead of fading.
+      g.mergeEdgeAttributes(e, { color: mix(palette.bg, c, a.linkType === "mentions" ? 0.35 : a.linkType === "same_session" ? 0.45 : 0.8), size: a.linkType === "updates" || a.linkType === "causes" ? 2 : 1, zIndex: 0 });
     });
     return g;
   }, [data, showEntities, showSessions, palette]);
@@ -248,39 +309,46 @@ export default function Graph({ apiBase, auth, onOpenMemories, path = "/memory/g
       minCameraRatio: 0.05,
       maxCameraRatio: 4,
       nodeReducer: (id, attrs) => {
-        const cluster = colorRef.current === "cluster";
-        const base = { ...attrs, color: cluster ? attrs.clusterColor : attrs.typeColor,
+        const mode = colorRef.current, cluster = mode === "cluster";
+        const calm = attrs.kind === "entity" ? palette.calm.entity : palette.calm.memory;
+        const base = { ...attrs, color: cluster ? attrs.clusterColor : mode === "type" ? attrs.typeColor : calm,
           ...(cluster && attrs.clusterHub ? { forceLabel: true, size: Math.max(attrs.size, 9), zIndex: 3 } : {}) };
         const rings = ringsRef.current;
         if (rings) {
-          if (id === rings.focus) return { ...base, forceLabel: true, zIndex: 4, highlighted: true };
-          if (rings.near.has(id)) return { ...base, forceLabel: true, zIndex: 3 };
+          if (id === rings.focus) return { ...base, color: colorRef.current === "calm" ? palette.highlight : base.color, forceLabel: true, zIndex: 4, highlighted: true };
+          if (rings.near.has(id)) return { ...base, color: colorRef.current === "calm" ? palette.highlight : base.color, forceLabel: true, zIndex: 3 };
           // The blast radius' second ring: present, but clearly behind the first.
-          if (rings.far.has(id)) return { ...base, color: mix(base.color, palette.surface, 0.55), label: "", zIndex: 2 };
-          return { ...base, color: mix(base.color, palette.surface, 0.85), label: "", zIndex: 0 };
+          if (rings.far.has(id)) return { ...base, color: mix(base.color, palette.bg, 0.55), label: "", zIndex: 2 };
+          return { ...base, color: mix(base.color, palette.bg, 0.85), label: "", zIndex: 0 };
         }
         if (matchRef.current.size) {
           return matchRef.current.has(id)
             // Memory hits can be hundreds: colour them all, label only people and
             // companies (the dropdown lists the memories).
             ? { ...base, color: palette.highlight, forceLabel: attrs.kind === "entity", label: attrs.kind === "entity" ? attrs.label : "", size: Math.max(attrs.size, 5), zIndex: 3 }
-            : { ...base, color: mix(base.color, palette.surface, 0.85), label: "", zIndex: 0 };
+            : { ...base, color: mix(base.color, palette.bg, 0.85), label: "", zIndex: 0 };
         }
         return base;
       },
       edgeReducer: (id, attrs) => {
         const rings = ringsRef.current;
-        if (!rings) return matchRef.current.size ? { ...attrs, hidden: true } : attrs;
+        const restEdge = colorRef.current === "calm" ? { ...attrs, color: palette.calm.edge } : attrs;
+        if (!rings) return matchRef.current.size ? { ...attrs, hidden: true } : restEdge;
         const [a, b] = model.extremities(id);
         const touches = (n) => n === rings.focus || rings.near.has(n);
         if (touches(a) && touches(b) && (a === rings.focus || b === rings.focus)) {
-          return { ...attrs, color: alpha(palette.link[attrs.linkType] || palette.muted, 0.9), size: Math.max(attrs.size, 1.4), zIndex: 2 };
+          return { ...attrs, color: colorRef.current === "calm" ? mix(palette.bg, palette.highlight, 0.7) : mix(palette.bg, palette.link[attrs.linkType] || palette.muted, 0.9), size: Math.max(attrs.size, 1.4), zIndex: 2 };
         }
-        if (touches(a) || touches(b)) return { ...attrs, color: alpha(palette.muted, 0.25), zIndex: 1 };
+        if (touches(a) || touches(b)) return { ...attrs, color: mix(palette.bg, palette.muted, 0.25), zIndex: 1 };
         return { ...attrs, hidden: true };
       },
     });
     sigmaRef.current = renderer;
+    const glowCanvas = document.createElement("canvas");
+    glowCanvas.setAttribute("aria-hidden", "true");
+    glowCanvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none";
+    boxRef.current.prepend(glowCanvas);
+    renderer.on("afterRender", () => drawGlow(renderer, glowCanvas, model, palette, ringsRef.current?.focus));
     // Hover shows a node's neighbours; a selection keeps its blast radius
     // (two rings) until something else is chosen.
     const setRings = () => {
@@ -298,7 +366,7 @@ export default function Graph({ apiBase, auth, onOpenMemories, path = "/memory/g
     setLaying(true);
     const stop = setTimeout(() => { layout.stop(); setLaying(false); renderer.getCamera().animatedReset({ duration: 400 }); },
       Math.min(2000 + model.order * 2, 10000));
-    return () => { clearTimeout(stop); layout.kill(); renderer.kill(); sigmaRef.current = null; setLaying(false); };
+    return () => { clearTimeout(stop); layout.kill(); renderer.kill(); glowCanvas.remove(); sigmaRef.current = null; setLaying(false); };
   }, [model, palette]);
 
   // Selection lights up its neighbourhood and moves the camera to it.
@@ -379,7 +447,7 @@ export default function Graph({ apiBase, auth, onOpenMemories, path = "/memory/g
           </Empty>
         </div>
       ) : (
-        <div className="card relative overflow-hidden" style={{ height, minHeight: 420 }}>
+        <div className="card relative overflow-hidden" style={{ height, minHeight: 420, background: palette.bg }}>
           {/* Toolbar: search, size, view controls. */}
           <div className="absolute top-3 left-3 right-3 z-10 flex flex-wrap items-start gap-2">
             <div className="relative w-72 max-w-full">
@@ -410,7 +478,7 @@ export default function Graph({ apiBase, auth, onOpenMemories, path = "/memory/g
               ))}
             </div>
             <div className="inline-flex items-center h-9 p-0.5 rounded-[10px] bg-surface/95 border border-line" role="radiogroup" aria-label="Colour by">
-              {[["cluster", "Clusters"], ["type", "Types"]].map(([id, label]) => (
+              {[["calm", "Calm"], ["cluster", "Clusters"], ["type", "Types"]].map(([id, label]) => (
                 <button key={id} role="radio" aria-checked={colorBy === id} onClick={() => setColorBy(id)}
                   className={`h-full px-2.5 rounded-[8px] text-[12px] ${colorBy === id ? "bg-panel text-ink font-medium border border-line" : "text-muted hover:text-ink border border-transparent"}`}>
                   {label}
@@ -438,13 +506,17 @@ export default function Graph({ apiBase, auth, onOpenMemories, path = "/memory/g
                   <span key={c.community} className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: c.color }} />{c.name} · {c.size.toLocaleString()}</span>
                 ))}
                 <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: palette.muted }} />Other clusters</span>
+              </> : colorBy === "calm" ? <>
+                <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: palette.calm.memory }} />Memory</span>
+                <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full" style={{ background: palette.calm.entity }} />Person or company</span>
+                <span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: palette.highlight, boxShadow: palette.dark ? `0 0 6px ${palette.glow}` : "none" }} />In focus</span>
               </> : Object.keys(TYPE_INFO).map((t) => (
                 <span key={t} className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: palette.type[t] }} />{TYPE_INFO[t].label}</span>
               ))}
               {colorBy === "type" && showEntities && entityCount > 0 && (
                 <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full" style={{ background: palette.entity }} />Person or company</span>
               )}
-              {linkTypes.filter((t) => LINK_INFO[t] && (showSessions || t !== "same_session") && (showEntities || t !== "mentions")).map((t) => (
+              {colorBy !== "calm" && linkTypes.filter((t) => LINK_INFO[t] && (showSessions || t !== "same_session") && (showEntities || t !== "mentions")).map((t) => (
                 <span key={t} className="inline-flex items-center gap-1.5"><span className="h-0.5 w-3.5 rounded-full" style={{ background: palette.link[t] }} />{LINK_INFO[t].label}</span>
               ))}
             </div>
