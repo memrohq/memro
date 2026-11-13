@@ -30,6 +30,7 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0022](0022-session-diverse-search-for-aggregate-questions.md) | Session-diverse search for aggregate questions (off by default) | 2026-10-23 | Accepted |
 | [0023](0023-graph-edges-and-search-expansion.md) | Graph edge semantics, save-time edges, and optional graph expansion in search | 2026-10-24 | Proposed |
 | [0024](0024-cloudflare-embedding-evaluation.md) | Cloudflare credits for embedding-model evaluation (benchmark only) | 2026-10-23 | Accepted |
+| [0025](0025-tenant-keys-and-end-users.md) | Tenant keys and end users for B2B customers | 2026-11-13 | Accepted |
 
 Template:
 

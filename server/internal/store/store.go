@@ -52,6 +52,27 @@ func (s *Store) GetIdentity(ctx context.Context, id string) (*domain.AgentIdenti
 	return nilIfNoRows(&a, err)
 }
 
+// EndUser returns the identity of a tenant's end user, named by the
+// customer's own user ID (ADR 0025); nil if it does not exist yet.
+func (s *Store) EndUser(ctx context.Context, tenantID uuid.UUID, externalID string) (*domain.AgentIdentity, error) {
+	var a domain.AgentIdentity
+	err := s.Pool.QueryRow(ctx, `SELECT id, user_id, tenant_id, created_at FROM agent_identities
+		WHERE tenant_id = $1 AND external_id = $2`, tenantID, externalID).
+		Scan(&a.ID, &a.UserID, &a.TenantID, &a.CreatedAt)
+	return nilIfNoRows(&a, err)
+}
+
+// EnsureEndUser creates a tenant's end user with id unless it exists, and
+// returns it. Concurrent first requests for the same user get the same one.
+func (s *Store) EnsureEndUser(ctx context.Context, tenantID uuid.UUID, externalID, id string) (*domain.AgentIdentity, error) {
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO agent_identities (id, tenant_id, external_id, created_at)
+		VALUES ($1, $2, $3, NOW()) ON CONFLICT (tenant_id, external_id) WHERE external_id IS NOT NULL DO NOTHING`,
+		id, tenantID, externalID); err != nil {
+		return nil, err
+	}
+	return s.EndUser(ctx, tenantID, externalID)
+}
+
 func (s *Store) GetIdentityByUser(ctx context.Context, userID uuid.UUID) (*domain.AgentIdentity, error) {
 	var a domain.AgentIdentity
 	err := s.Pool.QueryRow(ctx, `SELECT id, user_id, tenant_id, created_at FROM agent_identities
@@ -256,22 +277,65 @@ func (s *Store) CreateAPIKey(ctx context.Context, id, tenantID uuid.UUID, agentI
 	return err
 }
 
-// AgentForAPIKey returns the identity behind an active key and records use
-// (at most once a minute, to avoid a write per request).
-func (s *Store) AgentForAPIKey(ctx context.Context, hash string) (*domain.AgentIdentity, uuid.UUID, error) {
-	var a domain.AgentIdentity
-	var keyID uuid.UUID
-	err := s.Pool.QueryRow(ctx, `SELECT k.id, i.id, i.user_id, i.tenant_id, i.created_at
-		FROM api_keys k JOIN agent_identities i ON i.id = k.agent_id
+// AgentForAPIKey looks up an active key and records use (at most once a
+// minute, to avoid a write per request). keyID is uuid.Nil when there is no
+// such key. A tenant-wide key (ADR 0025) has no identity: it returns nil and
+// the key's tenant.
+func (s *Store) AgentForAPIKey(ctx context.Context, hash string) (a *domain.AgentIdentity, keyID, tenantID uuid.UUID, err error) {
+	var id domain.AgentIdentity
+	var agentID *string
+	// A tenant-wide key joins no identity; COALESCE keeps its NULLs scannable.
+	err = s.Pool.QueryRow(ctx, `SELECT k.id, k.tenant_id, i.id, i.user_id,
+			COALESCE(i.tenant_id, k.tenant_id), COALESCE(i.created_at, k.created_at)
+		FROM api_keys k LEFT JOIN agent_identities i ON i.id = k.agent_id
 		WHERE k.key_hash = $1 AND k.revoked_at IS NULL`, hash).
-		Scan(&keyID, &a.ID, &a.UserID, &a.TenantID, &a.CreatedAt)
+		Scan(&keyID, &tenantID, &agentID, &id.UserID, &id.TenantID, &id.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, uuid.Nil, uuid.Nil, nil
+	}
 	if err != nil {
-		id, err := nilIfNoRows(&a, err)
-		return id, uuid.Nil, err
+		return nil, uuid.Nil, uuid.Nil, err
 	}
 	_, _ = s.Pool.Exec(ctx, `UPDATE api_keys SET last_used_at = NOW()
 		WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '1 minute')`, keyID)
-	return &a, keyID, nil
+	if agentID == nil {
+		return nil, keyID, tenantID, nil
+	}
+	id.ID = *agentID
+	return &id, keyID, id.TenantID, nil
+}
+
+// CreateTenantKey stores a tenant-wide key (no agent): it acts for any end
+// user of the tenant (ADR 0025).
+func (s *Store) CreateTenantKey(ctx context.Context, id, tenantID uuid.UUID, name, prefix, hash string) error {
+	_, err := s.Pool.Exec(ctx, `INSERT INTO api_keys (id, tenant_id, name, prefix, key_hash)
+		VALUES ($1, $2, $3, $4, $5)`, id, tenantID, name, prefix, hash)
+	return err
+}
+
+func (s *Store) ListTenantKeys(ctx context.Context, tenantID uuid.UUID) ([]APIKey, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT id, name, prefix, created_at, last_used_at FROM api_keys
+		WHERE tenant_id = $1 AND agent_id IS NULL AND revoked_at IS NULL ORDER BY created_at DESC`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (APIKey, error) {
+		var k APIKey
+		return k, row.Scan(&k.ID, &k.Name, &k.Prefix, &k.CreatedAt, &k.LastUsedAt)
+	})
+}
+
+// RevokeTenantKey revokes a tenant-wide key and the webhooks it registered.
+func (s *Store) RevokeTenantKey(ctx context.Context, id, tenantID uuid.UUID) (bool, error) {
+	var n int
+	err := s.Pool.QueryRow(ctx, `WITH revoked AS (
+			UPDATE api_keys SET revoked_at = NOW()
+			WHERE id = $1 AND tenant_id = $2 AND agent_id IS NULL AND revoked_at IS NULL RETURNING id
+		), hooks_gone AS (
+			DELETE FROM hooks WHERE api_key_id IN (SELECT id FROM revoked)
+		)
+		SELECT count(*) FROM revoked`, id, tenantID).Scan(&n)
+	return n > 0, err
 }
 
 func (s *Store) ListAPIKeys(ctx context.Context, agentID string) ([]APIKey, error) {
