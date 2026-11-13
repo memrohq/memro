@@ -31,6 +31,16 @@ func coordinationSession(r *http.Request, agent Agent, fromBody string) string {
 	return store.DefaultCoordinationSession
 }
 
+// coordinationScope is who sees each other's claims: the agents of a
+// dedicated tenant share one scope, except a tenant's end users (ADR 0025),
+// who must never see each other's claims and get one each.
+func coordinationScope(a Agent) string {
+	if a.EndUser != "" {
+		return store.CoordinationScopeKey(uuid.Nil, nil, a.ID)
+	}
+	return store.CoordinationScopeKey(a.TenantID, a.UserID, a.ID)
+}
+
 // POST /coordination/claim
 func (s *Server) coordinationClaim(w http.ResponseWriter, r *http.Request) {
 	agent := agentFrom(r)
@@ -51,7 +61,7 @@ func (s *Server) coordinationClaim(w http.ResponseWriter, r *http.Request) {
 	sessionID := coordinationSession(r, agent, req.SessionID)
 	ttl := time.Duration(req.TTLSeconds) * time.Second
 
-	scopeKey := store.CoordinationScopeKey(agent.TenantID, agent.UserID, agent.ID)
+	scopeKey := coordinationScope(agent)
 	result, err := s.store.ClaimLease(r.Context(), scopeKey, req.Resource, agent.ID, sessionID, req.Intent, ttl)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "Failed to claim lease: "+err.Error())
@@ -80,7 +90,7 @@ func (s *Server) coordinationHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	ttl := time.Duration(req.TTLSeconds) * time.Second
 
-	scopeKey := store.CoordinationScopeKey(agent.TenantID, agent.UserID, agent.ID)
+	scopeKey := coordinationScope(agent)
 	newExpires, err := s.store.HeartbeatLease(r.Context(), scopeKey, agent.ID, coordinationSession(r, agent, req.SessionID), req.LeaseID, req.Resource, ttl)
 	if err != nil {
 		if errors.Is(err, store.ErrLeaseNotFound) {
@@ -115,7 +125,7 @@ func (s *Server) coordinationRelease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scopeKey := store.CoordinationScopeKey(agent.TenantID, agent.UserID, agent.ID)
+	scopeKey := coordinationScope(agent)
 	if err := s.store.ReleaseLease(r.Context(), scopeKey, agent.ID, coordinationSession(r, agent, req.SessionID), req.LeaseID, req.Resource, req.Status); err != nil {
 		if errors.Is(err, store.ErrLeaseNotFound) {
 			httpError(w, http.StatusNotFound, "Active lease not found or not owned by caller")
@@ -154,7 +164,7 @@ func (s *Server) coordinationHandoff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scopeKey := store.CoordinationScopeKey(agent.TenantID, agent.UserID, agent.ID)
+	scopeKey := coordinationScope(agent)
 	if err := s.store.HandoffLease(r.Context(), scopeKey, agent.ID, coordinationSession(r, agent, req.SessionID), req.LeaseID, req.Resource, req.Summary, req.NextAgentID); err != nil {
 		if errors.Is(err, store.ErrLeaseHeldByOther) {
 			httpError(w, http.StatusConflict, "Resource is held by another agent or session")
@@ -191,7 +201,7 @@ func (s *Server) coordinationCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scopeKey := store.CoordinationScopeKey(agent.TenantID, agent.UserID, agent.ID)
+	scopeKey := coordinationScope(agent)
 	result, err := s.store.CheckCoordination(r.Context(), scopeKey, req.Resource, agent.ID, coordinationSession(r, agent, req.SessionID), req.Intent)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "Failed to check coordination: "+err.Error())
@@ -208,7 +218,7 @@ func (s *Server) coordinationActive(w http.ResponseWriter, r *http.Request) {
 		prefix = r.URL.Query().Get("prefix")
 	}
 
-	scopeKey := store.CoordinationScopeKey(agent.TenantID, agent.UserID, agent.ID)
+	scopeKey := coordinationScope(agent)
 	leases, intents, err := s.store.ActiveCoordination(r.Context(), scopeKey, prefix)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "Failed to get active coordination: "+err.Error())
@@ -271,7 +281,7 @@ func (s *Server) coordinationIntent(w http.ResponseWriter, r *http.Request) {
 	}
 	ttl := time.Duration(req.TTLSeconds) * time.Second
 
-	scopeKey := store.CoordinationScopeKey(agent.TenantID, agent.UserID, agent.ID)
+	scopeKey := coordinationScope(agent)
 	it, err := s.store.LogIntent(r.Context(), scopeKey, req.Resource, agent.ID, coordinationSession(r, agent, req.SessionID), req.Intent, ttl)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "Failed to log intent: "+err.Error())

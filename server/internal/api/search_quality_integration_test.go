@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -131,5 +132,40 @@ func TestSearchTemporalOrderingAndContradictions(t *testing.T) {
 	// Ledger should be generated and contain the ledger table
 	if resp.Ledger == nil || *resp.Ledger == "" {
 		t.Errorf("expected ledger markdown table to be present")
+	}
+}
+
+// Keyword search finds the parts of email addresses and domains (migration
+// 0034), and the queries can use the full-text index.
+func TestKeywordSearchFindsEmailAndDomainParts(t *testing.T) {
+	e := setup(t)
+	a := newAgent(t)
+	e.register(a)
+	e.remember(a, "Emailed jane@stripe.com about the role; see careers.acme.io", "episodic")
+	for _, q := range []string{"stripe", "jane", "jane@stripe.com", "acme"} {
+		code, body := e.do(&a, "v2", "GET", "/search?mode=keyword&query="+url.QueryEscape(q), nil, nil)
+		e.must(200, code, body, "search "+q)
+		var r struct{ Results []json.RawMessage }
+		_ = json.Unmarshal(body, &r)
+		if len(r.Results) != 1 {
+			t.Fatalf("search %q found %d memories: %s", q, len(r.Results), body)
+		}
+	}
+
+	tx, err := e.st.Pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	_, _ = tx.Exec(context.Background(), "SET LOCAL enable_seqscan = off")
+	var plan string
+	rows, _ := tx.Query(context.Background(), `EXPLAIN SELECT id FROM memories m WHERE memro_tsv(m.content) @@ plainto_tsquery('english', 'stripe')`)
+	for rows.Next() {
+		var line string
+		_ = rows.Scan(&line)
+		plan += line + "\n"
+	}
+	if !strings.Contains(plan, "idx_memories_tsv") {
+		t.Fatalf("keyword search does not use idx_memories_tsv:\n%s", plan)
 	}
 }

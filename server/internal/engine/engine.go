@@ -385,10 +385,10 @@ func (e *Engine) keywordHits(ctx context.Context, q domain.SearchQuery, tenantID
 	if anyWord {
 		tsq = anyTerms(3)
 	}
-	sql := `SELECT m.id, ts_rank_cd(to_tsvector('english', m.content), ` + tsq + `) AS rank
+	sql := `SELECT m.id, ts_rank_cd(memro_tsv(m.content), ` + tsq + `) AS rank
 		FROM memories m
 		WHERE m.agent_id = $1 AND m.tenant_id = $2` + searchableFilter + `
-		  AND to_tsvector('english', m.content) @@ ` + tsq + typeFilter(q, &args) + `
+		  AND memro_tsv(m.content) @@ ` + tsq + typeFilter(q, &args) + `
 		ORDER BY rank DESC LIMIT $4`
 	rows, err := e.pool.Query(ctx, sql, args...)
 	if err != nil {
@@ -602,14 +602,14 @@ func (e *Engine) TemporalSearch(ctx context.Context, q TemporalQuery, tenantID u
 		vi, di, qi := len(args)-2, len(args)-1, len(args)
 		tsq := fmt.Sprintf("plainto_tsquery('english', $%d)", qi)
 		join = fmt.Sprintf(" LEFT JOIN memory_embeddings e ON e.memory_id = m.id AND e.dims = $%d", di)
-		where += fmt.Sprintf(" AND (e.memory_id IS NOT NULL OR to_tsvector('english', m.content) @@ %s)", tsq)
-		simExpr = fmt.Sprintf("COALESCE((1 - (e.embedding <=> $%d))::REAL, ts_rank_cd(to_tsvector('english', m.content), %s)::REAL)", vi, tsq)
+		where += fmt.Sprintf(" AND (e.memory_id IS NOT NULL OR memro_tsv(m.content) @@ %s)", tsq)
+		simExpr = fmt.Sprintf("COALESCE((1 - (e.embedding <=> $%d))::REAL, ts_rank_cd(memro_tsv(m.content), %s)::REAL)", vi, tsq)
 		order = simExpr + " DESC"
 	} else {
 		args = append(args, q.Query)
 		qi := len(args)
-		where += fmt.Sprintf(" AND to_tsvector('english', m.content) @@ plainto_tsquery('english', $%d)", qi)
-		simExpr = fmt.Sprintf("ts_rank_cd(to_tsvector('english', m.content), plainto_tsquery('english', $%d))", qi)
+		where += fmt.Sprintf(" AND memro_tsv(m.content) @@ plainto_tsquery('english', $%d)", qi)
+		simExpr = fmt.Sprintf("ts_rank_cd(memro_tsv(m.content), plainto_tsquery('english', $%d))", qi)
 		order = simExpr + " DESC"
 	}
 	args = append(args, q.Limit*3)

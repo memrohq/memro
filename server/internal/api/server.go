@@ -270,6 +270,12 @@ func (s *Server) requireAgent(next http.HandlerFunc) http.Handler {
 			httpError(w, status, msg)
 			return
 		}
+		// A customer's backend sends all its end users' requests from a few
+		// addresses (ADR 0025), so a valid tenant key gives back its address hit;
+		// each end user is limited below instead.
+		if agent.EndUser != "" && s.ipLimiter != nil {
+			s.ipLimiter.Refund(s.clientIP(r))
+		}
 		// A recovery key may only manage keys (ADR 0013).
 		if agent.KeyRole == store.KeyRecovery && !keyManagementRoutes[r.Pattern] {
 			httpError(w, http.StatusForbidden, "A recovery key can only manage the agent's keys")
@@ -316,9 +322,16 @@ func (s *Server) authenticate(r *http.Request) (Agent, []byte, int, string) {
 			if ext = r.Header.Get(endUserHeader); !validExternalID(ext) {
 				return Agent{}, nil, http.StatusBadRequest, "Tenant keys must send " + endUserHeader + ": your user's ID (1-128 letters, digits or . _ - : @)"
 			}
-			if id, err = s.endUser(ctx, tenantID, ext); err != nil {
+			lookup := s.endUser
+			if r.Pattern == "DELETE /end-user" { // deleting must not create the user first
+				lookup = s.store.EndUser
+			}
+			if id, err = lookup(ctx, tenantID, ext); err != nil {
 				slog.Error("ensure end user", "err", err)
 				return Agent{}, nil, http.StatusInternalServerError, "Database error"
+			}
+			if id == nil {
+				return Agent{}, nil, http.StatusNotFound, "End user not found"
 			}
 		}
 		return Agent{ID: id.ID, UserID: id.UserID, TenantID: id.TenantID, Via: "api_key", KeyID: &keyID, EndUser: ext}, raw, 0, ""
@@ -594,6 +607,15 @@ type window struct {
 
 func NewRateLimiter(max int, w time.Duration) *RateLimiter {
 	return &RateLimiter{max: max, window: w, hits: map[string]*window{}}
+}
+
+// Refund takes back one hit counted by Allow.
+func (l *RateLimiter) Refund(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if w, ok := l.hits[key]; ok && w.count > 0 {
+		w.count--
+	}
 }
 
 func (l *RateLimiter) Allow(key string) bool {

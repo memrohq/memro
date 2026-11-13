@@ -364,7 +364,7 @@ default tenant and get `403` from all of these.
 | 🔒 `POST /tenant/{id}/api-keys` | Body `{"name"}` → `{"id", "tenant_id", "name", "prefix", "key"}`. Issues a tenant key, which is shown once. Platform admins only; not for the default tenant. See [Tenant keys](authentication.md#tenant-keys-one-key-for-all-your-users). |
 | 🔒 `GET /tenant/{id}/api-keys` | The tenant's active keys (no secrets). Platform admins only. |
 | 🔒 `DELETE /tenant/{id}/api-keys/{key_id}` | Revokes a tenant key and the webhooks it registered. Platform admins only. |
-| 🔒 `DELETE /end-user` | With a tenant key and `X-Memro-User`: deletes that end user, their memories and their files → `204`. |
+| 🔒 `DELETE /end-user` | With a tenant key and `X-Memro-User`: deletes that end user, their memories and their files → `204` (`404` if there's no such user). |
 
 Platform admins act only through a dashboard session; their API keys and
 signed requests get `403`.

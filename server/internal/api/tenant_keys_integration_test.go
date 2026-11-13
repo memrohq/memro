@@ -2,9 +2,12 @@ package api_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/memrohq/memro/server/internal/api"
 )
 
 // tenantKey makes a dedicated tenant and a tenant key for it, as a platform
@@ -78,8 +81,24 @@ func TestTenantKeyKeepsEndUsersApart(t *testing.T) {
 	if again, _ := who(keyA, "u_1"); again != a1 || tid != tenantA {
 		t.Fatalf("u_1 is agent %s then %s in tenant %s", a1, again, tid)
 	}
+	// End users don't share coordination claims (the tenant's other agents do).
+	code, body := e.do(nil, "", "POST", "/coordination/claim", j(map[string]string{
+		"resource": "candidate/jane", "intent": "emailing jane about the stripe offer"}), asUser(keyA, "u_1"))
+	e.must(200, code, body, "u_1 claim")
+	code, body = e.do(nil, "", "GET", "/coordination/active", nil, asUser(keyA, "u_2"))
+	e.must(200, code, body, "u_2 active")
+	if strings.Contains(string(body), "stripe offer") {
+		t.Fatalf("u_2 sees u_1's claim: %s", body)
+	}
+	code, body = e.do(nil, "", "POST", "/coordination/claim", j(map[string]string{
+		"resource": "candidate/jane", "intent": "x"}), asUser(keyA, "u_2"))
+	e.must(200, code, body, "u_2 claim")
+	if !strings.Contains(string(body), `"granted":true`) {
+		t.Fatalf("u_1's claim blocks u_2: %s", body)
+	}
+
 	// A tenant key must name the end user, with a sane ID.
-	code, body := e.do(nil, "", "GET", "/auth/whoami", nil, bearer(keyA))
+	code, body = e.do(nil, "", "GET", "/auth/whoami", nil, bearer(keyA))
 	e.must(400, code, body, "tenant key without end user")
 	code, body = e.do(nil, "", "GET", "/auth/whoami", nil, asUser(keyA, "bad id/../x"))
 	e.must(400, code, body, "invalid end user ID")
@@ -95,6 +114,13 @@ func TestTenantKeyKeepsEndUsersApart(t *testing.T) {
 	// Deleting an end user removes its memories; the others keep theirs.
 	code, body = e.do(nil, "", "DELETE", "/end-user", nil, asUser(keyA, "u_1"))
 	e.must(204, code, body, "delete end user")
+	code, body = e.do(nil, "", "DELETE", "/end-user", nil, asUser(keyA, "u_1"))
+	e.must(404, code, body, "delete an end user twice")
+	var n int
+	_ = e.st.Pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM agent_identities WHERE external_id = 'u_1' AND tenant_id = $1`, tenantA).Scan(&n)
+	if n != 0 {
+		t.Fatalf("deleting an unknown end user created it")
+	}
 	if got := sees(keyA, "u_1", "stripe"); strings.Contains(got, mem1) {
 		t.Fatalf("deleted user's memory still found: %s", got)
 	}
@@ -135,4 +161,23 @@ func TestTenantKeysAreForPlatformAdminsOnly(t *testing.T) {
 	e.must(204, code, body, "revoke tenant key")
 	code, body = e.do(nil, "", "GET", "/auth/whoami", nil, asUser(key, "u_1"))
 	e.must(401, code, body, "revoked tenant key")
+}
+
+// A customer's backend sends all its users' requests from one address: valid
+// tenant-key requests don't use up that address's limit, failed ones do.
+func TestTenantKeyRequestsSkipTheAddressLimit(t *testing.T) {
+	e := setup(t, func(d *api.Deps) { d.Config.RateLimitMax = 5 })
+	_, key := e.tenantKey("Customer D") // 3 of the address's 5 requests
+	for i := range 10 {
+		code, body := e.do(nil, "", "GET", "/auth/whoami", nil, asUser(key, fmt.Sprintf("u_%d", i)))
+		e.must(200, code, body, "valid tenant-key request")
+	}
+	var codes []int
+	for range 3 {
+		code, _ := e.do(nil, "", "GET", "/auth/whoami", nil, asUser("memro_sk_wrong", "u_1"))
+		codes = append(codes, code)
+	}
+	if fmt.Sprint(codes) != "[401 401 429]" {
+		t.Fatalf("failed tenant-key requests got %v, want [401 401 429]", codes)
+	}
 }

@@ -22,16 +22,24 @@ credential could act for the many users inside it.
   that ID appears, with a unique index so two first requests that race get
   the same agent. The agent ID is a fresh ed25519 public key whose private key
   is discarded, so the agent is reachable only through the tenant key.
-- **Isolation needs no new code.** Memories, search, graph, files, hooks and
-  rate limits are already scoped by `agent_id` + `tenant_id` (ADR 0018). A
+- **Isolation mostly reuses existing scoping.** Memories, search, graph,
+  files, hooks and rate limits are already scoped by `agent_id` + `tenant_id`
+  (ADR 0018); coordination needed one change (below). A
   tenant key resolves to that end user's agent before any handler runs, so
   every existing endpoint is per user. Two customers may use the same user IDs.
 - **A tenant key is an API key acting as the end user** (`Via: "api_key"`), so
   every API-key restriction applies unchanged: no minting keys, approving
   device logins, `DELETE /identity`, or admin endpoints.
+- **End users never share coordination.** A dedicated tenant's agents share
+  one scope for claims and intents (ADR 0019), but a tenant's end users get
+  one each, so one user's claim notes never reach another.
+- **Rate limits apply per end user, not per address.** A customer's backend
+  sends every user's requests from a few IP addresses, so a request that a
+  tenant key authenticates gives back its hit on the per-address limit. Failed
+  key checks still count, so guessing keys stays limited.
 - **Offboarding / right to erasure:** `DELETE /end-user` with the tenant key
-  and `X-Memro-User` deletes that user's agent, memories and files. Only a
-  tenant key may call it.
+  and `X-Memro-User` deletes that user's agent, memories and files (`404` if
+  the user doesn't exist, without creating it). Only a tenant key may call it.
 - Usage is recorded per tenant, which is the unit we bill.
 
 ## Alternatives considered
