@@ -37,6 +37,15 @@ const local = await Agent.fromApiKey(key, { baseUrl: 'http://localhost:8081' });
 
 Don't ship API keys to browsers; call Memro from your server.
 
+One memory per user of your product (B2B tenant key): pass your user's ID as
+`endUser`. Each user is created on first use and sees only their own memories.
+
+```ts
+const memory = await Agent.fromApiKey(process.env.MEMRO_TENANT_KEY!, { endUser: user.id });
+await memory.remember('Prefers intros by email');
+await memory.client.deleteEndUser();                          // erase this user and everything they stored
+```
+
 Self-owned identity (Node.js file helpers shown):
 
 ```ts
@@ -107,7 +116,7 @@ try {
 }
 ```
 
-Options: `{ baseUrl, apiKey, timeout: 30_000, maxRetries: 2, fetch }`.
+Options: `{ baseUrl, apiKey, endUser, timeout: 30_000, maxRetries: 2, fetch }`.
 429s are retried (honouring `Retry-After`); gateway errors only for `GET`
 and `DELETE`.
 

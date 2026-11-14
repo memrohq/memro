@@ -38,6 +38,8 @@ export interface MemroClientOptions {
   baseUrl?: string;
   /** memro_sk_... Defaults to MEMRO_API_KEY. */
   apiKey?: string;
+  /** With a tenant key: your user's ID, sent as X-Memro-User so each user has separate memory. */
+  endUser?: string;
   /** Per-request timeout in ms (default 30 000). */
   timeout?: number;
   /** Retries for rate limits and gateway errors on safe requests (default 2). */
@@ -64,6 +66,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export class MemroClient {
   readonly baseUrl: string;
   readonly apiKey?: string;
+  readonly endUser?: string;
   private readonly timeout: number;
   private readonly maxRetries: number;
   private readonly fetchImpl: typeof fetch;
@@ -74,6 +77,8 @@ export class MemroClient {
     if (this.apiKey && !this.apiKey.startsWith(API_KEY_PREFIX)) {
       throw new Error('memro: API keys start with memro_sk_. Create one with `npx memro-cli connect` or in the dashboard.');
     }
+    this.endUser = options.endUser;
+    if (this.endUser !== undefined && !this.apiKey) throw new Error('memro: endUser needs a tenant key (apiKey).');
     this.timeout = options.timeout ?? 30_000;
     this.maxRetries = options.maxRetries ?? 2;
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
@@ -139,7 +144,11 @@ export class MemroClient {
 
   /** Authentication headers for one request; override to add headers. */
   protected authHeaders(method: string, pathAndQuery: string, body: Uint8Array, signer?: Signer): Record<string, string> {
-    if (this.apiKey) return { Authorization: `Bearer ${this.apiKey}` };
+    if (this.apiKey) {
+      const headers: Record<string, string> = { Authorization: `Bearer ${this.apiKey}` };
+      if (this.endUser !== undefined) headers['X-Memro-User'] = this.endUser;
+      return headers;
+    }
     if (signer) return signRequest(signer.agentId, signer.privateKey, method, pathAndQuery, body);
     return {};
   }
@@ -174,6 +183,8 @@ export class MemroClient {
   }
   /** Deletes the agent with all of its memories, files, keys and webhooks. */
   deleteIdentity(agentId: string, signer?: Signer) { return this.request<void>('DELETE', `/identity/${agentId}`, { signer }); }
+  /** Tenant key + endUser: deletes that user with all their memories and files. */
+  deleteEndUser() { return this.request<void>('DELETE', '/end-user'); }
 
   // ── Memories ────────────────────────────────────────────────────────────
 
