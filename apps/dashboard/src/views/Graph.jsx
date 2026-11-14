@@ -215,6 +215,30 @@ export default function Graph({ apiBase, auth, onOpenMemories, path = "/memory/g
   const ringsRef = useRef(null); // { focus, near: Set, far: Set } for hover or selection
   const matchRef = useRef(new Set()); // search hits, highlighted while typing
   const boxRef = useRef(null);
+  const cardRef = useRef(null);
+  // Full screen: the graph covers the whole window as an overlay, and also
+  // asks the browser for real full screen. Browsers may refuse that (it needs
+  // a direct click and can be blocked), and the overlay works either way.
+  // Esc, the button, or leaving browser full screen exits.
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    requestAnimationFrame(() => { sigmaRef.current?.resize(true); sigmaRef.current?.refresh(); });
+    if (!full) return;
+    const onKey = (e) => { if (e.key === "Escape") setFull(false); };
+    const onChange = () => { if (!document.fullscreenElement) setFull(false); };
+    window.addEventListener("keydown", onKey);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => { window.removeEventListener("keydown", onKey); document.removeEventListener("fullscreenchange", onChange); };
+  }, [full]);
+  const toggleFull = useCallback(() => {
+    if (full) {
+      setFull(false);
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    } else {
+      setFull(true);
+      document.documentElement.requestFullscreen?.().catch(() => {}); // best effort
+    }
+  }, [full]);
   const sigmaRef = useRef(null);
   const hoverRef = useRef(null); // node under the pointer
   const selRef = useRef(null);
@@ -447,7 +471,8 @@ export default function Graph({ apiBase, auth, onOpenMemories, path = "/memory/g
           </Empty>
         </div>
       ) : (
-        <div className="card relative overflow-hidden" style={{ height, minHeight: 420, background: palette.bg }}>
+        <div ref={cardRef} className={full ? "fixed inset-0 z-[60] overflow-hidden" : "card relative overflow-hidden"}
+          style={{ height: full ? "100dvh" : height, minHeight: 420, background: palette.bg }}>
           {/* Toolbar: search, size, view controls. */}
           <div className="absolute top-3 left-3 right-3 z-10 flex flex-wrap items-start gap-2">
             <div className="relative w-72 max-w-full">
@@ -490,6 +515,7 @@ export default function Graph({ apiBase, auth, onOpenMemories, path = "/memory/g
             <ToolButton icon="remove" label="Zoom out" onClick={() => zoom(1.5)} />
             <ToolButton icon="center_focus_strong" label="Fit to view" onClick={fit} />
             <ToolButton icon="refresh" label="Reload" onClick={load} />
+            <ToolButton icon={full ? "fullscreen_exit" : "fullscreen"} label={full ? "Exit full screen (Esc)" : "Full screen"} active={full} onClick={toggleFull} />
           </div>
 
           <div ref={boxRef} className="absolute inset-0" />
