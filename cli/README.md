@@ -43,6 +43,7 @@ npx memro-cli connect --project
    | OpenCode | `~/.config/opencode/AGENTS.md` | `./AGENTS.md` |
    | Gemini CLI | `~/.gemini/GEMINI.md` | `./GEMINI.md` |
    | Antigravity | `~/.gemini/config/rules/memro.md` (always on) | `./.agents/rules/memro.md` (always on) |
+   | Cursor | — (user rules live in Cursor's settings) | `./.cursor/rules/memro.mdc` (always applied) |
    | Windsurf | `~/.codeium/windsurf/memories/global_rules.md` | — |
 
    Untick "Teach these tools…" in the list, or pass `--no-instructions`, to
@@ -63,6 +64,25 @@ once as `<file>.memro-backup`. Restart the tool afterwards.
 >   npx memro-cli connect --project --key memro_sk_client_specific_key
 >   ```
 
+### Keeping the key out of project files
+
+Project config files hold your API key, so `connect` adds them to
+`.gitignore`. To commit them instead (so a team shares one setup), pass
+`--env-key`: Claude Code (`.mcp.json`) and Codex (`.codex/config.toml`) then
+read the key from the `MEMRO_API_KEY` environment variable, and each person sets
+their own:
+
+```bash
+npx memro-cli connect --project --client claude,codex --env-key
+export MEMRO_API_KEY=memro_sk_...   # in your shell profile
+```
+
+Other tools keep the key in their config file, because apps started from the
+Dock or Start menu don't see your shell's environment.
+
+Claude Code asks once, the first time you run `claude` in the project, before
+it uses a server from a shared `.mcp.json`; approve `memro` there.
+
 ---
 
 ## Commands
@@ -78,10 +98,41 @@ npx memro-cli connect --project [--client cursor,claude] [--yes]
 npx memro-cli connect --scope user
 npx memro-cli connect --scope project
 
-# Status and disconnect
+# Status, checks and disconnect
 npx memro-cli status [--project]
+npx memro-cli doctor [--client ...]
 npx memro-cli disconnect [--project] [--client ...]
 ```
+
+### Checking a setup
+
+`npx memro-cli doctor` checks every tool that has Memro, from the folder you
+run it in:
+
+```
+│  ✔ Claude Code   project ./.mcp.json · key $MEMRO_API_KEY · 25 tools
+│                  overrides ~/.claude.json
+│  ! Codex         global ~/.codex/config.toml · key in the file · key rejected
+│                  no Memro note in its instructions: it uses Memro only when asked
+│  ! Cursor        installed, Memro not added · npx memro-cli connect --client cursor
+```
+
+- **Which config is used.** Inside a project, a project config replaces the
+  global one (for Claude Code, a private `--scope local` server beats both).
+  The other file is listed as overridden.
+- **Where the key comes from** (the file, or a variable such as
+  `$MEMRO_API_KEY`), and whether that variable is set.
+- **Whether the Memro server accepts the key**, by asking it for its tools.
+  A rejected key, an unreachable server and a missing variable each get their
+  own message.
+- **Whether the tool has the "use Memro automatically" note**, in its global
+  or project instructions.
+
+It exits with 1 when a tool needs attention, so it can run in CI. It reads
+the tools' config files and asks the Memro server directly; it can't see what
+a running tool loaded, so restart a tool after changing its config. Note that
+`claude mcp list` and `claude mcp get` show the global server even inside a
+project whose `.mcp.json` overrides it; Claude Code itself uses the project's.
 
 ### Options
 
@@ -89,6 +140,7 @@ npx memro-cli disconnect [--project] [--client ...]
 * `--scope <user|project>`: Explicitly select configuration scope (`user` default).
 * `--client <ids>`: Only configure these tools, comma-separated (e.g. `--client claude,cursor`).
 * `--key <key>`: Use a specific API key (`memro_sk_...`) instead of default credentials.
+* `--env-key`: Claude Code and Codex read the key from `$MEMRO_API_KEY` instead of storing it (see above).
 * `-y, --yes`: Configure every detected tool without prompting.
 * `--no-instructions`: Do not add Memro guidance to instruction files (`CLAUDE.md`, `AGENTS.md`, etc.).
 * `--staging`, `--local` or `--api <url>`: Target another Memro server (e.g. self-hosted: `--api https://memro.example.com`).

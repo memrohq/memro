@@ -22,6 +22,11 @@ function appSupport(...parts) {
 
 const bearer = (key) => ({ Authorization: `Bearer ${key}` });
 
+/** With --env-key, tools that can read the key from the environment get a
+ * reference to this variable instead of the key, so the file is safe to commit. */
+export const KEY_ENV = "MEMRO_API_KEY";
+const authHeader = ({ apiKey, envKey }) => (envKey ? `Bearer \${${KEY_ENV}}` : `Bearer ${apiKey}`);
+
 /** The MCP URL for one tool, tagged with ?session_id=<tool id>. The hosted MCP
  * is stateless, so this is how it tells tools on the same key apart when they
  * claim work (memro ADR 0019): each tool is its own lease holder. */
@@ -187,13 +192,16 @@ const codex = {
       ? path.join(cwd, "AGENTS.md")
       : path.join(process.env.CODEX_HOME || path.join(home(), ".codex"), "AGENTS.md");
   },
-  add({ mcpUrl, apiKey }, { scope = "user", cwd = process.cwd() } = {}) {
+  supportsEnvKey: true,
+  add({ mcpUrl, apiKey, envKey }, { scope = "user", cwd = process.cwd() } = {}) {
     const target = codex.file(scope, cwd);
     const current = fs.existsSync(target) ? stripCodexServer(fs.readFileSync(target, "utf8")) : "";
     const block = [
       CODEX_HEADER,
       `url = ${tomlString(mcpUrl)}`,
-      `http_headers = { Authorization = ${tomlString(`Bearer ${apiKey}`)} }`,
+      envKey
+        ? `bearer_token_env_var = ${tomlString(KEY_ENV)}`
+        : `http_headers = { Authorization = ${tomlString(`Bearer ${apiKey}`)} }`,
     ].join("\n");
     writeFileSafely(target, (current ? current + "\n\n" : "") + block + "\n");
   },
@@ -225,6 +233,8 @@ const claudeCode = {
   name: "Claude Code",
   aliases: ["claude", "claudecode"],
   supportsScope: (scope) => scope === "user" || scope === "project",
+  // Claude Code expands ${VAR} in .mcp.json and ~/.claude.json.
+  supportsEnvKey: true,
   // Project-scoped servers live in the project's .mcp.json (what
   // `claude mcp add --scope project` writes); user scope in ~/.claude.json.
   file: (scope = "user", cwd = process.cwd()) => {
@@ -247,11 +257,11 @@ const claudeCode = {
     if (process.platform !== "win32" && hasClaudeCLI()) {
       runClaudeCLI(["mcp", "remove", "--scope", scope, SERVER_NAME], { cwd });
       if (runClaudeCLI(["mcp", "add", "--transport", "http", "--scope", scope, SERVER_NAME, conn.mcpUrl,
-        "--header", `Authorization: Bearer ${conn.apiKey}`], { cwd })) return;
+        "--header", `Authorization: ${authHeader(conn)}`], { cwd })) return;
     }
     const target = claudeCode.file(scope, cwd);
     const cfg = readJSON(target);
-    cfg.mcpServers = { ...(cfg.mcpServers || {}), [SERVER_NAME]: { type: "http", url: conn.mcpUrl, headers: bearer(conn.apiKey) } };
+    cfg.mcpServers = { ...(cfg.mcpServers || {}), [SERVER_NAME]: { type: "http", url: conn.mcpUrl, headers: { Authorization: authHeader(conn) } } };
     writeJSON(target, cfg);
   },
   remove({ scope = "user", cwd = process.cwd() } = {}) {
@@ -279,6 +289,9 @@ export const CLIENTS = [
     file: (scope, cwd) => (scope === "project" ? path.join(cwd, ".cursor", "mcp.json") : path.join(home(), ".cursor", "mcp.json")),
     detect: (scope, cwd) => (scope === "project" ? exists(cwd, ".cursor") || exists(home(), ".cursor") : exists(home(), ".cursor")),
     entry: ({ mcpUrl, apiKey }) => ({ url: mcpUrl, headers: bearer(apiKey) }),
+    // Project rules only: Cursor's user rules live in its settings, not a file.
+    rules: (scope, cwd) => (scope === "project" ? path.join(cwd, ".cursor", "rules", "memro.mdc") : null),
+    rulesFrontmatter: "---\ndescription: Memro long-term memory\nalwaysApply: true\n---",
   }),
   jsonClient({
     id: "antigravity",

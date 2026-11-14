@@ -3,7 +3,9 @@
 A release is a `vX.Y.Z` tag on `main`. **Each release raises only the last
 number by one** (v0.1.0, v0.1.1, v0.1.2, …); the release script and the
 workflow refuse anything else. Packages keep their own versions, as listed in
-each release's notes (see `docs/releases/v0.1.0.md`).
+each release's notes (see `docs/releases/v0.1.0.md`), and follow the same rule:
+a package that should publish raises only its last number by one
+(0.2.0 → 0.2.1 → 0.2.2), for fixes and new features alike.
 
 Pushing the tag runs
 `.github/workflows/release.yml`, which:
@@ -27,8 +29,9 @@ Pushing the tag runs
    - move the `## [Unreleased]` notes in `CHANGELOG.md` under
      `## [vX.Y.Z] - YYYY-MM-DD` (the previous version with the last number
      plus one), leaving an empty `## [Unreleased]` above it;
-   - raise the version of any package that should publish (its
-     `pyproject.toml` and `__init__.py`, or `package.json`);
+   - raise the last number of any package that changed (its
+     `pyproject.toml` and `__init__.py`, or `package.json`); unchanged
+     packages keep their version and aren't published again;
    - check the release number with `scripts/check_release_version.sh vX.Y.Z`.
 2. After it's merged, from an up-to-date `main`, as an account that can push
    tags:

@@ -3,8 +3,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { CLIENTS, findClient, withSession } from "./clients.js";
+import { CLIENTS, KEY_ENV, findClient, withSession } from "./clients.js";
 import { pick, pickOne, promptText } from "./picker.js";
+import { diagnose } from "./doctor.js";
 import { installInstructions, uninstallInstructions } from "./instructions.js";
 import * as ui from "./ui.js";
 
@@ -23,6 +24,8 @@ Usage
                              Antigravity, OpenCode, Gemini CLI, VS Code, Windsurf
                              and Claude Desktop
   npx memro-cli status       Show the connected account and configured tools
+  npx memro-cli doctor       Check each tool: which config it uses, its key, and
+                             whether the Memro server accepts it
   npx memro-cli disconnect   Remove Memro from your tools and forget the key
 
 Options
@@ -30,6 +33,8 @@ Options
   --scope <user|project>     Configuration scope: "user" (default) or "project"
   --client <ids>             Only these tools, comma-separated (${CLIENTS.map((c) => c.id).join(", ")})
   --key <key>                Use a specific API key (memro_sk_...) instead of saved credentials
+  --env-key                  Claude Code and Codex read the key from $MEMRO_API_KEY
+                             instead of storing it in their config (safe to commit)
   --yes, -y                  Don't ask: use every detected tool
   --no-instructions          Don't add the "use Memro automatically" note to
                              the tools' instructions (CLAUDE.md, AGENTS.md…)
@@ -38,7 +43,7 @@ Options
 `;
 
 export function parseArgs(argv) {
-  const opts = { command: null, clients: null, yes: false, api: null, instructions: true, scope: null, key: null };
+  const opts = { command: null, clients: null, yes: false, api: null, instructions: true, scope: null, key: null, envKey: false };
   let projectFlag = false;
   let scopeFlagValue = null;
 
@@ -50,6 +55,8 @@ export function parseArgs(argv) {
       opts.yes = true;
     } else if (a === "--no-instructions") {
       opts.instructions = false;
+    } else if (a === "--env-key") {
+      opts.envKey = true;
     } else if (a === "--project") {
       projectFlag = true;
     } else if (a === "--scope") {
@@ -433,13 +440,16 @@ async function connect(opts) {
   const width = Math.max(...targets.map((c) => c.name.length)) + 2;
   const gitTracked = scope === "project" && isGitTracked(cwd);
   let ok = 0;
+  let usedEnvKey = false;
   for (const c of targets) {
     try {
-      c.add({ ...conn, mcpUrl: withSession(conn.mcpUrl, c.id) }, { scope, cwd });
+      const envKey = Boolean(opts.envKey && c.supportsEnvKey);
+      c.add({ ...conn, envKey, mcpUrl: withSession(conn.mcpUrl, c.id) }, { scope, cwd });
       ok++;
+      usedEnvKey ||= envKey;
       const configFile = c.file(scope, cwd);
-      let note = "";
-      if (gitTracked && ensureGitIgnored(configFile, cwd).added) note = "added to .gitignore (holds your key)";
+      let note = envKey ? `reads $${KEY_ENV}` : "";
+      if (!envKey && gitTracked && ensureGitIgnored(configFile, cwd).added) note = "added to .gitignore (holds your key)";
       ui.ok(c.name.padEnd(width), `${formatPath(configFile, scope, cwd)}${note ? "  " + note : ""}`);
       if (opts.instructions && c.rules) {
         const rulesFile = c.rules(scope, cwd);
@@ -454,6 +464,11 @@ async function connect(opts) {
     }
   }
   ui.gap();
+  if (usedEnvKey) {
+    ui.line(`Set ${KEY_ENV} to your Memro key in your shell profile before starting those tools`);
+    ui.line(ui.c.dim(`(the key is in ${tilde(CREDENTIALS())}, or create one in the dashboard → API keys).`));
+    ui.gap();
+  }
   ui.outro(
     ok ? `Done. Restart ${ok === 1 ? "the tool" : "your tools"} to load Memro.` : "Nothing was configured.",
     "Manage or revoke the key in the dashboard → API keys.",
@@ -497,6 +512,51 @@ async function status(opts) {
   console.log(`Tools:  ${configured.map((c) => c.name).join(", ") || "none"}`);
 }
 
+async function doctor(opts) {
+  const root = resolveProjectRoot(process.cwd());
+  const inProject = !isHomeOrRoot(root);
+  const cwd = inProject ? root : process.cwd();
+  ui.intro("Memro doctor", inProject ? tilde(cwd) : "global setup");
+  ui.gap();
+
+  const creds = loadCredentials();
+  if (creds) {
+    const who = await request(creds.api_url, "/auth/whoami", { key: creds.api_key }).catch((err) => ({ error: err.message }));
+    const state = who.error || (who.ok ? "key valid" : `key not valid (${who.status}): run \`npx memro-cli connect\``);
+    ui.line(`Signed in  ${ui.c.dim(`agent ${creds.agent_id.slice(0, 12)}… · ${host(creds.api_url)} ·`)} ${state}`);
+  } else {
+    ui.line(`Signed in  ${ui.c.dim("no saved key in ~/.memro/credentials.json")}`);
+  }
+  ui.gap();
+
+  const clients = opts.clients ? selectClients(opts.clients) : CLIENTS;
+  const rows = await diagnose(clients, { cwd, inProject });
+  if (!rows.length) {
+    ui.warn("No tools have Memro, and none of the supported tools were found.");
+    return ui.outro("Run `npx memro-cli connect` to set one up.");
+  }
+  const width = Math.max(...rows.map((r) => r.client.name.length)) + 2;
+  for (const r of rows) {
+    const name = r.client.name.padEnd(width);
+    if (r.problem === "not connected") {
+      ui.fail(name, `installed, Memro not added · npx memro-cli connect --client ${r.client.id}`);
+      continue;
+    }
+    const where = `${r.scope === "user" ? "global" : r.scope} ${r.scope === "local" ? tilde(r.file) : formatPath(r.file, r.scope === "user" ? "user" : "project", cwd)}`;
+    const detail = [where, `key ${r.keySource}`, r.tools != null && `${r.tools} tools`, r.problem].filter(Boolean).join(" · ");
+    (r.problem ? ui.fail : ui.ok)(name, detail);
+    for (const f of r.overridden) ui.line(ui.c.dim(`${"".padEnd(width + 3)}overrides ${tilde(f)}`));
+    if (r.instructions === false) ui.line(ui.c.dim(`${"".padEnd(width + 3)}no Memro note in its instructions: it uses Memro only when asked`));
+  }
+  ui.gap();
+  const broken = rows.filter((r) => r.problem && r.problem !== "not connected").length;
+  process.exitCode = broken ? 1 : 0;
+  ui.outro(
+    broken ? `${broken} ${broken === 1 ? "tool needs" : "tools need"} attention.` : "Everything checks out.",
+    "This reads each tool's config and asks the Memro server directly; restart a tool after changing its config.",
+  );
+}
+
 async function disconnect(opts) {
   const scope = opts.scope || "user";
   const cwd = scope === "project" ? resolveProjectRoot(process.cwd()) : process.cwd();
@@ -535,6 +595,7 @@ export async function main(argv) {
   switch (opts.command) {
     case "connect": return connect(opts);
     case "status": return status(opts);
+    case "doctor": return doctor(opts);
     case "disconnect": return disconnect(opts);
     case null:
     case "help": console.log(HELP); return;
