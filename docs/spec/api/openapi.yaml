@@ -12,7 +12,7 @@ info:
     - Production: `https://api.memro.co`
   version: 1.0.0
   contact:
-    email: api@memro.co
+    email: subal@memro.co
   license:
     name: CC0 1.0 Universal
     url: https://creativecommons.org/publicdomain/zero/1.0/

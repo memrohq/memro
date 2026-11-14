@@ -345,7 +345,7 @@ Agents can generate new identity:
 
 ## Vulnerability Disclosure
 
-Report security issues to: **security@memro.co**
+Report security issues to: **subal@memro.co**
 
 **Do not** open public GitHub issues for security vulnerabilities.
 

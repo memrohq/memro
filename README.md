@@ -18,7 +18,7 @@ Give your AI agents persistent memory across sessions: agent identity, memory st
 > Memro is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
 > - **Free for Non-Commercial Use**: Personal study, experiments, hobby projects, research, and testing without commercial application.
 > - **Commercial Use**: Using Memro for commercial products or production services requires a managed subscription on [Memro Cloud](https://memro.co) or an enterprise commercial license.
-> - **How to Get a Commercial License**: Visit [memro.co/pricing](https://memro.co/pricing) or contact `licensing@memro.co`.
+> - **How to Get a Commercial License**: Visit [memro.co/pricing](https://memro.co/pricing) or contact `subal@memro.co`.
 
 > **Repository Notice**: `github.com/memrohq/memro` is the single public repository for Memro. It contains the Go server, official SDKs (Python, JavaScript/TypeScript, Go), Model Context Protocol (MCP) server, and the CLI.
 
