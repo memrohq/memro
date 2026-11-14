@@ -98,10 +98,41 @@ npx memro-cli connect --project [--client cursor,claude] [--yes]
 npx memro-cli connect --scope user
 npx memro-cli connect --scope project
 
-# Status and disconnect
+# Status, checks and disconnect
 npx memro-cli status [--project]
+npx memro-cli doctor [--client ...]
 npx memro-cli disconnect [--project] [--client ...]
 ```
+
+### Checking a setup
+
+`npx memro-cli doctor` checks every tool that has Memro, from the folder you
+run it in:
+
+```
+│  ✔ Claude Code   project ./.mcp.json · key $MEMRO_API_KEY · 25 tools
+│                  overrides ~/.claude.json
+│  ! Codex         global ~/.codex/config.toml · key in the file · key rejected
+│                  no Memro note in its instructions: it uses Memro only when asked
+│  ! Cursor        installed, Memro not added · npx memro-cli connect --client cursor
+```
+
+- **Which config is used.** Inside a project, a project config replaces the
+  global one (for Claude Code, a private `--scope local` server beats both).
+  The other file is listed as overridden.
+- **Where the key comes from** (the file, or a variable such as
+  `$MEMRO_API_KEY`), and whether that variable is set.
+- **Whether the Memro server accepts the key**, by asking it for its tools.
+  A rejected key, an unreachable server and a missing variable each get their
+  own message.
+- **Whether the tool has the "use Memro automatically" note**, in its global
+  or project instructions.
+
+It exits with 1 when a tool needs attention, so it can run in CI. It reads
+the tools' config files and asks the Memro server directly; it can't see what
+a running tool loaded, so restart a tool after changing its config. Note that
+`claude mcp list` and `claude mcp get` show the global server even inside a
+project whose `.mcp.json` overrides it; Claude Code itself uses the project's.
 
 ### Options
 
