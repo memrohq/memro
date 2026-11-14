@@ -360,3 +360,19 @@ test("--env-key: Claude Code and Codex reference $MEMRO_API_KEY instead of stori
   // Tools that can't read the environment don't claim to.
   for (const c of CLIENTS.filter((c) => !["claude-code", "codex"].includes(c.id))) assert.ok(!c.supportsEnvKey, c.id);
 });
+
+test("VS Code (Copilot) gets an instructions file that applies to every file", () => {
+  const c = findClient("vscode");
+  assert.equal(c.rules("user", PROJECT_DIR), path.join(HOME, ".copilot", "instructions", "memro.instructions.md"));
+  const rulesFile = c.rules("project", PROJECT_DIR);
+  assert.equal(rulesFile, path.join(PROJECT_DIR, ".github", "instructions", "memro.instructions.md"));
+
+  installInstructions(rulesFile, { scope: "project", frontmatter: c.rulesFrontmatter });
+  const text = fs.readFileSync(rulesFile, "utf8");
+  // Without applyTo, Copilot only uses the file when it decides it's relevant.
+  assert.match(text, /^---\ndescription: .+\napplyTo: "\*\*"\n---\n/);
+  assert.ok(text.includes(PROJECT_BLOCK));
+
+  assert.equal(uninstallInstructions(rulesFile, { frontmatter: c.rulesFrontmatter }), true);
+  assert.equal(fs.existsSync(rulesFile), false);
+});

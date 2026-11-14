@@ -337,6 +337,11 @@ export const CLIENTS = [
     detect: (scope, cwd) => (scope === "project" ? exists(cwd, ".vscode") || fs.existsSync(appSupport("Code", "User")) : fs.existsSync(appSupport("Code", "User"))),
     key: "servers",
     entry: ({ mcpUrl, apiKey }) => ({ type: "http", url: mcpUrl, headers: bearer(apiKey) }),
+    // Copilot Chat reads *.instructions.md from these default locations.
+    rules: (scope, cwd) => (scope === "project"
+      ? path.join(cwd, ".github", "instructions", "memro.instructions.md")
+      : path.join(home(), ".copilot", "instructions", "memro.instructions.md")),
+    rulesFrontmatter: "---\ndescription: Memro long-term memory\napplyTo: \"**\"\n---",
   }),
   jsonClient({
     id: "windsurf",

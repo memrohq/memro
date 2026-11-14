@@ -12,6 +12,9 @@ and every release and package raises only the last number of its version (see RE
 - **memro-cli `--env-key`**: Claude Code and Codex read the key from `$MEMRO_API_KEY` instead of storing it, so project config files can be committed.
 - **memro-cli Cursor rule**: project setup adds `.cursor/rules/memro.mdc` (always applied).
 
+### Added
+- **memro-cli and GitHub Copilot**: `connect` adds the Memro note for VS Code's Copilot Chat (`~/.copilot/instructions/memro.instructions.md`, or `.github/instructions/memro.instructions.md` with `--project`), so Copilot recalls and remembers without being asked.
+
 ### Fixed
 - **memro-cli and Codex project setups**: Codex reads a project's `.codex/config.toml` only in folders you've trusted in Codex. `doctor` now reports an untrusted folder (and that Codex falls back to the global config), and `connect --project` says to trust the folder.
 

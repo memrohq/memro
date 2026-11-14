@@ -44,6 +44,7 @@ npx memro-cli connect --project
    | Gemini CLI | `~/.gemini/GEMINI.md` | `./GEMINI.md` |
    | Antigravity | `~/.gemini/config/rules/memro.md` (always on) | `./.agents/rules/memro.md` (always on) |
    | Cursor | — (user rules live in Cursor's settings) | `./.cursor/rules/memro.mdc` (always applied) |
+   | VS Code (Copilot) | `~/.copilot/instructions/memro.instructions.md` | `./.github/instructions/memro.instructions.md` |
    | Windsurf | `~/.codeium/windsurf/memories/global_rules.md` | — |
 
    Untick "Teach these tools…" in the list, or pass `--no-instructions`, to
