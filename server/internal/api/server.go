@@ -184,6 +184,10 @@ func (s *Server) Handler() http.Handler {
 	protected("POST /tenant", s.createTenant)
 	protected("GET /tenant/{id}", s.getTenant)
 	protected("GET /tenant/{id}/usage", s.tenantUsage)
+	protected("GET /tenant/{id}/api-keys", s.listTenantKeys)
+	protected("POST /tenant/{id}/api-keys", s.createTenantKey)
+	protected("DELETE /tenant/{id}/api-keys/{key_id}", s.revokeTenantKey)
+	protected("DELETE /end-user", s.deleteEndUser)
 	protected("POST /hooks", s.registerHook)
 	protected("GET /hooks/{event_type}", s.getHooks)
 	protected("DELETE /hooks", s.deleteHook)
@@ -235,6 +239,9 @@ type Agent struct {
 	// role ("signing" or "recovery"), when Via is "signature" (ADR 0013).
 	SigningKey string
 	KeyRole    string
+	// EndUser is the customer's own user ID, when a tenant-wide key acts
+	// for one of its end users (ADR 0025).
+	EndUser string
 }
 
 type ctxKey int
@@ -262,6 +269,12 @@ func (s *Server) requireAgent(next http.HandlerFunc) http.Handler {
 		if status != 0 {
 			httpError(w, status, msg)
 			return
+		}
+		// A customer's backend sends all its end users' requests from a few
+		// addresses (ADR 0025), so a valid tenant key gives back its address hit;
+		// each end user is limited below instead.
+		if agent.EndUser != "" && s.ipLimiter != nil {
+			s.ipLimiter.Refund(s.clientIP(r))
 		}
 		// A recovery key may only manage keys (ADR 0013).
 		if agent.KeyRole == store.KeyRecovery && !keyManagementRoutes[r.Pattern] {
@@ -297,14 +310,31 @@ func (s *Server) authenticate(r *http.Request) (Agent, []byte, int, string) {
 	}
 
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer "+auth.APIKeyPrefix) {
-		id, keyID, err := s.store.AgentForAPIKey(ctx, auth.HashToken(strings.TrimPrefix(h, "Bearer ")))
+		id, keyID, tenantID, err := s.store.AgentForAPIKey(ctx, auth.HashToken(strings.TrimPrefix(h, "Bearer ")))
 		if err != nil {
 			return Agent{}, nil, http.StatusInternalServerError, "Database error"
 		}
-		if id == nil {
+		if keyID == uuid.Nil {
 			return Agent{}, nil, http.StatusUnauthorized, "Invalid or revoked API key"
 		}
-		return Agent{ID: id.ID, UserID: id.UserID, TenantID: id.TenantID, Via: "api_key", KeyID: &keyID}, raw, 0, ""
+		var ext string
+		if id == nil { // tenant-wide key: act as the end user it names (ADR 0025)
+			if ext = r.Header.Get(endUserHeader); !validExternalID(ext) {
+				return Agent{}, nil, http.StatusBadRequest, "Tenant keys must send " + endUserHeader + ": your user's ID (1-128 letters, digits or . _ - : @)"
+			}
+			lookup := s.endUser
+			if r.Pattern == "DELETE /end-user" { // deleting must not create the user first
+				lookup = s.store.EndUser
+			}
+			if id, err = lookup(ctx, tenantID, ext); err != nil {
+				slog.Error("ensure end user", "err", err)
+				return Agent{}, nil, http.StatusInternalServerError, "Database error"
+			}
+			if id == nil {
+				return Agent{}, nil, http.StatusNotFound, "End user not found"
+			}
+		}
+		return Agent{ID: id.ID, UserID: id.UserID, TenantID: id.TenantID, Via: "api_key", KeyID: &keyID, EndUser: ext}, raw, 0, ""
 	}
 
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
@@ -577,6 +607,15 @@ type window struct {
 
 func NewRateLimiter(max int, w time.Duration) *RateLimiter {
 	return &RateLimiter{max: max, window: w, hits: map[string]*window{}}
+}
+
+// Refund takes back one hit counted by Allow.
+func (l *RateLimiter) Refund(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if w, ok := l.hits[key]; ok && w.count > 0 {
+		w.count--
+	}
 }
 
 func (l *RateLimiter) Allow(key string) bool {

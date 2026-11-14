@@ -173,10 +173,20 @@ func (s *Server) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusForbidden, "API keys cannot delete an agent. Sign in to the dashboard, or sign the request with the agent's private key.")
 		return
 	}
+	if !s.removeIdentity(w, r, id) {
+		return
+	}
+	s.audit(r, a, "identity.delete", &id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// removeIdentity deletes an agent with its memories and files, or writes the
+// error and returns false.
+func (s *Server) removeIdentity(w http.ResponseWriter, r *http.Request, id string) bool {
 	if err := s.store.DeleteIdentity(r.Context(), id); err != nil {
 		slog.Error("delete identity", "err", err)
 		httpError(w, http.StatusInternalServerError, "Failed to delete identity")
-		return
+		return false
 	}
 	// Files are not tied to the identity by a foreign key (memories, which
 	// reference them, are gone now); remove them and their bytes on disk so
@@ -191,8 +201,7 @@ func (s *Server) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.engine.Cache().InvalidateAgent(id)
-	s.audit(r, a, "identity.delete", &id)
-	w.WriteHeader(http.StatusNoContent)
+	return true
 }
 
 // --- Memories -----------------------------------------------------------------------

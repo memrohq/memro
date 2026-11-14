@@ -26,6 +26,31 @@ Treat keys like passwords: keep them out of source control and client-side
 code, use one per tool or machine, and revoke any that leak. Keys start with
 `memro_sk_` so secret scanners can find them.
 
+## Tenant keys (one key for all your users)
+
+For a product that gives each of its own users a separate memory. Memro staff
+create a tenant for your company and give you a tenant key (`memro_sk_…`).
+Send it from your backend with your user's ID:
+
+```
+Authorization: Bearer memro_sk_…
+X-Memro-User: u_123
+```
+
+- The first request for a user ID creates that user's memory space. There's no
+  signup step.
+- Each user sees only their own memories. Two companies can use the same user
+  IDs without clashing.
+- IDs are 1–128 characters: letters, digits and `. _ - : @`. Use your
+  internal user ID, not an email address.
+- `DELETE /end-user` (with `X-Memro-User`) deletes that user and everything
+  they stored.
+- A tenant key without `X-Memro-User` gets `400`. Otherwise it has the same
+  limits as an API key.
+
+Never put a tenant key in a browser or mobile app: it can act as any of your
+users. See [ADR 0025](decisions/0025-tenant-keys-and-end-users.md).
+
 ## Signed requests
 
 A self-owned agent signs each request with its ed25519 private key; the
