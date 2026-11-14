@@ -80,6 +80,9 @@ export MEMRO_API_KEY=memro_sk_...   # in your shell profile
 Other tools keep the key in their config file, because apps started from the
 Dock or Start menu don't see your shell's environment.
 
+Claude Code asks once, the first time you run `claude` in the project, before
+it uses a server from a shared `.mcp.json`; approve `memro` there.
+
 ---
 
 ## Commands
