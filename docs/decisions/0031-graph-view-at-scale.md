@@ -45,10 +45,21 @@ So the graph shows a capped view, and a summary when there is more.
    at most a few thousand items, whatever the total. This will be checked
    with a load test of 10 million seeded memories.
 
+## Layout (2026-11-14)
+Louvain runs before the layout and each community starts around its own
+point on a circle, so ForceAtlas2 settles into separate groups. The three
+coloured clusters are named above their centre. On hover or selection only
+people and companies are labelled; memories light up and the side card lists
+them.
+
 ## Known issues
-- The entity extractor (`extract.Entities`) labels some non-names:
+- The entity extractor (`extract.Entities`) tags some non-names:
   sentence-start verbs ("emailed diego ruiz") and topic words ("wants",
   "series"). Search uses it too, so it gets its own change with the search
-  quality tests.
+  quality tests. Until then the graph filters its people and companies
+  itself (2026-11-14): a tag becomes a node only if some memory writes it
+  capitalised mid-sentence, and job titles, departments, funding rounds,
+  months and days are skipped. This works on tags already stored, with no
+  backfill. Names written only in lowercase ("met ana at stripe") drop out.
 - Switching the theme while a node is selected leaves the rest undimmed
   until the next click.

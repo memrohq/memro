@@ -121,7 +121,6 @@ function drawGlow(renderer, canvas, model, palette, focus) {
   const ctx = canvas.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
-  if (!palette.dark) return;
   const halo = (x, y, r, color, a) => {
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
     g.addColorStop(0, alpha(color, a));
@@ -140,8 +139,16 @@ function drawGlow(renderer, canvas, model, palette, focus) {
     if (!n) continue;
     const cx = sx / n, cy = sy / n;
     const spread = Math.sqrt(pts.reduce((t, p) => t + (p.x - cx) ** 2 + (p.y - cy) ** 2, 0) / n);
-    halo(cx, cy, Math.max(60, spread * 1.6), c.color, 0.1);
+    if (palette.dark) halo(cx, cy, Math.max(60, spread * 1.6), c.color, 0.1);
+    // The cluster's name above it; hidden while something is in focus.
+    if (!focus && c.hub) {
+      ctx.font = '600 13px "Geist", ui-sans-serif, system-ui, sans-serif';
+      ctx.textAlign = "center";
+      ctx.fillStyle = alpha(palette.muted, 0.9);
+      ctx.fillText(`${c.name} · ${c.size.toLocaleString()}`, cx, Math.max(16, cy - spread * 1.2));
+    }
   }
+  if (!palette.dark) return;
   model.forEachNode((id, a) => {
     if (!(a.forceLabel || id === focus)) return;
     const p = renderer.graphToViewport(a);
@@ -291,7 +298,16 @@ export default function Graph({ apiBase, auth, onOpenMemories, path = "/memory/g
       louvain.assign(g, { nodeCommunityAttribute: "community" });
       const bySize = {};
       g.forEachNode((id, a) => { (bySize[a.community] ||= []).push(id); });
-      Object.entries(bySize).sort((x, y) => y[1].length - x[1].length).slice(0, 3).forEach(([community, ids], i) => {
+      const ranked = Object.entries(bySize).sort((x, y) => y[1].length - x[1].length);
+      // Start each community around its own point on a circle, biggest first,
+      // so the layout settles into visible groups instead of one round blob.
+      const ring = Math.sqrt(g.order) * 12;
+      ranked.forEach(([, ids], i) => {
+        const angle = (2 * Math.PI * i) / ranked.length, spread = Math.sqrt(ids.length) * 3;
+        const cx = ranked.length > 1 ? Math.cos(angle) * ring : 0, cy = ranked.length > 1 ? Math.sin(angle) * ring : 0;
+        for (const id of ids) g.mergeNodeAttributes(id, { x: cx + (Math.random() - 0.5) * spread, y: cy + (Math.random() - 0.5) * spread });
+      });
+      ranked.slice(0, 3).forEach(([community, ids], i) => {
         const hub = ids.filter((id) => g.getNodeAttribute(id, "kind") === "entity").sort((x, y) => g.degree(y) - g.degree(x))[0];
         clusters.push({ community: Number(community), color: palette.clusters[i], size: ids.length,
           name: hub ? g.getNodeAttribute(hub, "label") : `Group ${i + 1}`, hub });
@@ -340,7 +356,10 @@ export default function Graph({ apiBase, auth, onOpenMemories, path = "/memory/g
         const rings = ringsRef.current;
         if (rings) {
           if (id === rings.focus) return { ...base, color: colorRef.current === "calm" ? palette.highlight : base.color, forceLabel: true, zIndex: 4, highlighted: true };
-          if (rings.near.has(id)) return { ...base, color: colorRef.current === "calm" ? palette.highlight : base.color, forceLabel: true, zIndex: 3 };
+          // Neighbouring memories can be dozens: they light up, and only people
+          // and companies are labelled (the side card lists the memories).
+          if (rings.near.has(id)) return { ...base, color: colorRef.current === "calm" ? palette.highlight : base.color,
+            forceLabel: attrs.kind === "entity", label: attrs.kind === "entity" ? attrs.label : "", zIndex: 3 };
           // The blast radius' second ring: present, but clearly behind the first.
           if (rings.far.has(id)) return { ...base, color: mix(base.color, palette.bg, 0.55), label: "", zIndex: 2 };
           return { ...base, color: mix(base.color, palette.bg, 0.85), label: "", zIndex: 0 };

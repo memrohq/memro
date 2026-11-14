@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 
@@ -161,22 +162,28 @@ func buildGraphView(mems []graphViewMemory, rels []graphViewRelation) *GraphView
 		g.Links = append(g.Links, GraphViewLink{Source: r.From.String(), Target: r.To.String(), Type: r.Type})
 	}
 
-	// Entities shared by at least two memories, most mentioned first.
+	// Entities shared by at least two memories, most mentioned first. Only
+	// names count: a tag must appear capitalised mid-sentence in at least one
+	// memory, so topic words ("email") and sentence starts ("Searching") drop out.
 	mentions := map[string][]string{}
+	named := map[string]bool{}
 	for _, m := range mems {
 		seen := map[string]bool{}
 		for _, t := range m.Tags {
 			t = strings.ToLower(strings.TrimSpace(t))
-			if t == "" || seen[t] {
+			if t == "" || seen[t] || strings.Contains(t, ":") || notGraphNames[t] {
 				continue
 			}
 			seen[t] = true
 			mentions[t] = append(mentions[t], m.ID.String())
+			if !named[t] {
+				named[t] = nameInText(m.Content, t)
+			}
 		}
 	}
 	var entities []string
 	for t, ms := range mentions {
-		if len(ms) >= 2 {
+		if len(ms) >= 2 && named[t] {
 			entities = append(entities, t)
 		}
 	}
@@ -222,6 +229,55 @@ func buildGraphView(mems []graphViewMemory, rels []graphViewRelation) *GraphView
 		return a.Target < b.Target
 	})
 	return g
+}
+
+// Capitalised mid-sentence but not names: job titles, departments, funding
+// rounds, months and days.
+var notGraphNames = map[string]bool{}
+
+func init() {
+	for _, w := range strings.Fields(`ceo cto cfo coo cmo cpo cro ciso vp svp evp head chief director manager
+		lead founder cofounder co-founder president engineer engineering partnerships sales marketing product
+		design operations finance legal hr series seed january february march april may june july august
+		september october november december monday tuesday wednesday thursday friday saturday sunday`) {
+		notGraphNames[w] = true
+	}
+}
+
+// nameInText reports whether tag (lowercase) appears in content as a whole
+// word, not at the start of a sentence, and written with a capital or a dot
+// (Stripe, Ana Lima, GCP, memro.co).
+func nameInText(content, tag string) bool {
+	lower := strings.ToLower(content)
+	if len(lower) != len(content) {
+		return false // shortcut: case-folding changed byte offsets (rare scripts); such tags stay hidden
+	}
+	isWord := func(b byte) bool {
+		return b == '_' || b >= 0x80 || unicode.IsLetter(rune(b)) || unicode.IsDigit(rune(b))
+	}
+	for from := 0; ; {
+		i := strings.Index(lower[from:], tag)
+		if i < 0 {
+			return false
+		}
+		i += from
+		from = i + 1
+		end := i + len(tag)
+		if (i > 0 && isWord(lower[i-1])) || (end < len(lower) && isWord(lower[end])) {
+			continue
+		}
+		word := content[i:end]
+		if word == lower[i:end] && !strings.Contains(tag, ".") {
+			continue // written in lowercase: a topic, not a name
+		}
+		j := i - 1
+		for j >= 0 && strings.IndexByte(" \t\"'([", content[j]) >= 0 {
+			j--
+		}
+		if j >= 0 && strings.IndexByte(".!?:;\n-*#>", content[j]) < 0 {
+			return true
+		}
+	}
 }
 
 func truncateRunes(s string, n int) string {
