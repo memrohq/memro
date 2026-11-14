@@ -16,7 +16,7 @@ export const BLOCK = `${START}
 
 Memro is my long-term memory across tools and sessions (MCP server \`memro\`). Use it without being asked:
 - At the start of a task, call \`recall\` with a short query about it and use what comes back.
-- Before answering about earlier work ("what did we decide about X?"), call \`recall\` first.
+- Before answering about earlier work, decisions, rules or preferences ("what did we decide about X?", "what's our rule for Y?"), call \`recall\` first, before searching files: Memro holds what was decided, and files can be incomplete.
 - Call \`remember\` with one short, self-contained sentence when something will matter in a later session: a decision and why, a fix or workflow worth reusing, a preference or correction from me, or an important project constraint.
 
 Types: \`semantic\` for facts ("Memro uses PostgreSQL"), \`profile\` for my preferences and working style ("User prefers reviewing migrations before deploys"), \`procedural\` for how-tos ("To run integration tests, start PostgreSQL first"), \`episodic\` for significant events ("The billing isolation tests passed"). If unsure, leave the type out and Memro chooses.
@@ -32,7 +32,7 @@ export const PROJECT_BLOCK = `${START}
 
 Memro is the long-term memory for this project (MCP server \`memro\`). Use it without being asked:
 - At the start of a task, call \`recall\` with a short query about it and use what comes back.
-- Before answering about earlier work ("what did we decide about X?"), call \`recall\` first.
+- Before answering about earlier work, decisions, rules or preferences ("what did we decide about X?", "what's our rule for Y?"), call \`recall\` first, before searching files: Memro holds what was decided, and files can be incomplete.
 - Call \`remember\` with one short, self-contained sentence when something will matter in a later session: a decision and why, a fix or workflow worth reusing, a preference or correction from the user, or an important constraint of this project. Name the project in the sentence.
 
 Types: \`semantic\` for facts ("Memro uses PostgreSQL"), \`profile\` for the user's preferences and working style ("User prefers reviewing migrations before deploys"), \`procedural\` for how-tos ("To run integration tests, start PostgreSQL first"), \`episodic\` for significant events ("The billing isolation tests passed"). If unsure, leave the type out and Memro chooses.

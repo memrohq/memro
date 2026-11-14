@@ -51,8 +51,9 @@ Memro is the user's long-term memory, shared across their AI tools and sessions.
 Use it without being asked:
 - At the start of a task or conversation, call `recall` with a short query about \
 the task (project, topic, people involved) and use what comes back.
-- Before answering questions about earlier work ("what did we decide about X?"), \
-`recall` first.
+- Before answering about earlier work, decisions, rules or preferences ("what did \
+we decide about X?", "what's our rule for Y?"), call `recall` first, before \
+searching files: Memro holds what was decided, and files can be incomplete.
 - Call `remember` with one short, self-contained sentence when something will \
 matter in a later session: a decision and why, a fix or workflow worth reusing, \
 a preference or correction from the user, or an important project constraint.
