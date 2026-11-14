@@ -12,7 +12,10 @@ and every release and package raises only the last number of its version (see RE
 - **memro-cli `--env-key`**: Claude Code and Codex read the key from `$MEMRO_API_KEY` instead of storing it, so project config files can be committed.
 - **memro-cli Cursor rule**: project setup adds `.cursor/rules/memro.mdc` (always applied).
 
-Packages: `memro-cli` 0.1.7.
+### Changed
+- Package author and the contact addresses in the docs are now subal@memro.co.
+
+Packages: `memro-cli` 0.1.7, `memro` 0.2.1, `memro-mcp` 0.2.2, `@memro/sdk` 0.2.1.
 
 ## [v0.1.1] - 2026-11-14
 

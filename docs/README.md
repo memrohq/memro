@@ -28,4 +28,4 @@ it by meaning, keyword or time, and reason over how memories connect.
 | Dashboard | `https://app.memro.co` | `http://localhost:5173` |
 
 Questions or problems: [open an issue](https://github.com/memrohq/memro/issues)
-or email support@memro.co. Security reports: see [SECURITY.md](../SECURITY.md).
+or email subal@memro.co. Security reports: see [SECURITY.md](../SECURITY.md).

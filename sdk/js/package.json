@@ -1,6 +1,6 @@
 {
   "name": "@memro/sdk",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Memro — verified memory infrastructure for AI agents",
   "main": "dist/cjs/index.js",
   "types": "dist/esm/index.d.ts",
@@ -24,7 +24,7 @@
     "mcp",
     "llm"
   ],
-  "author": "Memro <sdk@memro.co>",
+  "author": "Memro <subal@memro.co>",
   "license": "LicenseRef-PolyForm-Noncommercial-1.0.0",
   "repository": {
     "type": "git",

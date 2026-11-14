@@ -2,14 +2,6 @@
 
 ## Give your coding tools a memory (1 minute)
 
-> **Until the SDKs are published** (`@memro/sdk` on npm, `memro` on PyPI),
-> install them from source:
-> ```bash
-> pip install "git+https://github.com/memrohq/memro#subdirectory=sdk/python"
-> git clone https://github.com/memrohq/memro && (cd memro/sdk/js && npm install && npm run build) && npm install ./memro/sdk/js
-> ```
-> The CLI (`npx memro-cli`) is published, and the Go SDK installs from GitHub as shown below.
-
 ```bash
 npx memro-cli connect
 ```
