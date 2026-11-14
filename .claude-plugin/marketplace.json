@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "memro",
+  "description": "Memro: long-term memory for AI agents",
+  "owner": {
+    "name": "Memro",
+    "email": "subal@memro.co",
+    "url": "https://memro.co"
+  },
+  "plugins": [
+    {
+      "name": "memro",
+      "description": "Long-term memory for Claude Code, shared with your other AI tools. Recalls the project's decisions at the start of every session.",
+      "source": "./integrations/claude-code",
+      "category": "productivity"
+    }
+  ]
+}

@@ -8,6 +8,9 @@ and every release and package raises only the last number of its version (see RE
 ## [Unreleased]
 
 ### Added
+- **Claude Code plugin** (`integrations/claude-code`, marketplace `memrohq/memro`): the Memro MCP server, with the API key asked at install and kept in the keychain, plus a SessionStart hook that recalls the project's memories and adds the Memro note at the start of every session.
+
+### Added
 - **memro-cli `doctor`**: for each tool, the Memro config it uses (project over global), where its key comes from, whether the server accepts it and lists its tools, and whether the tool has the Memro note. Exits 1 when a tool needs attention.
 - **memro-cli `--env-key`**: Claude Code and Codex read the key from `$MEMRO_API_KEY` instead of storing it, so project config files can be committed.
 - **memro-cli Cursor rule**: project setup adds `.cursor/rules/memro.mdc` (always applied).
