@@ -1,0 +1,35 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "memro",
+  "displayName": "Memro",
+  "version": "0.1.0",
+  "description": "Long-term memory for Claude Code, shared with your other AI tools. Recalls the project's decisions and preferences at the start of every session, and remembers new ones.",
+  "author": {
+    "name": "Memro",
+    "email": "subal@memro.co",
+    "url": "https://memro.co"
+  },
+  "homepage": "https://memro.co/integrations/claude-code-memory.html",
+  "repository": "https://github.com/memrohq/memro",
+  "license": "LicenseRef-PolyForm-Noncommercial-1.0.0",
+  "icon": "./.claude-plugin/icon.png",
+  "privacyPolicyUrl": "https://memro.co/privacy.html",
+  "termsOfServiceUrl": "https://memro.co/terms.html",
+  "supportUrl": "https://github.com/memrohq/memro/issues",
+  "keywords": [
+    "memory",
+    "mcp",
+    "context",
+    "agents",
+    "recall"
+  ],
+  "userConfig": {
+    "api_key": {
+      "type": "string",
+      "title": "Memro API key",
+      "description": "Your memro_sk_\u2026 key. Create one in the Memro dashboard (app.memro.co \u2192 API keys), or run `npx memro-cli connect` and copy it from ~/.memro/credentials.json.",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}

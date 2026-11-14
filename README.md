@@ -24,6 +24,14 @@ Give your AI agents persistent memory across sessions: agent identity, memory st
 
 ---
 
+## Claude Code plugin
+
+```
+/plugin install memro --marketplace memrohq/memro
+```
+
+Adds Memro's MCP server and recalls the project's memory at the start of every session. See [integrations/claude-code](integrations/claude-code/).
+
 ## Quickstart
 
 ### Option A: Memro Cloud with Claude Code, Cursor, or Codex (< 10 lines)
