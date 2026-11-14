@@ -56,6 +56,11 @@ type Server struct {
 	meeLimiters     map[string]*RateLimiter
 	promHandler     http.Handler
 
+	lookupTXT func(ctx context.Context, name string) ([]string, error)
+
+	suspMu sync.Mutex
+	susp   map[string]suspension // suspended accounts, see suspended()
+
 	v1LogMu  sync.Mutex
 	v1Logged map[string]time.Time
 }
@@ -77,6 +82,10 @@ type Deps struct {
 	// Connectors syncs Slack and GitHub into memory. When nil, NewServer
 	// builds one from Config whose background jobs are not started.
 	Connectors *connectors.Manager
+
+	// LookupTXT resolves DNS TXT records for domain verification; nil uses
+	// the system resolver.
+	LookupTXT func(ctx context.Context, name string) ([]string, error)
 }
 
 // StoreUsageMeter records usage in the tenant_usage table, and per agent
@@ -114,7 +123,7 @@ func NewServer(d Deps) *Server {
 		connectors: conns,
 		cfg:        d.Config, store: d.Store, engine: d.Engine, embed: d.Embed, indexer: d.Indexer,
 		files: d.Files, email: d.Email, replay: auth.NewReplayCache(),
-		meter: usage, quota: quota, extra: d.Routes,
+		meter: usage, quota: quota, extra: d.Routes, lookupTXT: d.LookupTXT,
 		ipLimiter:       NewRateLimiter(d.Config.RateLimitMax, d.Config.RateLimitWindow),
 		agentLimiter:    NewRateLimiter(d.Config.RateLimitMax, d.Config.RateLimitWindow),
 		otpLimiter:      NewRateLimiter(otpCodesPerHour, time.Hour),
@@ -126,6 +135,9 @@ func NewServer(d Deps) *Server {
 			"/mee/resolve": NewRateLimiter(10, time.Minute),
 		},
 		promHandler: promhttp.Handler(),
+	}
+	if s.lookupTXT == nil {
+		s.lookupTXT = net.DefaultResolver.LookupTXT
 	}
 	if d.Config.MetricsToken == "" {
 		slog.Warn("METRICS_TOKEN is not set; /metrics is open without authentication")
@@ -193,6 +205,7 @@ func (s *Server) Handler() http.Handler {
 	protected("DELETE /tenant/{id}/api-keys/{key_id}", s.revokeTenantKey)
 	protected("DELETE /end-user", s.deleteEndUser)
 	protected("GET /tenant/{id}/usage/members", s.memberUsage)
+	protected("GET /tenant/{id}/end-users/{agent_id}/{what}", s.viewEndUser)
 	protected("GET /orgs", s.listOrgs)
 	protected("GET /tenant/{id}/members", s.listMembers)
 	protected("PATCH /tenant/{id}/members/{user_id}", s.changeMember)
@@ -201,6 +214,32 @@ func (s *Server) Handler() http.Handler {
 	protected("GET /tenant/{id}/invites", s.listInvites)
 	protected("DELETE /tenant/{id}/invites/{invite_id}", s.cancelInvite)
 	protected("POST /invites/accept", s.acceptInvite)
+	protected("GET /orgs/discover", s.discoverOrgs)
+	protected("POST /orgs", s.createOrg)
+	protected("POST /orgs/{id}/join-requests", s.requestToJoin)
+	protected("PATCH /tenant/{id}", s.updateOrg)
+	protected("GET /tenant/{id}/join-requests", s.listJoinRequests)
+	protected("POST /tenant/{id}/join-requests/{request_id}", s.decideJoinRequest)
+	protected("DELETE /tenant/{id}/join-requests/{request_id}", s.decideJoinRequest)
+	protected("GET /tenant/{id}/domains", s.listDomains)
+	protected("POST /tenant/{id}/domains", s.claimDomain)
+	protected("POST /tenant/{id}/domains/{domain}/verify", s.verifyDomain)
+	protected("DELETE /tenant/{id}/domains/{domain}", s.deleteDomain)
+	protected("GET /tenant/{id}/limits", s.getLimits)
+	protected("PUT /tenant/{id}/limits", s.setLimits)
+	protected("DELETE /tenant/{id}/limits", s.setLimits)
+	protected("GET /admin/tenants", s.adminTenants)
+	protected("GET /admin/overview", s.adminOverview)
+	protected("GET /admin/users", s.adminUsers)
+	protected("PUT /admin/staff/{user_id}", s.setStaff)
+	protected("DELETE /admin/staff/{user_id}", s.setStaff)
+	protected("GET /admin/users/{id}", s.adminUser)
+	protected("POST /admin/users/{id}/{action}", s.adminUserAction)
+	protected("DELETE /admin/users/{id}", s.adminUserAction)
+	protected("GET /admin/tenants/{id}", s.adminTenant)
+	protected("POST /admin/tenants/{id}/{action}", s.adminTenantAction)
+	protected("DELETE /admin/tenants/{id}", s.adminTenantAction)
+	protected("GET /admin/activity", s.adminActivity)
 	protected("POST /hooks", s.registerHook)
 	protected("GET /hooks/{event_type}", s.getHooks)
 	protected("DELETE /hooks", s.deleteHook)
@@ -288,6 +327,16 @@ func (s *Server) requireAgent(next http.HandlerFunc) http.Handler {
 		// each end user is limited below instead.
 		if agent.EndUser != "" && s.ipLimiter != nil {
 			s.ipLimiter.Refund(s.clientIP(r))
+		}
+		// A suspended person or organisation can do nothing (ADR 0029).
+		if is, reason := s.suspended(r.Context(), agent); is {
+			msg := "This account is suspended. Contact Memro."
+			if reason != "" {
+				msg = "This account is suspended (" + reason + "). Contact Memro."
+			}
+			w.Header().Set("Memro-Account", "suspended")
+			httpError(w, http.StatusForbidden, msg)
+			return
 		}
 		// A recovery key may only manage keys (ADR 0013).
 		if agent.KeyRole == store.KeyRecovery && !keyManagementRoutes[r.Pattern] {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -184,15 +185,23 @@ func (s *Server) deleteIdentity(w http.ResponseWriter, r *http.Request) {
 // removeIdentity deletes an agent with its memories and files, or writes the
 // error and returns false.
 func (s *Server) removeIdentity(w http.ResponseWriter, r *http.Request, id string) bool {
-	if err := s.store.DeleteIdentity(r.Context(), id); err != nil {
+	if err := s.deleteAgentData(r.Context(), id); err != nil {
 		slog.Error("delete identity", "err", err)
 		httpError(w, http.StatusInternalServerError, "Failed to delete identity")
 		return false
 	}
+	return true
+}
+
+// deleteAgentData deletes an agent with its memories, files and cache.
+func (s *Server) deleteAgentData(ctx context.Context, id string) error {
+	if err := s.store.DeleteIdentity(ctx, id); err != nil {
+		return err
+	}
 	// Files are not tied to the identity by a foreign key (memories, which
 	// reference them, are gone now); remove them and their bytes on disk so
 	// /assets stops serving them.
-	paths, err := s.store.DeleteFilesForAgent(r.Context(), id)
+	paths, err := s.store.DeleteFilesForAgent(ctx, id)
 	if err != nil {
 		slog.Error("delete files of deleted identity", "agent_id", id, "err", err)
 	}
@@ -202,7 +211,7 @@ func (s *Server) removeIdentity(w http.ResponseWriter, r *http.Request, id strin
 		}
 	}
 	s.engine.Cache().InvalidateAgent(id)
-	return true
+	return nil
 }
 
 // --- Memories -----------------------------------------------------------------------
@@ -482,6 +491,11 @@ func (s *Server) allowWrite(w http.ResponseWriter, r *http.Request, a Agent, n i
 		httpError(w, http.StatusInternalServerError, "Failed to store memory")
 		return false
 	}
+	// An organisation's plan replaces the unclaimed cap and the quota policy
+	// (ADR 0028): end users of a tenant key are never claimed.
+	if ok, set := s.allowWriteUnderPlan(w, r, a); set {
+		return ok
+	}
 	if max := s.cfg.UnclaimedMaxMemories; a.UserID == nil && max > 0 && current+n > max && !s.exemptFromUnclaimedCaps(r, a) {
 		httpError(w, http.StatusForbidden, fmt.Sprintf("Unclaimed agents can store up to %d memories. Ask your person to claim this agent to lift the limit.", max)+s.unclaimedCapHint(a))
 		return false
@@ -518,6 +532,9 @@ func (s *Server) unclaimedCapHint(a Agent) string {
 // the caller may use amount of metric. It writes the error response (403
 // with the policy's message) and returns false when not.
 func (s *Server) gate(w http.ResponseWriter, r *http.Request, a Agent, metric string, amount int64) bool {
+	if ok, set := s.gatePlan(w, r, a, metric, amount); set {
+		return ok
+	}
 	if max := s.cfg.UnclaimedMaxFileBytes; metric == extension.MetricIngestBytes && a.UserID == nil && max > 0 && amount > 0 {
 		used, err := s.store.FileBytes(r.Context(), a.ID)
 		if err != nil {
@@ -666,7 +683,7 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var warning *string
-	limit := s.quota.SoftLimit(ctx, a.TenantID, a.ID)
+	limit := s.memoryLimitFor(r, a)
 	if limit > 0 && nodes > limit*8/10 {
 		warning = strPtr(fmt.Sprintf("Approaching memory soft cap (%d). Consider pruning.", limit))
 	}
@@ -746,6 +763,14 @@ func (s *Server) createTenant(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "owner_email is not a valid email address")
 		return
 	}
+	if req.Domain != nil {
+		d := normDomain(*req.Domain)
+		if d == "" {
+			httpError(w, http.StatusBadRequest, "domain must be a company domain, e.g. example.com")
+			return
+		}
+		req.Domain = &d
+	}
 	now := time.Now().UTC()
 	t := &domain.Tenant{ID: uuid.New(), Name: req.Name, Domain: req.Domain, CreatedAt: now, UpdatedAt: now}
 	if err := s.store.CreateTenant(r.Context(), t); err != nil {
@@ -754,6 +779,14 @@ func (s *Server) createTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metrics.TenantsCreated.Inc()
+	// Staff checked the domain themselves (ADR 0027).
+	if req.Domain != nil {
+		if err := s.store.AddVerifiedDomain(r.Context(), t.ID, *req.Domain); err != nil {
+			slog.Error("tenant domain", "err", err)
+			httpError(w, http.StatusConflict, "Tenant created, but its domain is verified by another organisation")
+			return
+		}
+	}
 	if owner == "" {
 		writeJSON(w, http.StatusOK, toTenantResponse(t))
 		return

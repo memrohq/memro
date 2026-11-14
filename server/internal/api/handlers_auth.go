@@ -131,6 +131,15 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Only after a correct code, so suspension doesn't reveal who has an account.
+	if is, reason, err := s.store.Suspended(ctx, &user.ID, domain.DefaultTenantID); err == nil && is {
+		msg := "This account is suspended. Contact Memro."
+		if reason != "" {
+			msg = "This account is suspended (" + reason + "). Contact Memro."
+		}
+		httpError(w, http.StatusForbidden, msg)
+		return
+	}
 	token, hash, err := auth.NewSessionToken()
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, "Failed to create session")

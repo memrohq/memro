@@ -134,6 +134,7 @@ func Run(ctx context.Context, cfg config.Config, opts ...Option) error {
 		Email: email.New(cfg.EmailHost, cfg.EmailPort, cfg.EmailUser, cfg.EmailPass, cfg.EmailFrom),
 		Usage: usage, Quota: quota, Routes: o.routes, Connectors: conns,
 	})
+	go srv.RunHourlyJobs(ctx)
 	httpServer := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),
 		Handler:           srv.Handler(),

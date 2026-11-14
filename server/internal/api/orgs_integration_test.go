@@ -159,3 +159,65 @@ func TestOrganisationMembersRolesAndUsage(t *testing.T) {
 	code, body = e.do(nil, "", "DELETE", "/tenant/"+tid+"/members/"+who.UserID, nil, bearer(viewer))
 	e.must(204, code, body, "viewer leaves")
 }
+
+// ADR 0030: owners and admins read their end users' memories and graph,
+// read-only and logged; other members and other organisations can't.
+func TestOwnersReadEndUsersMemories(t *testing.T) {
+	e := setup(t)
+	_, staff := e.signIn("staff")
+	e.makePlatformAdmin(staff)
+	newOrg := func(name string) (tid, key, owner string) {
+		ownerEmail, owner := e.signIn("owner")
+		code, body := e.do(nil, "", "POST", "/tenant", j(map[string]string{"name": name, "owner_email": ownerEmail}), bearer(staff))
+		e.must(200, code, body, "create tenant")
+		var c struct {
+			Tenant      struct{ ID string }
+			OwnerInvite json.RawMessage `json:"owner_invite"`
+		}
+		_ = json.Unmarshal(body, &c)
+		code, body = e.do(nil, "", "POST", "/invites/accept", j(map[string]string{"token": inviteToken(t, c.OwnerInvite)}), bearer(owner))
+		e.must(200, code, body, "owner accepts")
+		code, body = e.do(nil, "", "POST", "/tenant/"+c.Tenant.ID+"/api-keys", j(map[string]string{"name": "server"}), bearer(owner))
+		e.must(200, code, body, "key")
+		var k struct{ Key string }
+		_ = json.Unmarshal(body, &k)
+		return c.Tenant.ID, k.Key, owner
+	}
+	tid, key, owner := newOrg("Readable Co")
+	_, otherKey, _ := newOrg("Other Co")
+	agentOf := func(key, user string) string {
+		code, body := e.do(nil, "", "POST", "/memory", j(map[string]string{"content": "Prefers short intro emails"}), asUser(key, user))
+		e.must(200, code, body, "remember")
+		var m struct {
+			AgentID string `json:"agent_id"`
+		}
+		_ = json.Unmarshal(body, &m)
+		return m.AgentID
+	}
+	mine, theirs := agentOf(key, "u_1"), agentOf(otherKey, "u_1")
+	base := "/tenant/" + tid + "/end-users/"
+
+	code, body := e.do(nil, "", "GET", base+mine+"/memories", nil, bearer(owner))
+	e.must(200, code, body, "owner reads memories")
+	if !strings.Contains(string(body), "Prefers short intro emails") {
+		t.Fatalf("memories = %s", body)
+	}
+	code, body = e.do(nil, "", "GET", base+mine+"/graph", nil, bearer(owner))
+	e.must(200, code, body, "owner reads graph")
+	code, body = e.do(nil, "", "GET", base+theirs+"/memories", nil, bearer(owner))
+	e.must(404, code, body, "another organisation's user")
+
+	viewerEmail, viewer := e.signIn("viewer")
+	code, body = e.do(nil, "", "POST", "/tenant/"+tid+"/invites", j(map[string]string{"email": viewerEmail, "role": "viewer"}), bearer(owner))
+	e.must(201, code, body, "invite viewer")
+	code, body = e.do(nil, "", "POST", "/invites/accept", j(map[string]string{"token": inviteToken(t, body)}), bearer(viewer))
+	e.must(200, code, body, "viewer accepts")
+	code, body = e.do(nil, "", "GET", base+mine+"/memories", nil, bearer(viewer))
+	e.must(403, code, body, "viewer reads memories")
+
+	code, body = e.do(nil, "", "GET", "/admin/tenants/"+tid, nil, bearer(staff))
+	e.must(200, code, body, "org audit")
+	if !strings.Contains(string(body), "end_user.memories.view") || !strings.Contains(string(body), "end_user.graph.view") {
+		t.Fatalf("views not audited: %s", body)
+	}
+}

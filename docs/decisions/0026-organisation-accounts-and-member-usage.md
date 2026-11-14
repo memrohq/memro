@@ -1,5 +1,5 @@
 # 0026. Organisation Accounts and Usage per End User
-Date: 2026-11-14 · Status: Accepted · Builds on 0025
+Date: 2026-11-14 · Status: Accepted, partly changed by 0030 (owners and admins may read users' memories) · Builds on 0025
 
 ## Context
 B2B customers (first: Vaultnel) need three things ADR 0025 left out:

@@ -1077,9 +1077,9 @@ type cachedResponse struct {
 const (
 	resultCacheTTL = 5 * time.Minute
 	resultCacheMax = 1000
-	// A graph is up to GraphViewMaxLimit memories plus entities, so far fewer
-	// are kept than search results.
-	graphCacheMax = 200
+	// A graph is up to GraphViewMaxLimit memories (about 1.75 MB at 5,000) plus
+	// entities, so far fewer are kept than search results: at most ~90 MB.
+	graphCacheMax = 50
 )
 
 func NewResultCache() *ResultCache {

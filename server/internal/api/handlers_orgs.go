@@ -225,6 +225,9 @@ func (s *Server) inviteMember(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusForbidden, "Only an owner can invite owners")
 		return
 	}
+	if !s.seatsLeft(w, r, tid) {
+		return
+	}
 	res, err := s.createInvite(r, tid, email, req.Role)
 	if err != nil {
 		slog.Error("create invite", "err", err)

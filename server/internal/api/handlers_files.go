@@ -257,6 +257,9 @@ var imageExt = map[string]string{"image/png": "png", "image/gif": "gif", "image/
 // POST /upload/image — describe an image with vision and store it as a memory.
 func (s *Server) uploadImage(w http.ResponseWriter, r *http.Request) {
 	a := agentFrom(r)
+	if !s.allowImages(w, r, a) {
+		return
+	}
 	data, h, _, err := formFile(r, "image")
 	if err != nil {
 		httpError(w, http.StatusBadRequest, err.Error())

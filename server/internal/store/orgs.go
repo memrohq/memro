@@ -246,3 +246,15 @@ func (s *Store) UserEmail(ctx context.Context, userID uuid.UUID) (string, error)
 	}
 	return email, err
 }
+
+// EndUserOf returns the customer's ID for one of a tenant's end users, or ""
+// when agentID isn't an end user of that tenant (ADR 0030).
+func (s *Store) EndUserOf(ctx context.Context, tenantID uuid.UUID, agentID string) (string, error) {
+	var ext string
+	err := s.Pool.QueryRow(ctx, `SELECT external_id FROM agent_identities
+		WHERE id = $1 AND tenant_id = $2 AND external_id IS NOT NULL`, agentID, tenantID).Scan(&ext)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return ext, err
+}
