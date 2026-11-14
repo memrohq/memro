@@ -5,7 +5,7 @@ Give your AI agents persistent memory across sessions: agent identity, memory st
 <p align="center">
   <a href="https://memro.co/#graph"><img src="docs/assets/memro-graph.gif" width="720" alt="The Memro dashboard's memory graph: a million memories, linked by the people, companies and conversations in them"></a>
   <br/>
-  <sub>The dashboard's memory graph over a million stored memories. <a href="https://memro.co/#graph">Watch the tour with sound</a>.</sub>
+  <sub>The dashboard's memory graph on an account with a million memories; it draws the newest 5,000 at most at a time. <a href="https://memro.co/#graph">Watch the tour with sound</a>.</sub>
 </p>
 
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](LICENSE)
