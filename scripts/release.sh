@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Cut the next release. The version is the newest "## [vX.Y.Z]" section in
 # CHANGELOG.md; it must be the previous release with only the last number
-# raised by one, and match the SDK and MCP package versions. Checks main, then
-# pushes the tag, which starts .github/workflows/release.yml. See RELEASING.md.
+# raised by one. Checks main, then pushes the tag, which starts .github/workflows/release.yml. See RELEASING.md.
 #   scripts/release.sh
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"

@@ -14,6 +14,9 @@ ingest, better handling of facts that change, and multi-tool coordination.
 The first tagged release: Docker images, Go module tags and the GitHub
 release are now produced from the tag.
 
+Packages: `memro` 0.2.0, `memro-mcp` 0.2.1, `@memro/sdk` 0.2.0, `memro-cli`
+0.1.6, Go SDK `sdk/go/v0.1.1`.
+
 ### Added
 - **Organisations**: organisation accounts with verified work-email domains, join requests, plans, trials, limits, usage per member, account suspension and a staff console (ADRs 0026–0030). [#50](https://github.com/memrohq/memro/pull/50), [#51](https://github.com/memrohq/memro/pull/51)
 - **Tenant keys**: one server key per business customer, with each of their end users isolated. The JS SDK can name and delete an end user. [#49](https://github.com/memrohq/memro/pull/49)
