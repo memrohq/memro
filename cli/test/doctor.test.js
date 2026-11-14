@@ -65,8 +65,14 @@ test("the project config wins over the global one, and its key is what gets chec
   assert.equal(globalRow.tools, 25);
 });
 
+const trustProject = () => {
+  fs.mkdirSync(path.dirname(codex.file("user")), { recursive: true });
+  fs.writeFileSync(codex.file("user"), `[projects.${JSON.stringify(PROJECT)}]\ntrust_level = "trusted"\n`);
+};
+
 test("--env-key setups: a missing variable is reported before asking the server", async () => {
   codex.add({ mcpUrl: URL_, apiKey: GOOD, envKey: true }, { scope: "project", cwd: PROJECT });
+  trustProject();
   let asked = false;
   const [missing] = await diagnose([codex], { cwd: PROJECT, inProject: true, env: {}, check: async () => { asked = true; return {}; } });
   assert.equal(missing.problem, "$MEMRO_API_KEY is not set");
@@ -113,4 +119,25 @@ test("tools without Memro are listed only when installed; one server check per k
   codex.add({ mcpUrl: URL_, apiKey: GOOD }, { scope: "user" });
   await diagnose([claude, codex], { cwd: HOME, inProject: false, check: counting });
   assert.equal(calls, 1);
+});
+
+test("Codex: a project config in an untrusted folder is reported as ignored", async () => {
+  codex.add({ mcpUrl: URL_, apiKey: GOOD }, { scope: "project", cwd: PROJECT });
+  let [row] = await diagnose([codex], { cwd: PROJECT, inProject: true, check });
+  assert.equal(row.scope, "project");
+  assert.match(row.problem, /ignores \.\/\.codex\/config\.toml until you open Codex in this folder and trust it/);
+
+  // With a global config too, Codex falls back to it: that's what gets checked.
+  fs.mkdirSync(path.dirname(codex.file("user")), { recursive: true });
+  codex.add({ mcpUrl: URL_, apiKey: GOOD }, { scope: "user" });
+  [row] = await diagnose([codex], { cwd: PROJECT, inProject: true, check });
+  assert.equal(row.scope, "user");
+  assert.equal(row.tools, 25);
+  assert.match(row.problem, /^uses the global config: Codex ignores/);
+
+  // Trusted: the project config is used.
+  fs.appendFileSync(codex.file("user"), `\n[projects.${JSON.stringify(PROJECT)}]\ntrust_level = "trusted"\n`);
+  [row] = await diagnose([codex], { cwd: PROJECT, inProject: true, check });
+  assert.equal(row.scope, "project");
+  assert.equal(row.problem, undefined);
 });

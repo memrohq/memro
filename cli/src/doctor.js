@@ -41,6 +41,28 @@ function readCodex(text) {
   };
 }
 
+const CODEX_UNTRUSTED = "Codex ignores ./.codex/config.toml until you open Codex in this folder and trust it";
+
+/** Whether Codex's own config marks `dir` as trusted: a [projects."<dir>"]
+ * table with trust_level = "trusted" (the path as given or resolved). */
+export function codexTrusts(globalConfig, dir) {
+  if (!fs.existsSync(globalConfig)) return false;
+  const lines = fs.readFileSync(globalConfig, "utf8").split("\n");
+  const dirs = new Set([dir]);
+  try { dirs.add(fs.realpathSync(dir)); } catch { /* keep the path as given */ }
+  return [...dirs].some((d) => {
+    const start = lines.findIndex((l) => l.trim() === `[projects.${JSON.stringify(d)}]`);
+    if (start < 0) return false;
+    for (const l of lines.slice(start + 1)) {
+      if (l.trim().startsWith("[")) return false;
+      if (/^\s*trust_level\s*=\s*"trusted"\s*$/.test(l)) return true;
+    }
+    return false;
+  });
+}
+
+const keySource = (auth) => (auth.env ? `$${auth.env}` : auth.key ? "in the file" : "none");
+
 function readJSONQuiet(file) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; }
 }
@@ -98,6 +120,16 @@ export async function diagnose(clients, { cwd, inProject, env = process.env, che
       .filter((s) => s.server);
     // Claude Code's private per-project servers (`--scope local`) sit in
     // ~/.claude.json under the project's path and beat .mcp.json.
+    // Codex ignores a project's .codex/config.toml until the folder is trusted.
+    let ignoredProject = null;
+    if (c.id === "codex" && found[0]?.scope === "project" && !codexTrusts(c.file("user", cwd), cwd)) {
+      const ignored = found.shift();
+      ignoredProject = ignored.file;
+      if (!found.length) {
+        rows.push({ client: c, scope: "project", file: ignored.file, overridden: [], keySource: keySource(ignored.server.auth), problem: CODEX_UNTRUSTED });
+        continue;
+      }
+    }
     const claudeState = c.id === "claude-code" ? readJSONQuiet(c.file("user", cwd))?.projects?.[cwd] : null;
     const local = claudeState?.mcpServers?.[SERVER_NAME];
     if (inProject && local) {
@@ -111,7 +143,7 @@ export async function diagnose(clients, { cwd, inProject, env = process.env, che
     const row = { client: c, scope: active.scope, file: active.file, overridden: overridden.map((s) => s.file) };
     const { url, auth } = active.server;
     const key = auth.key || (auth.env && env[auth.env]);
-    row.keySource = auth.env ? `$${auth.env}` : auth.key ? "in the file" : "none";
+    row.keySource = keySource(auth);
     if (active.scope === "project" && claudeState?.disabledMcpjsonServers?.includes(SERVER_NAME)) {
       row.problem = "turned off for this project in Claude Code (/mcp to turn it on)";
     } else if (!url) row.problem = "no server URL";
@@ -122,6 +154,7 @@ export async function diagnose(clients, { cwd, inProject, env = process.env, che
       if (res.ok) row.tools = res.tools;
       else row.problem = res.error;
     }
+    if (ignoredProject && !row.problem) row.problem = `uses the global config: ${CODEX_UNTRUSTED}`;
     // Tools read their global instructions and the project's together.
     const ruleFiles = [...new Set((inProject ? ["project", "user"] : ["user"]).map((s) => c.rules(s, cwd)).filter(Boolean))];
     if (ruleFiles.length) {

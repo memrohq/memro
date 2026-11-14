@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { CLIENTS, KEY_ENV, findClient, withSession } from "./clients.js";
 import { pick, pickOne, promptText } from "./picker.js";
-import { diagnose } from "./doctor.js";
+import { codexTrusts, diagnose } from "./doctor.js";
 import { installInstructions, uninstallInstructions } from "./instructions.js";
 import * as ui from "./ui.js";
 
@@ -451,6 +451,9 @@ async function connect(opts) {
       let note = envKey ? `reads $${KEY_ENV}` : "";
       if (!envKey && gitTracked && ensureGitIgnored(configFile, cwd).added) note = "added to .gitignore (holds your key)";
       ui.ok(c.name.padEnd(width), `${formatPath(configFile, scope, cwd)}${note ? "  " + note : ""}`);
+      if (c.id === "codex" && scope === "project" && !codexTrusts(c.file("user", cwd), cwd)) {
+        ui.line(ui.c.dim(`${"".padEnd(width + 3)}Codex reads it once you open Codex in this folder and trust it`));
+      }
       if (opts.instructions && c.rules) {
         const rulesFile = c.rules(scope, cwd);
         if (rulesFile) {

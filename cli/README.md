@@ -44,6 +44,7 @@ npx memro-cli connect --project
    | Gemini CLI | `~/.gemini/GEMINI.md` | `./GEMINI.md` |
    | Antigravity | `~/.gemini/config/rules/memro.md` (always on) | `./.agents/rules/memro.md` (always on) |
    | Cursor | — (user rules live in Cursor's settings) | `./.cursor/rules/memro.mdc` (always applied) |
+   | VS Code (Copilot) | `~/.copilot/instructions/memro.instructions.md` | `./.github/instructions/memro.instructions.md` |
    | Windsurf | `~/.codeium/windsurf/memories/global_rules.md` | — |
 
    Untick "Teach these tools…" in the list, or pass `--no-instructions`, to
@@ -82,6 +83,10 @@ Dock or Start menu don't see your shell's environment.
 
 Claude Code asks once, the first time you run `claude` in the project, before
 it uses a server from a shared `.mcp.json`; approve `memro` there.
+
+Codex reads a project's `.codex/config.toml` only in folders you have trusted:
+open Codex in the project once and choose to trust it. Until then it uses your
+global Memro setup, and `npx memro-cli doctor` says so.
 
 ---
 
