@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Package author and the contact addresses in the docs are now subal@memro.co.
+
+Packages: `memro` 0.2.1, `memro-mcp` 0.2.2, `@memro/sdk` 0.2.1.
+
 ## [v0.1.1] - 2026-11-14
 
 Organisations and per-customer tenant keys, a faster 2D memory graph, batch
