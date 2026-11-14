@@ -3,9 +3,16 @@
 All notable changes to Memro will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and every release and package raises only the last number of its version (see RELEASING.md).
 
 ## [Unreleased]
+
+### Added
+- **memro-cli `doctor`**: for each tool, the Memro config it uses (project over global), where its key comes from, whether the server accepts it and lists its tools, and whether the tool has the Memro note. Exits 1 when a tool needs attention.
+- **memro-cli `--env-key`**: Claude Code and Codex read the key from `$MEMRO_API_KEY` instead of storing it, so project config files can be committed.
+- **memro-cli Cursor rule**: project setup adds `.cursor/rules/memro.mdc` (always applied).
+
+Packages: `memro-cli` 0.1.7.
 
 ## [v0.1.1] - 2026-11-14
 
