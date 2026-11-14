@@ -319,3 +319,44 @@ test("Antigravity project setup: .agents/mcp_config.json, always-on rule, old pa
   assert.equal(uninstallInstructions(rules, { frontmatter: c.rulesFrontmatter }), true);
   assert.equal(fs.existsSync(rules), false, "a file holding only frontmatter and our block is removed");
 });
+
+test("Cursor project setup adds an always-applied rule; global setup has no rules file", () => {
+  const c = findClient("cursor");
+  assert.equal(c.rules("user", PROJECT_DIR), null);
+  const rulesFile = c.rules("project", PROJECT_DIR);
+  assert.equal(rulesFile, path.join(PROJECT_DIR, ".cursor", "rules", "memro.mdc"));
+
+  installInstructions(rulesFile, { scope: "project", frontmatter: c.rulesFrontmatter });
+  const text = fs.readFileSync(rulesFile, "utf8");
+  // A rule without alwaysApply is only used when the agent picks it.
+  assert.match(text, /^---\ndescription: .+\nalwaysApply: true\n---\n/);
+  assert.ok(text.includes(PROJECT_BLOCK));
+
+  assert.equal(uninstallInstructions(rulesFile, { frontmatter: c.rulesFrontmatter }), true);
+  assert.equal(fs.existsSync(rulesFile), false, "a rule that was only ours is deleted");
+});
+
+test("--env-key: Claude Code and Codex reference $MEMRO_API_KEY instead of storing the key", () => {
+  assert.equal(parseArgs(["connect"]).envKey, false);
+  assert.equal(parseArgs(["connect", "--project", "--env-key"]).envKey, true);
+
+  const envConn = { ...conn, envKey: true };
+  const claude = findClient("claude-code");
+  claude.add(envConn, { scope: "project", cwd: PROJECT_DIR });
+  const mcp = fs.readFileSync(claude.file("project", PROJECT_DIR), "utf8");
+  assert.equal(JSON.parse(mcp).mcpServers.memro.headers.Authorization, "Bearer ${MEMRO_API_KEY}");
+  assert.ok(!mcp.includes(conn.apiKey), "the key itself is not in .mcp.json");
+
+  const codex = findClient("codex");
+  codex.add(envConn, { scope: "project", cwd: PROJECT_DIR });
+  const toml = fs.readFileSync(codex.file("project", PROJECT_DIR), "utf8");
+  assert.match(toml, /^bearer_token_env_var = "MEMRO_API_KEY"$/m);
+  assert.ok(!toml.includes(conn.apiKey) && !toml.includes("http_headers"));
+
+  // Without the flag the key is written as before.
+  codex.add(conn, { scope: "project", cwd: PROJECT_DIR });
+  assert.ok(fs.readFileSync(codex.file("project", PROJECT_DIR), "utf8").includes(`Bearer ${conn.apiKey}`));
+
+  // Tools that can't read the environment don't claim to.
+  for (const c of CLIENTS.filter((c) => !["claude-code", "codex"].includes(c.id))) assert.ok(!c.supportsEnvKey, c.id);
+});

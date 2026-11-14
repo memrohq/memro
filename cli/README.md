@@ -43,6 +43,7 @@ npx memro-cli connect --project
    | OpenCode | `~/.config/opencode/AGENTS.md` | `./AGENTS.md` |
    | Gemini CLI | `~/.gemini/GEMINI.md` | `./GEMINI.md` |
    | Antigravity | `~/.gemini/config/rules/memro.md` (always on) | `./.agents/rules/memro.md` (always on) |
+   | Cursor | — (user rules live in Cursor's settings) | `./.cursor/rules/memro.mdc` (always applied) |
    | Windsurf | `~/.codeium/windsurf/memories/global_rules.md` | — |
 
    Untick "Teach these tools…" in the list, or pass `--no-instructions`, to
@@ -62,6 +63,22 @@ once as `<file>.memro-backup`. Restart the tool afterwards.
 >   ```bash
 >   npx memro-cli connect --project --key memro_sk_client_specific_key
 >   ```
+
+### Keeping the key out of project files
+
+Project config files hold your API key, so `connect` adds them to
+`.gitignore`. To commit them instead (so a team shares one setup), pass
+`--env-key`: Claude Code (`.mcp.json`) and Codex (`.codex/config.toml`) then
+read the key from the `MEMRO_API_KEY` environment variable, and each person sets
+their own:
+
+```bash
+npx memro-cli connect --project --client claude,codex --env-key
+export MEMRO_API_KEY=memro_sk_...   # in your shell profile
+```
+
+Other tools keep the key in their config file, because apps started from the
+Dock or Start menu don't see your shell's environment.
 
 ---
 
@@ -89,6 +106,7 @@ npx memro-cli disconnect [--project] [--client ...]
 * `--scope <user|project>`: Explicitly select configuration scope (`user` default).
 * `--client <ids>`: Only configure these tools, comma-separated (e.g. `--client claude,cursor`).
 * `--key <key>`: Use a specific API key (`memro_sk_...`) instead of default credentials.
+* `--env-key`: Claude Code and Codex read the key from `$MEMRO_API_KEY` instead of storing it (see above).
 * `-y, --yes`: Configure every detected tool without prompting.
 * `--no-instructions`: Do not add Memro guidance to instruction files (`CLAUDE.md`, `AGENTS.md`, etc.).
 * `--staging`, `--local` or `--api <url>`: Target another Memro server (e.g. self-hosted: `--api https://memro.example.com`).

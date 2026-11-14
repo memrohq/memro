@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { CLIENTS, findClient, withSession } from "./clients.js";
+import { CLIENTS, KEY_ENV, findClient, withSession } from "./clients.js";
 import { pick, pickOne, promptText } from "./picker.js";
 import { installInstructions, uninstallInstructions } from "./instructions.js";
 import * as ui from "./ui.js";
@@ -30,6 +30,8 @@ Options
   --scope <user|project>     Configuration scope: "user" (default) or "project"
   --client <ids>             Only these tools, comma-separated (${CLIENTS.map((c) => c.id).join(", ")})
   --key <key>                Use a specific API key (memro_sk_...) instead of saved credentials
+  --env-key                  Claude Code and Codex read the key from $MEMRO_API_KEY
+                             instead of storing it in their config (safe to commit)
   --yes, -y                  Don't ask: use every detected tool
   --no-instructions          Don't add the "use Memro automatically" note to
                              the tools' instructions (CLAUDE.md, AGENTS.md…)
@@ -38,7 +40,7 @@ Options
 `;
 
 export function parseArgs(argv) {
-  const opts = { command: null, clients: null, yes: false, api: null, instructions: true, scope: null, key: null };
+  const opts = { command: null, clients: null, yes: false, api: null, instructions: true, scope: null, key: null, envKey: false };
   let projectFlag = false;
   let scopeFlagValue = null;
 
@@ -50,6 +52,8 @@ export function parseArgs(argv) {
       opts.yes = true;
     } else if (a === "--no-instructions") {
       opts.instructions = false;
+    } else if (a === "--env-key") {
+      opts.envKey = true;
     } else if (a === "--project") {
       projectFlag = true;
     } else if (a === "--scope") {
@@ -433,13 +437,16 @@ async function connect(opts) {
   const width = Math.max(...targets.map((c) => c.name.length)) + 2;
   const gitTracked = scope === "project" && isGitTracked(cwd);
   let ok = 0;
+  let usedEnvKey = false;
   for (const c of targets) {
     try {
-      c.add({ ...conn, mcpUrl: withSession(conn.mcpUrl, c.id) }, { scope, cwd });
+      const envKey = Boolean(opts.envKey && c.supportsEnvKey);
+      c.add({ ...conn, envKey, mcpUrl: withSession(conn.mcpUrl, c.id) }, { scope, cwd });
       ok++;
+      usedEnvKey ||= envKey;
       const configFile = c.file(scope, cwd);
-      let note = "";
-      if (gitTracked && ensureGitIgnored(configFile, cwd).added) note = "added to .gitignore (holds your key)";
+      let note = envKey ? `reads $${KEY_ENV}` : "";
+      if (!envKey && gitTracked && ensureGitIgnored(configFile, cwd).added) note = "added to .gitignore (holds your key)";
       ui.ok(c.name.padEnd(width), `${formatPath(configFile, scope, cwd)}${note ? "  " + note : ""}`);
       if (opts.instructions && c.rules) {
         const rulesFile = c.rules(scope, cwd);
@@ -454,6 +461,11 @@ async function connect(opts) {
     }
   }
   ui.gap();
+  if (usedEnvKey) {
+    ui.line(`Set ${KEY_ENV} to your Memro key in your shell profile before starting those tools`);
+    ui.line(ui.c.dim(`(the key is in ${tilde(CREDENTIALS())}, or create one in the dashboard → API keys).`));
+    ui.gap();
+  }
   ui.outro(
     ok ? `Done. Restart ${ok === 1 ? "the tool" : "your tools"} to load Memro.` : "Nothing was configured.",
     "Manage or revoke the key in the dashboard → API keys.",
