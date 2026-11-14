@@ -1,6 +1,6 @@
 {
   "name": "@memro/sdk",
-  "version": "0.2.0",
+  "version": "0.1.1",
   "description": "Memro — verified memory infrastructure for AI agents",
   "main": "dist/cjs/index.js",
   "types": "dist/esm/index.d.ts",

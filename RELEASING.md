@@ -1,9 +1,16 @@
 # Releasing Memro
 
-A release is a `vX.Y.Z` tag on `main`. Pushing it runs
+A release is a `vX.Y.Z` tag on `main`. **Each release raises only the last
+number by one** (v0.1.0, v0.1.1, v0.1.2, …); the release script and the
+workflow refuse anything else. The Python SDK, the JS SDK and the MCP server
+carry the same version as the tag. memro-cli keeps its own version.
+
+Pushing the tag runs
 `.github/workflows/release.yml`, which:
 
-1. checks the tag is on `main` and `CHANGELOG.md` has a `## [vX.Y.Z]` section,
+1. checks the tag is on `main`, follows the previous release with only the
+   last number raised, matches the package versions, and has a
+   `## [vX.Y.Z]` section in `CHANGELOG.md`,
 2. builds the server and dashboard images for amd64 and arm64, pushes them to
    `ghcr.io/memrohq/memro` and `ghcr.io/memrohq/memro-dashboard` as `X.Y.Z`,
    `X.Y` and `latest`, and signs them with Sigstore,
@@ -12,22 +19,28 @@ A release is a `vX.Y.Z` tag on `main`. Pushing it runs
 5. publishes packages whose version isn't on the registry yet: `memro` and
    `memro-mcp` to PyPI, `@memro/sdk` and `memro-cli` to npm. A registry whose
    token secret (`PYPI_API_TOKEN`, `NPM_TOKEN`) isn't set is skipped with a
-   warning. Packages keep their own versions; bump one in its
-   `pyproject.toml` or `package.json` to publish it with the next release.
+   warning. memro-cli publishes when its own version in `cli/package.json`
+   has been raised.
 
 ## Steps
 
-1. Move the `## [Unreleased]` notes in `CHANGELOG.md` under
-   `## [vX.Y.Z] - YYYY-MM-DD`, leave an empty `## [Unreleased]` above it, and
-   merge that to `main`. Bump package versions in the same pull request if
-   they should publish.
-2. From an up-to-date `main`, as an account that can push tags:
+1. In one pull request to `main`:
+   - move the `## [Unreleased]` notes in `CHANGELOG.md` under
+     `## [vX.Y.Z] - YYYY-MM-DD` (the previous version with the last number
+     plus one), leaving an empty `## [Unreleased]` above it;
+   - set that version in `sdk/python/pyproject.toml`,
+     `sdk/python/src/memro/__init__.py`, `mcp/pyproject.toml`,
+     `mcp/src/memro_mcp/__init__.py` and `sdk/js/package.json`
+     (`npm install --package-lock-only` updates the lock file);
+   - check it with `scripts/check_release_version.sh vX.Y.Z`.
+2. After it's merged, from an up-to-date `main`, as an account that can push
+   tags:
    ```bash
    git switch main && git pull
-   scripts/release.sh vX.Y.Z
+   scripts/release.sh
    ```
-   It checks the working tree, `origin/main`, the tag and the changelog,
-   shows the notes and asks before pushing.
+   It takes the version from the changelog, checks it, shows the notes and
+   asks before pushing the tag.
 3. Watch the run: `gh run list --workflow release.yml`, then check the
    release page, the images and the packages.
 4. Pin Memro Cloud to the release: in memro-cloud,
@@ -35,7 +48,7 @@ A release is a `vX.Y.Z` tag on `main`. Pushing it runs
 
 ## If something fails
 
-- **Verify failed:** fix the changelog or tag, delete the tag
+- **Verify failed:** fix the changelog or versions in a pull request, delete the tag
   (`git push origin :refs/tags/vX.Y.Z` and `git tag -d vX.Y.Z`) and tag again.
 - **An image or package job failed:** fix the cause, then re-run the failed
   jobs from the Actions page. Every step is safe to re-run: published

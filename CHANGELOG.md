@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v0.2.0] - 2026-11-14
+## [v0.1.1] - 2026-11-14
 
 Organisations and per-customer tenant keys, a faster 2D memory graph, batch
 ingest, better handling of facts that change, and multi-tool coordination.

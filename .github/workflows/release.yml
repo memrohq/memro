@@ -1,12 +1,14 @@
 name: Release
 
 # Pushing a version tag (vX.Y.Z, made by scripts/release.sh) releases Memro:
-#   1. verify   - the tag is on main and CHANGELOG.md has a section for it
+#   1. verify   - the tag is on main, only its last number went up from the
+#                 previous release, packages match it, and CHANGELOG.md has its section
 #   2. images   - server and dashboard images to GHCR, signed with Sigstore
 #   3. release  - a GitHub release whose notes are that CHANGELOG section
 #   4. go tags  - server/vX.Y.Z and sdk/go/vX.Y.Z, so `go get ...@vX.Y.Z` works
-#   5. packages - PyPI (memro, memro-mcp) and npm (@memro/sdk, memro-cli). Each
-#      package has its own version: one already on the registry is skipped, and
+#   5. packages - PyPI (memro, memro-mcp) and npm (@memro/sdk, memro-cli). The
+#      SDKs and MCP share the tag's version; memro-cli has its own. A version
+#      already on the registry is skipped, and
 #      a registry without its token secret is skipped with a warning.
 # See RELEASING.md.
 on:
@@ -34,6 +36,8 @@ jobs:
         run: |
           [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Tag must look like v1.2.3"; exit 1; }
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_REF_NAME is not on main"; exit 1; }
+      - name: Only the last number changed, and packages match the tag
+        run: scripts/check_release_version.sh "$GITHUB_REF_NAME"
       - name: CHANGELOG.md has a section for the tag
         run: scripts/changelog_section.sh "$GITHUB_REF_NAME"
 
