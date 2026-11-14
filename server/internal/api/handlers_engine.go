@@ -119,6 +119,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	s.audit(r, a, "memory.search", nil)
 	s.recordUsage(r, a, extension.MetricMemoriesSearched, 1)
 	s.recordUsage(r, a, extension.MetricQueries, 1)
+	s.recordUsage(r, a, extension.MetricQueryTokens, extension.EstimateTokens(query))
 	out := *resp
 	out.LatencyMS = time.Since(start).Milliseconds()
 	writeJSON(w, http.StatusOK, out)
@@ -171,6 +172,7 @@ func (s *Server) searchTemporal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.recordUsage(r, a, extension.MetricQueries, 1)
+	s.recordUsage(r, a, extension.MetricQueryTokens, extension.EstimateTokens(tq.Query))
 	writeJSON(w, http.StatusOK, map[string]any{"results": items, "total": len(items)})
 }
 

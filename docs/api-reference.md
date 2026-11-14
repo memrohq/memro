@@ -358,13 +358,21 @@ default tenant and get `403` from all of these.
 
 | | |
 |---|---|
-| 🔒 `POST /tenant` | Body `{"name", "domain"}` → `{"id", "name", "domain", "created_at"}`. Platform admins only. |
+| 🔒 `POST /tenant` | Body `{"name", "domain", "owner_email"?}` → the tenant; with `owner_email`, `{"tenant", "owner_invite": {"invite", "link", "emailed"}}`. Platform admins only. |
 | 🔒 `GET /tenant/{id}` | Platform admins, or an agent of that dedicated tenant. |
 | 🔒 `GET /tenant/{id}/usage?hours=24` | Same rule; `hours` is capped at 2160 (90 days). |
-| 🔒 `POST /tenant/{id}/api-keys` | Body `{"name"}` → `{"id", "tenant_id", "name", "prefix", "key"}`. Issues a tenant key, which is shown once. Platform admins only; not for the default tenant. See [Tenant keys](authentication.md#tenant-keys-one-key-for-all-your-users). |
-| 🔒 `GET /tenant/{id}/api-keys` | The tenant's active keys (no secrets). Platform admins only. |
-| 🔒 `DELETE /tenant/{id}/api-keys/{key_id}` | Revokes a tenant key and the webhooks it registered. Platform admins only. |
+| 🔒 `POST /tenant/{id}/api-keys` | Body `{"name"}` → `{"id", "tenant_id", "name", "prefix", "key"}`. Issues a tenant key, which is shown once. The organisation's owners and admins, or platform admins; not for the default tenant. See [Tenant keys](authentication.md#tenant-keys-one-key-for-all-your-users). |
+| 🔒 `GET /tenant/{id}/api-keys` | The tenant's active keys (no secrets). Owners, admins, platform admins. |
+| 🔒 `DELETE /tenant/{id}/api-keys/{key_id}` | Revokes a tenant key and the webhooks it registered. Owners, admins, platform admins. |
 | 🔒 `DELETE /end-user` | With a tenant key and `X-Memro-User`: deletes that end user, their memories and their files → `204` (`404` if there's no such user). |
+| 🔒 `GET /tenant/{id}/usage/members?month=2026-11` | Usage per end user for a month (default: this one): `{"month", "active_members", "members": [{"user", "agent_id", "metrics", "cost_usd"}], "totals", "cost_usd", "embedding_model"}`. `cost_usd` is an estimate from list prices. The organisation's members, platform admins, or the tenant's own key. Never memory content. |
+| 🔒 `GET /orgs` | Dashboard session: the organisations you belong to, `[{"tenant_id", "name", "role"}]`. |
+| 🔒 `GET /tenant/{id}/members` | Members and roles. Any member. |
+| 🔒 `PATCH /tenant/{id}/members/{user_id}` | Body `{"role"}`: `owner`, `admin`, `billing` or `viewer`. Owners and admins; only owners make or change owners. `409` if it would leave no owner. |
+| 🔒 `DELETE /tenant/{id}/members/{user_id}` | Removes a member (owners and admins), or leave yourself (anyone). `409` for the last owner. |
+| 🔒 `POST /tenant/{id}/invites` | Body `{"email", "role"}` → `201 {"invite", "link", "emailed"}`. Owners and admins; only owners invite owners. Emailed when email is set up; the link works once, for that address, for 7 days. |
+| 🔒 `GET /tenant/{id}/invites` · `DELETE /tenant/{id}/invites/{invite_id}` | Pending invitations; cancel one. Owners and admins. |
+| 🔒 `POST /invites/accept` | Dashboard session, body `{"token"}` → `{"tenant_id", "name", "role"}`. `403` if signed in with a different address than the one invited. |
 
 Platform admins act only through a dashboard session; their API keys and
 signed requests get `403`.

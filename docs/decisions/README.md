@@ -31,6 +31,7 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0023](0023-graph-edges-and-search-expansion.md) | Graph edge semantics, save-time edges, and optional graph expansion in search | 2026-10-24 | Proposed |
 | [0024](0024-cloudflare-embedding-evaluation.md) | Cloudflare credits for embedding-model evaluation (benchmark only) | 2026-10-23 | Accepted |
 | [0025](0025-tenant-keys-and-end-users.md) | Tenant keys and end users for B2B customers | 2026-11-13 | Accepted |
+| [0026](0026-organisation-accounts-and-member-usage.md) | Organisation accounts and usage per end user | 2026-11-14 | Accepted |
 
 Template:
 

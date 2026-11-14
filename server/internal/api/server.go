@@ -79,10 +79,14 @@ type Deps struct {
 	Connectors *connectors.Manager
 }
 
-// StoreUsageMeter records usage in the tenant_usage table.
+// StoreUsageMeter records usage in the tenant_usage table, and per agent
+// (end user) and month in usage_monthly (ADR 0026).
 func StoreUsageMeter(st *store.Store) extension.UsageMeter {
 	return extension.UsageMeterFunc(func(ctx context.Context, e extension.UsageEvent) error {
-		return st.RecordTenantUsage(ctx, e.TenantID, e.Metric, e.Value)
+		if err := st.RecordTenantUsage(ctx, e.TenantID, e.Metric, e.Value); err != nil {
+			return err
+		}
+		return st.RecordMemberUsage(ctx, e.TenantID, e.AgentID, e.Metric, e.Value)
 	})
 }
 
@@ -188,6 +192,15 @@ func (s *Server) Handler() http.Handler {
 	protected("POST /tenant/{id}/api-keys", s.createTenantKey)
 	protected("DELETE /tenant/{id}/api-keys/{key_id}", s.revokeTenantKey)
 	protected("DELETE /end-user", s.deleteEndUser)
+	protected("GET /tenant/{id}/usage/members", s.memberUsage)
+	protected("GET /orgs", s.listOrgs)
+	protected("GET /tenant/{id}/members", s.listMembers)
+	protected("PATCH /tenant/{id}/members/{user_id}", s.changeMember)
+	protected("DELETE /tenant/{id}/members/{user_id}", s.changeMember)
+	protected("POST /tenant/{id}/invites", s.inviteMember)
+	protected("GET /tenant/{id}/invites", s.listInvites)
+	protected("DELETE /tenant/{id}/invites/{invite_id}", s.cancelInvite)
+	protected("POST /invites/accept", s.acceptInvite)
 	protected("POST /hooks", s.registerHook)
 	protected("GET /hooks/{event_type}", s.getHooks)
 	protected("DELETE /hooks", s.deleteHook)

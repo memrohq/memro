@@ -23,9 +23,10 @@ dev: setup
 	docker compose up -d db
 	cd server && DATABASE_URL=postgres://memro:memro@localhost:55432/memro go run ./cmd/memro-api
 
-# Run backend tests (integration tests need the db service running)
+# Run backend tests (integration tests need the db service running; -p 1
+# because the packages share one database)
 test:
-	cd server && MEMRO_TEST_DATABASE_URL=postgres://memro:memro@localhost:55432/memro go test -race ./...
+	cd server && MEMRO_TEST_DATABASE_URL=postgres://memro:memro@localhost:55432/memro go test -race -p 1 ./...
 
 # Run only the frontend components
 frontend: setup

@@ -21,6 +21,7 @@ import (
 	"github.com/memrohq/memro/server/internal/extract"
 	"github.com/memrohq/memro/server/internal/hooks"
 	"github.com/memrohq/memro/server/internal/metrics"
+	"github.com/memrohq/memro/server/internal/store"
 )
 
 const maxContentChars = 10_000
@@ -718,6 +719,12 @@ func (s *Server) canReadTenant(w http.ResponseWriter, r *http.Request, a Agent, 
 	if a.TenantID == tid && tid != domain.DefaultTenantID {
 		return true
 	}
+	// Any member of an organisation may read it (ADR 0026).
+	if a.Via == "session" && a.UserID != nil && tid != domain.DefaultTenantID {
+		if role, err := s.store.TenantRole(r.Context(), tid, *a.UserID); err == nil && role != "" {
+			return true
+		}
+	}
 	return s.requirePlatformAdmin(w, r, a)
 }
 
@@ -726,11 +733,17 @@ func (s *Server) createTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name   string  `json:"name"`
-		Domain *string `json:"domain"`
+		Name       string  `json:"name"`
+		Domain     *string `json:"domain"`
+		OwnerEmail string  `json:"owner_email"` // invited as the first owner (ADR 0026)
 	}
 	if err := decodeJSON(body(r), &req); err != nil || req.Name == "" {
 		httpError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	owner := inviteEmail(req.OwnerEmail)
+	if req.OwnerEmail != "" && owner == "" {
+		httpError(w, http.StatusBadRequest, "owner_email is not a valid email address")
 		return
 	}
 	now := time.Now().UTC()
@@ -741,7 +754,17 @@ func (s *Server) createTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metrics.TenantsCreated.Inc()
-	writeJSON(w, http.StatusOK, toTenantResponse(t))
+	if owner == "" {
+		writeJSON(w, http.StatusOK, toTenantResponse(t))
+		return
+	}
+	invite, err := s.createInvite(r, t.ID, owner, store.RoleOwner)
+	if err != nil {
+		slog.Error("invite tenant owner", "err", err)
+		httpError(w, http.StatusInternalServerError, "Tenant created, but inviting its owner failed; invite them from the organisation page")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tenant": toTenantResponse(t), "owner_invite": invite})
 }
 
 func (s *Server) getTenant(w http.ResponseWriter, r *http.Request) {
