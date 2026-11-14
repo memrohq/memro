@@ -1,5 +1,6 @@
 # Build stage
-FROM node:20-alpine AS builder
+# The built files are the same on every platform, so build them natively (no emulated npm install for arm64).
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 
 WORKDIR /app
 
