@@ -20,7 +20,8 @@ import (
 //   - independent scenarios: nothing may be marked superseded (a false update).
 //
 // Arms: save-time linking off (GRAPH_WRITE_EDGES=false, prod today) and on.
-// Run: MEMRO_EVOLUTION_BENCH=1 MEMRO_TEST_DATABASE_URL=... go test ./internal/api -run TestEvolutionBench -v
+// Runs with the other database tests (CI); locally:
+// MEMRO_TEST_DATABASE_URL=... go test ./internal/api -run TestEvolutionBench -v
 type evolutionScenario struct {
 	Name        string   `json:"name"`
 	Memories    []string `json:"memories"`
@@ -34,9 +35,6 @@ type evolutionScenario struct {
 type evolutionScore struct{ stale, updates, dupLeft, dups, falseUpd, indep int }
 
 func TestEvolutionBench(t *testing.T) {
-	if os.Getenv("MEMRO_EVOLUTION_BENCH") == "" {
-		t.Skip("MEMRO_EVOLUTION_BENCH not set")
-	}
 	raw, err := os.ReadFile("testdata/evolution.json")
 	if err != nil {
 		t.Fatal(err)
@@ -110,6 +108,11 @@ func TestEvolutionBench(t *testing.T) {
 			}
 			t.Logf("== %s: unresolved updates %d/%d · duplicates left %d/%d · false updates %d/%d",
 				arm.name, s.stale, s.updates, s.dupLeft, s.dups, s.falseUpd, s.indep)
+			// A gate, not just a report: a change that leaves an update unresolved, a
+			// duplicate live or (worst) hides an independent fact fails CI.
+			if s.stale+s.dupLeft+s.falseUpd > 0 {
+				t.Errorf("evolution regressed (%s): see the scenarios logged above", arm.name)
+			}
 		})
 	}
 }
