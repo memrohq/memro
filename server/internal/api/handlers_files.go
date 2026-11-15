@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -235,6 +236,10 @@ func (s *Server) storeChunks(w http.ResponseWriter, r *http.Request, a Agent, f 
 		m := domain.Memory{ID: uuid.New(), AgentID: a.ID, TenantID: a.TenantID, Content: c, MemoryType: memType,
 			Visibility: vis, CreatedAt: now, DocumentDate: now, LastAccessedAt: now, Confidence: 1,
 			EntityTags: extract.Entities(c), RelationshipTypes: []string{}, FileID: &f.ID, Metadata: meta}
+		stamp(r, a, &m)
+		if m.Source == "api" || m.Source == "dashboard" {
+			m.Source = "import:" + strings.TrimPrefix(strings.ToLower(filepath.Ext(f.FileName)), ".")
+		}
 		if err := s.store.InsertMemory(r.Context(), &m); err != nil {
 			slog.Error("store chunk", "err", err)
 			httpError(w, http.StatusInternalServerError, "Failed to store memory")

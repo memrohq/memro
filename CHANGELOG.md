@@ -11,7 +11,11 @@ and every release and package raises only the last number of its version (see RE
 - **Fewer stale answers and duplicates in search**: contradiction detection now matches "X is Y" with "X: Y", understands "X moved/switched [from A] to B" (only against a where/when value of the same kind, so "Ana moved to the Berlin office" leaves "Ana is in the design team" alone), treats invoice/order/ticket numbers as identifiers rather than changed quantities, and marks near-duplicate restatements as superseded (except for counting questions). The save-time linker (`GRAPH_WRITE_EDGES`, still off by default) also finds candidates by shared words, not only entity tags, and links duplicates of non-episodic memories. On the new evolution benchmark (`TestEvolutionBench`): unresolved updates 4/9 → 0/9, duplicates left 2/2 → 0/2, false updates 0/7.
 - **Memory evolution can be re-run safely**: `Evolve` (`POST /mee/evolve`, the `mee_evolve` tool) consolidates each episodic memory once, so repeated runs no longer add duplicate summaries of the same memories. One run folds in at most the 50 newest unconsolidated episodes and compares at most the 300 newest facts for contradictions, so its cost no longer grows with the agent's whole history.
 
+### Changed
+- **Deleting a memory archives it** (ADR 0032): `DELETE /memory/{id}` and the `delete_memory` tool move it out of search and listings, and `POST /memory/restore/{id}` brings it back. `?purge=true` removes it for good, together with the content kept in its history.
+
 ### Added
+- **Memory history and provenance** (ADR 0032): `GET /memory/history/{id}` lists every change to a memory (who, from where, content before and after, why). Memories record their `source` (`mcp`, `dashboard`, `api`, `import:pdf`…) and `author_type`; the MCP server identifies itself with `X-Memro-Source: mcp`, and batch writes are audited per memory.
 - **Claude Code plugin** (`integrations/claude-code`, marketplace `memrohq/memro`): the Memro MCP server, with the API key asked at install and kept in the keychain, plus a SessionStart hook that recalls the project's memories and adds the Memro note at the start of every session.
 
 ### Added

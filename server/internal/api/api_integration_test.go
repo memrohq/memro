@@ -947,9 +947,17 @@ func TestDeletingAMemoryRemovesItsFile(t *testing.T) {
 	code, body = e.do(nil, "", "GET", "/assets/"+up.FileID, nil, nil)
 	e.must(200, code, body, "file still used by the second memory")
 	code, body = e.do(&a, "v2", "DELETE", "/memory/"+ids[1], nil, nil)
-	e.must(204, code, body, "delete second memory")
+	e.must(204, code, body, "archive second memory")
 	code, body = e.do(nil, "", "GET", "/assets/"+up.FileID, nil, nil)
-	e.must(404, code, body, "file after its last memory is deleted")
+	e.must(200, code, body, "file kept while its memory is archived")
+	code, body = e.do(&a, "v2", "DELETE", "/memory/"+ids[1]+"?purge=true", nil, nil)
+	e.must(204, code, body, "purge second memory")
+	code, body = e.do(nil, "", "GET", "/assets/"+up.FileID, nil, nil)
+	e.must(200, code, body, "file kept for the archived first memory")
+	code, body = e.do(&a, "v2", "DELETE", "/memory/"+ids[0]+"?purge=true", nil, nil)
+	e.must(204, code, body, "purge archived first memory")
+	code, body = e.do(nil, "", "GET", "/assets/"+up.FileID, nil, nil)
+	e.must(404, code, body, "file after its last memory is purged")
 }
 
 func (e *env) uploadForm(a *agent, path, field, name string, data []byte, extra map[string]string) (int, []byte) {
@@ -1024,8 +1032,8 @@ func TestUploadDocumentChunksOfficeFiles(t *testing.T) {
 	code, body = e.do(nil, "", "GET", "/assets/"+mems[0].FileID, nil, nil)
 	e.must(200, code, body, "document file stored")
 	for _, m := range mems {
-		code, body = e.do(&a, "v2", "DELETE", "/memory/"+m.ID, nil, nil)
-		e.must(204, code, body, "delete chunk")
+		code, body = e.do(&a, "v2", "DELETE", "/memory/"+m.ID+"?purge=true", nil, nil)
+		e.must(204, code, body, "purge chunk")
 	}
 	code, body = e.do(nil, "", "GET", "/assets/"+mems[0].FileID, nil, nil)
 	e.must(404, code, body, "file deleted with its last chunk")

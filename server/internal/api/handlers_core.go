@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -28,9 +29,59 @@ import (
 const maxContentChars = 10_000
 
 func (s *Server) audit(r *http.Request, a Agent, action string, resourceID *string) {
-	ip := s.clientIP(r)
-	if err := s.store.Audit(r.Context(), a.ID, a.TenantID, action, resourceID, &ip); err != nil {
+	s.auditChange(r, a, action, resourceID, nil, nil, "")
+}
+
+// auditChange writes an audit row with who acted, through what, the content
+// before and after, and why (ADR 0032).
+func (s *Server) auditChange(r *http.Request, a Agent, action string, resourceID *string, before, after any, reason string) {
+	if err := s.store.Record(r.Context(), s.auditRecord(r, a, action, resourceID, before, after, reason)); err != nil {
 		slog.Error("audit log write failed", "action", action, "err", err)
+	}
+}
+
+func (s *Server) auditRecord(r *http.Request, a Agent, action string, resourceID *string, before, after any, reason string) store.AuditRecord {
+	ip := s.clientIP(r)
+	return store.AuditRecord{AgentID: a.ID, TenantID: a.TenantID, Action: action, ResourceID: resourceID, IP: &ip,
+		ActorType: authorType(a), Source: requestSource(r, a), Before: before, After: after, Reason: reason,
+		RequestID: r.Header.Get("X-Request-Id")}
+}
+
+var reSource = regexp.MustCompile(`^[a-z0-9][a-z0-9:/._-]{0,39}$`)
+
+// requestSource names where a write came from: the X-Memro-Source header sent
+// by the MCP server and SDKs ("mcp", "sdk-python/0.2.1"), else "dashboard" for
+// browser sessions, else "api".
+func requestSource(r *http.Request, a Agent) string {
+	if v := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Memro-Source"))); reSource.MatchString(v) {
+		return v
+	}
+	if a.Via == "session" {
+		return "dashboard"
+	}
+	return "api"
+}
+
+// authorType is "user" for a person in the dashboard, else "agent".
+func authorType(a Agent) string {
+	if a.Via == "session" {
+		return "user"
+	}
+	return "agent"
+}
+
+// auditedMemory is what audit rows keep of a memory's state.
+func auditedMemory(m *domain.Memory) map[string]any {
+	return map[string]any{"content": m.Content, "memory_type": m.MemoryType, "visibility": m.Visibility}
+}
+
+// stamp records where a new memory came from, unless the caller set it.
+func stamp(r *http.Request, a Agent, m *domain.Memory) {
+	if m.Source == "" {
+		m.Source = requestSource(r, a)
+	}
+	if m.AuthorType == "" {
+		m.AuthorType = authorType(a)
 	}
 }
 
@@ -426,6 +477,9 @@ func (s *Server) createMemoriesBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	for _, m := range memories {
+		stamp(r, a, m)
+	}
 	if err := s.store.InsertMemories(r.Context(), memories); err != nil {
 		slog.Error("store batch memories", "err", err, "count", len(memories))
 		httpError(w, http.StatusInternalServerError, "Failed to store batch memories")
@@ -440,6 +494,14 @@ func (s *Server) createMemoriesBatch(w http.ResponseWriter, r *http.Request) {
 	s.recordUsage(r, a, extension.MetricMemoriesStored, int64(len(memories)))
 	s.recordUsage(r, a, extension.MetricStoredTokens, totalTokens)
 	s.audit(r, a, "memory.create_batch", nil)
+	recs := make([]store.AuditRecord, len(memories))
+	for i, m := range memories {
+		id := m.ID.String()
+		recs[i] = s.auditRecord(r, a, "memory.create", &id, nil, auditedMemory(m), "")
+	}
+	if err := s.store.RecordMany(r.Context(), recs); err != nil {
+		slog.Error("audit log write failed", "action", "memory.create", "err", err)
+	}
 
 	if urls, err := s.store.GetHooks(r.Context(), a.ID, "memory_created"); err == nil && len(urls) > 0 {
 		for _, m := range memories {
@@ -474,6 +536,7 @@ func (s *Server) saveMemory(w http.ResponseWriter, r *http.Request, a Agent, m *
 	if m.EntityTags == nil {
 		m.EntityTags = extract.Entities(m.Content)
 	}
+	stamp(r, a, m)
 	if err := s.store.InsertMemory(ctx, m); err != nil {
 		slog.Error("store memory", "err", err)
 		httpError(w, http.StatusInternalServerError, "Failed to store memory")
@@ -581,7 +644,7 @@ func (s *Server) afterMemoryCreated(r *http.Request, a Agent, m *domain.Memory, 
 	s.engine.Cache().InvalidateAgent(a.ID)
 	metrics.MemoriesCreated.Inc()
 	id := m.ID.String()
-	s.audit(r, a, action, &id)
+	s.auditChange(r, a, action, &id, nil, auditedMemory(m), "")
 	s.recordUsage(r, a, extension.MetricMemoriesStored, 1)
 	s.recordUsage(r, a, extension.MetricStoredTokens, extension.EstimateTokens(m.Content))
 	if urls, err := s.store.GetHooks(r.Context(), a.ID, "memory_created"); err == nil {
@@ -612,6 +675,9 @@ func (s *Server) listMemories(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, mems)
 }
 
+// DELETE /memory/{id}[?reason=…] archives the memory: it leaves search and
+// listings but can be restored. ?purge=true removes it for good, with its
+// archived copy and the content kept in its audit history (privacy requests).
 func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
 	a, raw := agentFrom(r), r.PathValue("id")
 	id, err := uuid.Parse(raw)
@@ -619,9 +685,27 @@ func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "Invalid memory ID format")
 		return
 	}
-	ok, fileID, err := s.store.DeleteMemory(r.Context(), id, a.ID, a.TenantID)
-	if ok && fileID != nil {
-		// The file goes with the last memory made from it.
+	reason := r.URL.Query().Get("reason")
+	purge, _ := strconv.ParseBool(r.URL.Query().Get("purge"))
+	var (
+		ok     bool
+		fileID *uuid.UUID
+		before map[string]any
+	)
+	if purge {
+		ok, fileID, err = s.store.PurgeMemory(r.Context(), id, a.ID, a.TenantID)
+	} else {
+		var row json.RawMessage
+		row, fileID, err = s.store.ArchiveMemory(r.Context(), id, a.ID, a.TenantID, reason)
+		if ok = row != nil; ok {
+			var m domain.Memory
+			if json.Unmarshal(row, &m) == nil {
+				before = auditedMemory(&m)
+			}
+		}
+	}
+	if ok && purge && fileID != nil {
+		// The file goes with the last memory made from it; archived memories keep theirs.
 		if path, err := s.store.DeleteOrphanFile(r.Context(), *fileID, a.ID); err != nil {
 			slog.Warn("delete orphan file", "err", err)
 		} else if path != "" {
@@ -639,9 +723,58 @@ func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.engine.Cache().InvalidateAgent(a.ID)
 		metrics.MemoriesDeleted.Inc()
-		s.audit(r, a, "memory.delete", &raw)
+		if purge {
+			s.auditChange(r, a, "memory.purge", &raw, nil, nil, reason)
+		} else {
+			s.auditChange(r, a, "memory.delete", &raw, before, nil, reason)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// POST /memory/restore/{id} puts an archived memory back.
+func (s *Server) restoreMemory(w http.ResponseWriter, r *http.Request) {
+	a, raw := agentFrom(r), r.PathValue("id")
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "Invalid memory ID format")
+		return
+	}
+	m, err := s.store.RestoreMemory(r.Context(), id, a.ID, a.TenantID)
+	switch {
+	case err != nil:
+		slog.Error("restore memory", "err", err)
+		httpError(w, http.StatusInternalServerError, "Failed to restore memory")
+	case m == nil:
+		httpError(w, http.StatusNotFound, "No archived memory with that ID")
+	default:
+		s.indexer.Enqueue(m.ID, m.AgentID, m.TenantID, m.Content)
+		s.engine.Cache().InvalidateAgent(a.ID)
+		s.auditChange(r, a, "memory.restore", &raw, nil, auditedMemory(m), r.URL.Query().Get("reason"))
+		writeJSON(w, http.StatusOK, m)
+	}
+}
+
+// GET /memory/history/{id} lists every audited change to a memory, oldest
+// first, including after it was archived or purged.
+func (s *Server) memoryHistory(w http.ResponseWriter, r *http.Request) {
+	a, raw := agentFrom(r), r.PathValue("id")
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "Invalid memory ID format")
+		return
+	}
+	entries, archived, err := s.store.MemoryHistory(r.Context(), id, a.ID, a.TenantID)
+	if err != nil {
+		slog.Error("memory history", "err", err)
+		httpError(w, http.StatusInternalServerError, "Failed to load history")
+		return
+	}
+	if len(entries) == 0 && !archived {
+		httpError(w, http.StatusNotFound, "Memory not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"memory_id": id, "archived": archived, "history": entries})
 }
 
 func (s *Server) export(w http.ResponseWriter, r *http.Request) {

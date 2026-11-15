@@ -114,6 +114,7 @@ class ForwardingClient(MemroClient):
 
     def _headers(self, method, path_and_query, body, agent_id, private_key) -> dict:
         headers = super()._headers(method, path_and_query, body, agent_id, private_key)
+        headers["X-Memro-Source"] = "mcp"  # recorded as the memory's source (ADR 0032)
         ip = current_client_ip.get()
         if ip:
             headers["X-Real-IP"] = ip

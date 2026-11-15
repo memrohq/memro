@@ -69,6 +69,11 @@ type Memory struct {
 	LastAccessedAt    time.Time       `json:"last_accessed_at"`
 	Confidence        float32         `json:"confidence"`
 	Metadata          json.RawMessage `json:"metadata"`
+	// Where the memory came from ("mcp", "dashboard", "import:pdf",
+	// "connector:slack", "evolve", "api"…) and who wrote it ("agent", "user",
+	// "system"); empty for memories stored before ADR 0032.
+	Source     string `json:"source,omitempty"`
+	AuthorType string `json:"author_type,omitempty"`
 }
 
 type AgentIdentity struct {

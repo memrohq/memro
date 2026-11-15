@@ -77,7 +77,7 @@ instructions (`CLAUDE.md`, `AGENTS.md`, …):
 | `recall_multi_session` | `query`, `limit?` (15) | Search across all sessions |
 | `search_temporal` | `query`, `after_date?`, `before_date?`, `after_event_date?`, `before_event_date?`, `temporal_weight?`, `atomic_only?`, `limit?` | Search by time |
 | `get_recent_memories` | `limit?`, `type?` | Newest first |
-| `delete_memory` | `memory_id` | |
+| `delete_memory` | `memory_id` | Archives it; it can be restored through the API |
 | `export_memories` | | Count of all memories |
 | `get_temporal_stats` | | Totals by period and type |
 | `generate_atomic_facts` | `text` | Split text into facts (not stored) |
