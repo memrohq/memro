@@ -42,7 +42,7 @@ func DefaultLinkerConfig() LinkerConfig {
 // It is strictly best-effort, bounded by a 200ms deadline, and never returns an error
 // that would fail a memory write.
 func (e *Engine) LinkOnSave(ctx context.Context, m *domain.Memory, cfg LinkerConfig) {
-	if !cfg.Enabled || m == nil || len(m.EntityTags) == 0 {
+	if !cfg.Enabled || m == nil {
 		return
 	}
 
@@ -81,7 +81,8 @@ func (e *Engine) linkEntities(ctx context.Context, m *domain.Memory, cfg LinkerC
 			break
 		}
 	}
-	if len(specificTags) == 0 {
+	words := ftsWords(m.Content)
+	if len(specificTags) == 0 && words == "" {
 		return nil
 	}
 
@@ -90,14 +91,21 @@ func (e *Engine) linkEntities(ctx context.Context, m *domain.Memory, cfg LinkerC
 		maxCand = 8
 	}
 
-	// Find most recent memories of this agent sharing any of the specific entity tags.
+	// The most recent memories of this agent that share a specific entity tag
+	// or content words (so "deploys moved to tuesdays" finds "deploys happen on
+	// fridays", which has no entity tags).
 	rows, err := e.pool.Query(ctx, `
-		SELECT id, content, created_at, document_date, event_date, entity_tags
-		FROM memories
-		WHERE agent_id = $1 AND tenant_id = $2 AND id != $3
-		  AND entity_tags && $4
+		SELECT id, content, created_at, document_date, event_date, entity_tags FROM (
+			(SELECT id, content, created_at, document_date, event_date, entity_tags FROM memories
+			 WHERE agent_id = $1 AND tenant_id = $2 AND id != $3 AND cardinality($4::text[]) > 0 AND entity_tags && $4
+			 ORDER BY created_at DESC LIMIT $5)
+			UNION
+			(SELECT id, content, created_at, document_date, event_date, entity_tags FROM memories
+			 WHERE agent_id = $1 AND tenant_id = $2 AND id != $3 AND $6 != ''
+			   AND to_tsvector('english', content) @@ to_tsquery('english', $6)
+			 ORDER BY created_at DESC LIMIT $5)) c
 		ORDER BY created_at DESC
-		LIMIT $5`, m.AgentID, m.TenantID, m.ID, specificTags, maxCand)
+		LIMIT $5`, m.AgentID, m.TenantID, m.ID, specificTags, maxCand, words)
 	if err != nil {
 		return err
 	}
@@ -124,17 +132,18 @@ func (e *Engine) linkEntities(ctx context.Context, m *domain.Memory, cfg LinkerC
 				shared = append(shared, tl)
 			}
 		}
-		if len(shared) == 0 {
-			continue
-		}
 
-		// Check for contradiction
-		conf := DetectContradiction(m.Content, cand.Content)
+		// A newer fact replaces an older one when they contradict, or when it
+		// restates it (not for episodes: a repeated event is a second event).
+		conf, basis := DetectContradiction(m.Content, cand.Content), "contradiction"
+		if conf < 0.7 && m.MemoryType != domain.Episodic && NearDuplicate(m.Content, cand.Content) {
+			conf, basis = 0.9, "duplicate"
+		}
 		if conf >= 0.7 {
 			// Updates edge: directed newer -> older
 			newerID, olderID := determineTemporalOrder(m, cand)
 			meta, _ := json.Marshal(map[string]any{
-				"basis":           "contradiction",
+				"basis":           basis,
 				"confidence":      conf,
 				"shared_entities": shared,
 			})
@@ -142,7 +151,7 @@ func (e *Engine) linkEntities(ctx context.Context, m *domain.Memory, cfg LinkerC
 				return err
 			}
 			metrics.GraphEdgesCreated.WithLabelValues("updates").Inc()
-		} else {
+		} else if len(shared) > 0 {
 			// Associated edge: undirected, stored canonically (smaller UUID -> larger UUID)
 			srcID, tgtID := m.ID, cand.ID
 			if srcID.String() > tgtID.String() {
@@ -163,6 +172,22 @@ func (e *Engine) linkEntities(ctx context.Context, m *domain.Memory, cfg LinkerC
 		}
 	}
 	return nil
+}
+
+// ftsWords turns content into an OR full-text query of its distinctive words
+// ("deploys | moved | tuesdays"), or "" when there are none.
+func ftsWords(content string) string {
+	var words []string
+	for w := range contentWords(content) {
+		if strings.Trim(w, "0123456789.-") != "" && !strings.ContainsAny(w, ".-") {
+			words = append(words, w)
+		}
+	}
+	slices.Sort(words)
+	if len(words) > 8 {
+		words = words[:8]
+	}
+	return strings.Join(words, " | ")
 }
 
 func (e *Engine) insertEdge(ctx context.Context, tenantID uuid.UUID, src, tgt uuid.UUID, rel domain.RelationType, conf float32, meta json.RawMessage, createdBy string) error {

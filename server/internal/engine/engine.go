@@ -135,7 +135,7 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 		}
 		relations, _ := e.relationsTouching(ctx, resultIDs)
 		intent := DetectQueryIntent(q.Query)
-		resolveSearchContradictions(results, relations, intent == "aggregation")
+		resolveSearchContradictions(results, relations, intent == "aggregation", IsCountingQuery(q.Query))
 		if q.ResolveContradictions {
 			// Intent-aware demotion:
 			// - "historical": user wants past state, do not demote superseded memories
@@ -487,11 +487,11 @@ func resultTime(r domain.SearchResult) time.Time {
 	return time.Time{}
 }
 
-func resolveSearchContradictions(results []domain.SearchResult, relations []domain.Relation, isAggregation ...bool) {
-	agg := false
-	if len(isAggregation) > 0 && isAggregation[0] {
-		agg = true
-	}
+// flags: [0] the query aggregates across events; [1] it counts things, so
+// near-identical memories are separate items and must not collapse.
+func resolveSearchContradictions(results []domain.SearchResult, relations []domain.Relation, flags ...bool) {
+	agg := len(flags) > 0 && flags[0]
+	counting := agg || (len(flags) > 1 && flags[1])
 
 	// An updates edge points from the newer memory to the older one. Older
 	// Evolve runs wrote some edges in arbitrary order, so when both ends are
@@ -522,7 +522,9 @@ func resolveSearchContradictions(results []domain.SearchResult, relations []doma
 	for i := 0; i < len(results); i++ {
 		for j := i + 1; j < len(results); j++ {
 			conf := DetectContradictionWithIntent(results[i].Content, results[j].Content, agg)
-			if conf >= 0.7 {
+			// A restatement makes the older copy redundant, except when counting
+			// ("how many tanks do I currently have"), where repeats are separate items.
+			if conf >= 0.7 || (!counting && NearDuplicate(results[i].Content, results[j].Content)) {
 				ti := resultTime(results[i])
 				tj := resultTime(results[j])
 				if !ti.IsZero() && !tj.IsZero() {
@@ -781,6 +783,12 @@ func (e *Engine) ResolveConflict(ctx context.Context, agentID string, tenantID u
 
 // --- Evolution ----------------------------------------------------------------
 
+// Bounds on one Evolve run, so its cost doesn't grow with the agent's history.
+const (
+	maxEvolveEpisodes = 50  // episodes folded into one consolidated memory
+	maxEvolveFacts    = 300 // facts compared pairwise for contradictions (~45k pairs)
+)
+
 // Evolve consolidates recent episodic memories into one semantic memory and
 // links contradicting profile/semantic memories with "updates" relations.
 func (e *Engine) Evolve(ctx context.Context, agentID string, tenantID uuid.UUID) (*domain.EvolutionResult, error) {
@@ -794,10 +802,17 @@ func (e *Engine) Evolve(ctx context.Context, agentID string, tenantID uuid.UUID)
 	}
 	defer tx.Rollback(ctx)
 
-	rows, err := tx.Query(ctx, `SELECT id, content FROM memories
-		WHERE agent_id = $1 AND tenant_id = $2 AND memory_type = 'episodic'
-		  AND created_at > NOW() - INTERVAL '30 days' AND COALESCE(confidence, 1.0) > 0.1
-		ORDER BY created_at`, agentID, tenantID)
+	// Only episodes no earlier run has consolidated (they'd have a "derives"
+	// edge), so re-running Evolve never re-summarises the same memories; the
+	// newest maxEvolveEpisodes of them, oldest first.
+	rows, err := tx.Query(ctx, `SELECT id, content FROM (
+			SELECT id, content, created_at FROM memories m
+			WHERE agent_id = $1 AND tenant_id = $2 AND memory_type = 'episodic'
+			  AND created_at > NOW() - INTERVAL '30 days' AND COALESCE(confidence, 1.0) > 0.1
+			  AND NOT EXISTS (SELECT 1 FROM memory_relations r
+			                  WHERE r.source_memory_id = m.id AND r.relation_type = 'derives')
+			ORDER BY created_at DESC LIMIT $3) recent
+		ORDER BY created_at`, agentID, tenantID, maxEvolveEpisodes)
 	if err != nil {
 		return nil, err
 	}
@@ -842,9 +857,13 @@ func (e *Engine) Evolve(ctx context.Context, agentID string, tenantID uuid.UUID)
 		patterns = append(patterns, "Consolidated episodic clusters into semantic core")
 	}
 
-	rows, err = tx.Query(ctx, `SELECT id, content, COALESCE(event_date, document_date, created_at) FROM memories
+	// Every pair is compared, so cap the facts: the newest maxEvolveFacts.
+	// shortcut: older facts aren't compared with each other; replace with
+	// write-time neighbour checks (evolution roadmap, phase 1).
+	rows, err = tx.Query(ctx, `SELECT id, content, COALESCE(event_date, document_date, created_at) AS at FROM memories
 		WHERE agent_id = $1 AND tenant_id = $2 AND memory_type IN ('profile', 'semantic')
-		  AND COALESCE(confidence, 1.0) > 0.3`, agentID, tenantID)
+		  AND COALESCE(confidence, 1.0) > 0.3
+		ORDER BY at DESC LIMIT $3`, agentID, tenantID, maxEvolveFacts)
 	if err != nil {
 		return nil, err
 	}

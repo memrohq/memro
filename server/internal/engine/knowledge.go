@@ -103,6 +103,109 @@ func keyValueSlot(s string) (key, val string, ok bool) {
 	return key, val, true
 }
 
+// normSubject drops a leading "the" so "the billing contact" and "billing
+// contact" are one subject.
+func normSubject(s string) string {
+	return strings.TrimPrefix(strings.TrimSpace(s), "the ")
+}
+
+type factSlot struct {
+	kind      int // index into reSlotPatterns; "key: value" counts as 0 ("X is Y")
+	subj, val string
+}
+
+// factSlots returns every (subject, value) pair the slot patterns and the
+// "key: value" form find in a cleaned sentence.
+func factSlots(s string) []factSlot {
+	var out []factSlot
+	for i, re := range reSlotPatterns {
+		if m := re.FindStringSubmatch(s); len(m) >= 3 && strings.TrimSpace(m[1]) != "" {
+			out = append(out, factSlot{i, normSubject(m[1]), strings.TrimSpace(m[2])})
+		}
+	}
+	if k, v, ok := keyValueSlot(s); ok {
+		out = append(out, factSlot{0, normSubject(k), v})
+	}
+	return out
+}
+
+var (
+	// "deploys moved to tuesdays", "memro moved its data from mongodb to postgres"
+	reChange = regexp.MustCompile(`^(.+?)\s+(?:has\s+|have\s+|had\s+|was\s+|were\s+)?(?:moved|changed|switched|shifted|migrated)\b(.*?)\s+to\s+(.+)$`)
+	// "the team offsite is in lisbon", "deploys happen on fridays"
+	reWhereWhen  = regexp.MustCompile(`^(.+?)\s+(?:is|are|was|were|happens?|takes?\s+place|(?:is|are)\s+held)\s+(?:in|on|at|every)\b`)
+	reTimeWord   = regexp.MustCompile(`\b(mondays?|tuesdays?|wednesdays?|thursdays?|fridays?|saturdays?|sundays?|weekends?|mornings?|afternoons?|evenings?|nights?|daily|weekly|monthly|january|february|march|april|may|june|july|august|september|october|november|december|\d{1,2}(:\d\d)?\s*(am|pm))\b`)
+	reProperName = regexp.MustCompile(`\b[A-Z][a-z]`)
+	// "invoice 1042", "order #77", "PR 57", "#12"
+	reIdentifier = regexp.MustCompile(`(?:\b(?:invoice|order|ticket|issue|pr|case|ref|id|no)\s*#?|#)\s*\d+`)
+)
+
+// changeReplaces reports whether change ("X moved/changed/switched [from A]
+// to B", raw text) replaces other: other mentions the A it moved from, or says
+// where or when X is with a value of the same kind as B (both times, or both
+// named places), and doesn't already say B. "Ana moved to the Berlin office"
+// leaves "Ana is in the design team" alone.
+func changeReplaces(changeRaw, otherRaw string) bool {
+	change, other := cleanText(changeRaw), cleanText(otherRaw)
+	m := reChange.FindStringSubmatch(change)
+	if m == nil {
+		return false
+	}
+	subj, mid, to := normSubject(m[1]), m[2], strings.TrimSpace(m[3])
+	if subj == "" || to == "" || strings.Contains(other, to) {
+		return false
+	}
+	if i := strings.Index(mid, "from "); i >= 0 {
+		from := strings.TrimSpace(mid[i+len("from "):])
+		if from != "" && strings.HasPrefix(normSubject(other), subj) && strings.Contains(other, from) {
+			return true
+		}
+	}
+	loc := reWhereWhen.FindStringSubmatchIndex(other)
+	if loc == nil || normSubject(other[loc[2]:loc[3]]) != subj {
+		return false
+	}
+	// cleanText only lowercases and trims, so offsets map back to the raw text.
+	otherVal := strings.TrimSpace(strings.TrimSpace(otherRaw)[loc[1]:])
+	toRaw := strings.TrimSpace(strings.TrimSpace(changeRaw)[strings.LastIndex(change, to):])
+	if tA, tB := reTimeWord.MatchString(to), reTimeWord.MatchString(strings.ToLower(otherVal)); tA || tB {
+		return tA && tB
+	}
+	return reProperName.MatchString(toRaw) && reProperName.MatchString(otherVal)
+}
+
+// NearDuplicate reports whether two memories say the same thing in nearly the
+// same words: at least three content words each, and 80% of them shared.
+func NearDuplicate(a, b string) bool {
+	wa, wb := contentWords(a), contentWords(b)
+	if len(wa) < 3 || len(wb) < 3 {
+		return false
+	}
+	shared := 0
+	for w := range wa {
+		if wb[w] {
+			shared++
+		}
+	}
+	return float64(shared)/float64(len(wa)+len(wb)-shared) >= 0.8
+}
+
+var stopWords = map[string]bool{"the": true, "and": true, "for": true, "are": true, "was": true, "with": true,
+	"this": true, "that": true, "its": true, "our": true, "your": true, "has": true, "have": true}
+
+func contentWords(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '-')
+	}) {
+		w = strings.Trim(w, ".-")
+		if len(w) >= 3 && !stopWords[w] {
+			out[w] = true
+		}
+	}
+	return out
+}
+
 func cleanText(s string) string {
 	s = strings.TrimSpace(strings.ToLower(s))
 	s = strings.TrimRight(s, ".!?,;")
@@ -128,25 +231,21 @@ func DetectContradictionWithIntent(a, b string, isAggregation bool) float32 {
 	// 1. Slot-based conflict: same subject & relation, conflicting values
 	// e.g. "billing contact is Marco" vs "billing contact is Ana"
 	// e.g. "user prefers TypeScript" vs "user prefers Python"
-	for _, re := range reSlotPatterns {
-		mA := re.FindStringSubmatch(al)
-		mB := re.FindStringSubmatch(bl)
-		if len(mA) >= 3 && len(mB) >= 3 {
-			subjA, valA := strings.TrimSpace(mA[1]), strings.TrimSpace(mA[2])
-			subjB, valB := strings.TrimSpace(mB[1]), strings.TrimSpace(mB[2])
-			if subjA == subjB && valA != valB {
-				if !strings.Contains(valA, valB) && !strings.Contains(valB, valA) {
-					return 0.75
-				}
+	// Slots of the same kind are compared; "X is Y" and "X: Y" are one kind, so
+	// "the renewal owner is Marco" and "renewal owner: Ana" meet.
+	for _, sa := range factSlots(al) {
+		for _, sb := range factSlots(bl) {
+			if sa.kind == sb.kind && sa.subj == sb.subj && sa.val != sb.val &&
+				!strings.Contains(sa.val, sb.val) && !strings.Contains(sb.val, sa.val) {
+				return 0.75
 			}
 		}
 	}
 
-	if kA, vA, ok := keyValueSlot(al); ok {
-		if kB, vB, ok := keyValueSlot(bl); ok && kA == kB && vA != vB &&
-			!strings.Contains(vA, vB) && !strings.Contains(vB, vA) {
-			return 0.75
-		}
+	// A change statement ("deploys moved to tuesdays") replaces an earlier
+	// statement of where or when the same subject was.
+	if changeReplaces(a, b) || changeReplaces(b, a) {
+		return 0.75
 	}
 
 	// 2. Direct Negation with common root topic
@@ -207,10 +306,13 @@ func DetectContradictionWithIntent(a, b string, isAggregation bool) float32 {
 	// The statements must say nearly the same thing apart from the numbers:
 	// sharing a couple of words ("I ran 5 miles at the park" vs "I walked 2
 	// miles at the park") is not enough.
-	numsA := reDurationOrNumber.FindAllString(al, -1)
-	numsB := reDurationOrNumber.FindAllString(bl, -1)
+	// Identifiers ("invoice 1042", "#57") name different things; they aren't
+	// quantities that changed.
+	qa, qb := reIdentifier.ReplaceAllString(al, " "), reIdentifier.ReplaceAllString(bl, " ")
+	numsA := reDurationOrNumber.FindAllString(qa, -1)
+	numsB := reDurationOrNumber.FindAllString(qb, -1)
 	if len(numsA) > 0 && len(numsB) > 0 && !slices.ContainsFunc(numsA, func(n string) bool { return slices.Contains(numsB, n) }) {
-		if wordJaccard(reDurationOrNumber.ReplaceAllString(al, " "), reDurationOrNumber.ReplaceAllString(bl, " ")) >= 0.6 {
+		if wordJaccard(reDurationOrNumber.ReplaceAllString(qa, " "), reDurationOrNumber.ReplaceAllString(qb, " ")) >= 0.6 {
 			return 0.75
 		}
 	}

@@ -230,3 +230,82 @@ func TestPickDiverseSpreadsAcrossConversations(t *testing.T) {
 		t.Fatalf("cap of two: %v", got)
 	}
 }
+
+// Updates found by the evolution benchmark's scenarios, and the traps that
+// must stay independent (a false update hides a true fact).
+func TestDetectContradictionChangesAndTraps(t *testing.T) {
+	conflicts := [][2]string{
+		{"The renewal owner is Marco.", "Renewal owner: Ana, since September."},
+		{"Deploys happen on Fridays.", "Deploys moved to Tuesdays."},
+		{"The team offsite is in Lisbon.", "The team offsite moved to Porto."},
+		{"Memro stores its data in MongoDB.", "Memro moved its data from MongoDB to Postgres."},
+	}
+	for _, c := range conflicts {
+		if got := DetectContradiction(c[0], c[1]); got < 0.7 {
+			t.Errorf("DetectContradiction(%q, %q) = %.2f, want >= 0.7", c[0], c[1], got)
+		}
+	}
+	independent := [][2]string{
+		{"Deploys run on Kubernetes.", "Deploys moved to Tuesdays."},
+		{"Ana is in the design team.", "Ana moved to the Berlin office."},
+		{"Paid invoice 1042 to Acme on Monday.", "Paid invoice 1043 to Acme on Monday."},
+		{"Memro supports Cursor.", "Memro supports Codex."},
+		{"The staging database is Postgres 16.", "The staging database runs in asia-south1."},
+		{"Ana handles billing questions.", "Ana prefers tea over coffee."},
+		{"The office moved to Berlin.", "The office is Ana's favourite place."},
+	}
+	for _, c := range independent {
+		if got := DetectContradiction(c[0], c[1]); got >= 0.7 {
+			t.Errorf("DetectContradiction(%q, %q) = %.2f, want < 0.7 (independent facts)", c[0], c[1], got)
+		}
+	}
+}
+
+func TestNearDuplicate(t *testing.T) {
+	same := [][2]string{
+		{"The API server is written in Go.", "The API server is written in Go."},
+		{"Always review database migrations by hand before deploying.", "Review database migrations by hand before deploying, always."},
+	}
+	for _, c := range same {
+		if !NearDuplicate(c[0], c[1]) {
+			t.Errorf("NearDuplicate(%q, %q) = false, want true", c[0], c[1])
+		}
+	}
+	different := [][2]string{
+		{"Paid invoice 1042 to Acme on Monday.", "Paid invoice 1043 to Acme on Monday."},
+		{"Memro supports Cursor, Codex and Windsurf.", "Memro supports Cursor, Codex and Copilot."},
+		{"Use pnpm.", "Use npm."}, // too short to call
+	}
+	for _, c := range different {
+		if NearDuplicate(c[0], c[1]) {
+			t.Errorf("NearDuplicate(%q, %q) = true, want false", c[0], c[1])
+		}
+	}
+}
+
+// Counting questions keep near-identical memories: they're separate items.
+func TestCountingQueriesKeepNearDuplicates(t *testing.T) {
+	if !IsCountingQuery("How many tanks do I currently have?") || IsCountingQuery("What's my current tank setup?") {
+		t.Fatal("IsCountingQuery misclassified")
+	}
+	day := func(d int) *string { s := time.Date(2026, 1, d, 0, 0, 0, 0, time.UTC).Format(time.RFC3339); return &s }
+	mk := func() []domain.SearchResult {
+		return []domain.SearchResult{
+			{MemoryID: uuid.NewString(), Content: "I set up a new 20 gallon freshwater tank with tetras.", EventDate: day(1)},
+			{MemoryID: uuid.NewString(), Content: "I set up a new 20 gallon freshwater tank with guppies.", EventDate: day(5)},
+			{MemoryID: uuid.NewString(), Content: "Set up a new 20 gallon freshwater tank with tetras today.", EventDate: day(9)},
+		}
+	}
+	counting := mk()
+	resolveSearchContradictions(counting, nil, false, true)
+	for _, r := range counting {
+		if r.IsSuperseded {
+			t.Errorf("counting query superseded %q", r.Content)
+		}
+	}
+	plain := mk()
+	resolveSearchContradictions(plain, nil)
+	if !plain[0].IsSuperseded {
+		t.Errorf("non-counting query should collapse the older restatement %q", plain[0].Content)
+	}
+}
