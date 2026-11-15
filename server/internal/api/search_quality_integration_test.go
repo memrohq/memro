@@ -169,3 +169,59 @@ func TestKeywordSearchFindsEmailAndDomainParts(t *testing.T) {
 		t.Fatalf("keyword search does not use idx_memories_tsv:\n%s", plan)
 	}
 }
+
+// The fused score ranks; it doesn't measure relevance, so an unrelated query
+// still gets high scores. Similarity is what a "relevant only" threshold needs
+// (MR-2026-03's distractor test).
+func TestSearchReturnsSimilarityForThresholds(t *testing.T) {
+	e := setup(t)
+	a := newAgent(t)
+	e.register(a)
+	for _, c := range []string{
+		"The office pantry is restocked on Mondays.",
+		"Visitor badges are printed at the front desk.",
+		"The team retreat is in the mountains this year.",
+		"The projector in room four needs an HDMI adapter.",
+		"Production release freeze window starts December 15th at 18:00 UTC.",
+	} {
+		e.remember(a, c, "semantic")
+	}
+	e.waitEmbedded(a, 5)
+	search := func(q string) (results []struct {
+		Content    string   `json:"content"`
+		Score      float32  `json:"score"`
+		Similarity *float32 `json:"similarity"`
+	}) {
+		t.Helper()
+		code, body := e.do(&a, "v2", "GET", "/search?query="+url.QueryEscape(q)+"&limit=5", nil, nil)
+		e.must(200, code, body, "search "+q)
+		var r struct {
+			Results []struct {
+				Content    string   `json:"content"`
+				Score      float32  `json:"score"`
+				Similarity *float32 `json:"similarity"`
+			} `json:"results"`
+		}
+		_ = json.Unmarshal(body, &r)
+		return r.Results
+	}
+
+	unrelated := search("quantum cryptography entanglement simulation algorithms")
+	if len(unrelated) == 0 {
+		t.Fatal("expected candidates for the unrelated query")
+	}
+	for _, r := range unrelated {
+		if r.Similarity == nil || *r.Similarity >= 0.4 {
+			t.Fatalf("unrelated result %q: similarity %v, want < 0.4", r.Content, r.Similarity)
+		}
+	}
+	if unrelated[0].Score < 0.4 {
+		t.Fatalf("expected the rank-based score to stay high (%v): the reason it can't be a threshold", unrelated[0].Score)
+	}
+
+	related := search("production release freeze window date and time")
+	if len(related) == 0 || related[0].Similarity == nil || *related[0].Similarity < 0.4 ||
+		!strings.Contains(related[0].Content, "freeze window") {
+		t.Fatalf("related query: %+v", related)
+	}
+}

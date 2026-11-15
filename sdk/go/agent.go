@@ -205,9 +205,14 @@ func (a *Agent) Recall(ctx context.Context, query string, opts *RecallOptions) (
 	if err != nil || opts.MinScore <= 0 {
 		return res, err
 	}
+	// Score is rank-based; Similarity measures relevance (Score only when there's no embedding).
 	kept := res[:0]
 	for _, r := range res {
-		if r.Score >= opts.MinScore {
+		v := r.Score
+		if r.Similarity != nil {
+			v = *r.Similarity
+		}
+		if v >= opts.MinScore {
 			kept = append(kept, r)
 		}
 	}

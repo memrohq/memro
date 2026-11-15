@@ -189,6 +189,8 @@ class Agent:
     ) -> List[SearchResult]:
         """
         Search memories semantically or via hybrid retrieval.
+
+        min_score drops results whose similarity to the query (0..1) is below it.
         """
         raw = self.client.search(
             agent_id=self.agent_id,
@@ -200,7 +202,8 @@ class Agent:
         )
         results = [SearchResult(**r) for r in raw]
         if min_score is not None:
-            results = [r for r in results if r.score >= min_score]
+            # score is rank-based; similarity measures relevance (score only when there's no embedding)
+            results = [r for r in results if (r.similarity if r.similarity is not None else r.score) >= min_score]
         return results
 
     def recall_temporal(

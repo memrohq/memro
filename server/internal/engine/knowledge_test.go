@@ -338,3 +338,28 @@ func TestNegationNeedsTheSameClaim(t *testing.T) {
 		}
 	}
 }
+
+// Sentiment and negation words count only as whole words: "badge" isn't "bad",
+// "likely" isn't "like", and "dislike" isn't also "like".
+func TestSentimentAndNegationAreWholeWords(t *testing.T) {
+	notConflicts := [][2]string{
+		{"Picked up my badge at the front desk.", "Good coffee at the front desk."},
+		{"The bestseller list came out today.", "The worst traffic was on Monday."},
+		{"Nothing changed in the release notes.", "The release notes changed."},
+	}
+	for _, p := range notConflicts {
+		if c := DetectContradiction(p[0], p[1]); c != 0 {
+			t.Errorf("%q vs %q: %v, want 0", p[0], p[1], c)
+		}
+	}
+	conflicts := [][2]string{
+		{"Users like the new dashboard.", "Users dislike the new dashboard."},
+		{"I loved hiking in the hills.", "I hated hiking in the hills."},
+		{"We use the staging cluster.", "We do not use the staging cluster."},
+	}
+	for _, p := range conflicts {
+		if c := DetectContradiction(p[0], p[1]); c < 0.7 {
+			t.Errorf("%q vs %q: %v, want >= 0.7", p[0], p[1], c)
+		}
+	}
+}

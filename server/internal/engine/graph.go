@@ -312,7 +312,7 @@ func (e *Engine) ExpandGraph(ctx context.Context, q domain.SearchQuery, tenantID
 		candScoreMap[c.targetID] = c.finalScore
 	}
 
-	loadedGraphResults, err := e.loadResults(timeoutCtx, candIDs, candScoreMap)
+	loadedGraphResults, err := e.loadResults(timeoutCtx, candIDs, candScoreMap, nil)
 	if err != nil {
 		metrics.GraphExpansionErrors.Inc()
 		return hybridResults, &domain.GraphDiagnostics{

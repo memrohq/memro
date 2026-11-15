@@ -68,9 +68,11 @@ type BatchMemoryResponse struct {
 
 // SearchResult is one search hit.
 type SearchResult struct {
-	MemoryID     string           `json:"memory_id"`
-	Content      string           `json:"content"`
-	Score        float64          `json:"score"`
+	MemoryID string  `json:"memory_id"`
+	Content  string  `json:"content"`
+	Score    float64 `json:"score"`
+	// Similarity is the cosine similarity to the query; nil when either has no embedding.
+	Similarity   *float64         `json:"similarity,omitempty"`
 	MemoryType   MemoryType       `json:"memory_type"`
 	CreatedAt    string           `json:"created_at"`
 	DocumentDate *string          `json:"document_date,omitempty"`
@@ -223,7 +225,7 @@ type RecallOptions struct {
 	Limit             int // default 10, max 50
 	Type              MemoryType
 	Mode              SearchMode // default hybrid
-	MinScore          float64
+	MinScore          float64 // drop results whose Similarity (Score without an embedding) is below this
 	Graph             string // "legacy", "bounded", "rerank", "selective"
 	AdaptiveDiversity *bool  // cap results per session for count/total/list queries; nil uses the server default
 	MaxPerSession     int    // explicit cap on candidates per conversation session

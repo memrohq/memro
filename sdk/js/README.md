@@ -71,6 +71,7 @@ await agent.export();
 ## Search
 
 ```ts
+// minScore keeps results whose similarity to the query is at least 0.3
 const results = await agent.recall('what language is billing in?', { limit: 5, mode: 'hybrid', minScore: 0.3 });
 const recent = await agent.recallTemporal('deploy incidents', { afterDate: '2026-09-01T00:00:00Z', temporalWeight: 0.6 });
 ```

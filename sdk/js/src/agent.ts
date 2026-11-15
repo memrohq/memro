@@ -119,7 +119,8 @@ export class Agent {
       graph: options.graph, adaptive_diversity: options.adaptiveDiversity,
       max_per_session: options.maxPerSession,
     }, this.signer);
-    return options.minScore === undefined ? res.results : res.results.filter((r) => r.score >= options.minScore!);
+    // score is rank-based; similarity measures relevance (score only when there's no embedding).
+    return options.minScore === undefined ? res.results : res.results.filter((r) => (r.similarity ?? r.score) >= options.minScore!);
   }
 
   /** Search with date filters and a recency boost. */

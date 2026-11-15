@@ -150,9 +150,15 @@ how many, and how close together), so a natural-language question finds them.
 
 ```json
 { "results": [ { "memory_id": "8d0e…", "content": "Ana leads the platform team", "score": 0.91,
-                 "memory_type": "profile", "created_at": "2026-10-19T08:00:00Z", "asset_url": null } ],
+                 "similarity": 0.63, "memory_type": "profile", "created_at": "2026-10-19T08:00:00Z", "asset_url": null } ],
   "mode": "hybrid", "latency_ms": 42, "total": 1 }
 ```
+
+`score` orders the results: in `hybrid` mode it comes from the ranks in the
+semantic and keyword lists, so the top results score high even when nothing
+is relevant. `similarity` is the cosine similarity between the query and the
+memory (absent when either has no embedding); threshold on it to keep only
+relevant results. The SDKs' `min_score` does this ([ADR 0033](decisions/0033-similarity-thresholds-and-whole-word-rules.md)).
 
 Covers the last 90 days. Identical searches are cached for up to 5 minutes;
 the cache is cleared when the agent's memories change.

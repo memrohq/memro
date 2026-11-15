@@ -116,7 +116,7 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 		return nil, err
 	}
 
-	results, err := e.loadResults(ctx, order, scores)
+	results, err := e.loadResults(ctx, order, scores, vec)
 	if err != nil {
 		return nil, err
 	}
@@ -406,7 +406,9 @@ func (e *Engine) keywordHits(ctx context.Context, q domain.SearchQuery, tenantID
 	return hits, rows.Err()
 }
 
-func (e *Engine) loadResults(ctx context.Context, ids []uuid.UUID, scores map[uuid.UUID]float32) ([]domain.SearchResult, error) {
+// loadResults loads the memories in ids, in that order, with their scores and,
+// when vec is the query's embedding, their cosine similarity to it.
+func (e *Engine) loadResults(ctx context.Context, ids []uuid.UUID, scores map[uuid.UUID]float32, vec []float32) ([]domain.SearchResult, error) {
 	results := []domain.SearchResult{}
 	if len(ids) == 0 {
 		return results, nil
@@ -415,7 +417,14 @@ func (e *Engine) loadResults(ctx context.Context, ids []uuid.UUID, scores map[uu
 		last_accessed_at = NOW() WHERE id = ANY($1)`, ids); err != nil {
 		slog.Warn("access tracking failed", "err", err)
 	}
-	rows, err := e.pool.Query(ctx, `SELECT id, content, memory_type, created_at, asset_url, document_date, event_date, session_id FROM memories WHERE id = ANY($1)`, ids)
+	var qvec any // NULL when there's no query embedding
+	if vec != nil {
+		qvec = pgvector.NewVector(vec)
+	}
+	rows, err := e.pool.Query(ctx, `SELECT m.id, m.content, m.memory_type, m.created_at, m.asset_url, m.document_date,
+			m.event_date, m.session_id, (1 - (emb.embedding <=> $2))::REAL
+		FROM memories m LEFT JOIN memory_embeddings emb ON emb.memory_id = m.id AND emb.dims = $3
+		WHERE m.id = ANY($1)`, ids, qvec, len(vec))
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +437,7 @@ func (e *Engine) loadResults(ctx context.Context, ids []uuid.UUID, scores map[uu
 		var docDate *time.Time
 		var evDate *time.Time
 		var sessID *uuid.UUID
-		if err := rows.Scan(&id, &r.Content, &r.MemoryType, &created, &r.AssetURL, &docDate, &evDate, &sessID); err != nil {
+		if err := rows.Scan(&id, &r.Content, &r.MemoryType, &created, &r.AssetURL, &docDate, &evDate, &sessID, &r.Similarity); err != nil {
 			return nil, err
 		}
 		r.MemoryID = id.String()
