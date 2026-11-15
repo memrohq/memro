@@ -37,6 +37,7 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0029](0029-staff-console.md) | A staff console for running Memro | 2026-11-14 | Accepted |
 | [0030](0030-owners-read-end-users-memories.md) | Organisation owners can read their users' memories | 2026-11-14 | Accepted |
 | [0031](0031-graph-view-at-scale.md) | The memory graph in 2D WebGL, then summaries for millions | 2026-11-14 | Accepted |
+| [0032](0032-temporal-facts-provenance-and-audit.md) | Temporal facts, source-aware writes, agent edits and an auditable history | 2026-11-15 | Proposed |
 
 Template:
 
