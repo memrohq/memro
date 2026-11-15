@@ -131,4 +131,22 @@ func TestUpdateMemoryReplacesAndRecords(t *testing.T) {
 	}
 	code, b = e.do(&a, "v2", "PUT", "/memory/"+id, upd, nil)
 	e.must(404, code, b, "update an archived memory")
+
+	// Two updates at once: exactly one wins and only one version stays live.
+	id2 := e.remember(a, "The office is in Pune.", "semantic")
+	codes := make(chan int, 2)
+	for _, c := range []string{"The office is in Delhi.", "The office is in Goa."} {
+		go func(c string) {
+			code, _ := e.do(&a, "v2", "PUT", "/memory/"+id2, j(map[string]any{"content": c, "reason": "moved"}), nil)
+			codes <- code
+		}(c)
+	}
+	c1, c2 := <-codes, <-codes
+	if c1+c2 != 200+409 && c1+c2 != 200+404 {
+		t.Fatalf("concurrent updates = %d, %d", c1, c2)
+	}
+	_, b = e.do(&a, "v2", "GET", "/memory/agent/"+a.id, nil, nil)
+	if strings.Contains(string(b), "Delhi") == strings.Contains(string(b), "Goa") {
+		t.Fatalf("want exactly one live version, memories = %s", b)
+	}
 }

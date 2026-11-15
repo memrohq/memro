@@ -790,9 +790,19 @@ func (s *Server) updateMemory(w http.ResponseWriter, r *http.Request) {
 	if !s.saveMemory(w, r, a, m, "memory.create") {
 		return
 	}
-	if _, _, err := s.store.ArchiveMemory(r.Context(), id, a.ID, a.TenantID, req.Reason); err != nil {
+	row, _, err := s.store.ArchiveMemory(r.Context(), id, a.ID, a.TenantID, req.Reason)
+	if err != nil {
 		slog.Error("archive replaced memory", "err", err)
 		httpError(w, http.StatusInternalServerError, "Saved the new version but failed to archive the old one")
+		return
+	}
+	if row == nil {
+		// A concurrent update or delete got there first; drop our version so two don't stay live.
+		if _, _, err := s.store.DeleteMemory(r.Context(), m.ID, a.ID, a.TenantID); err != nil {
+			slog.Error("drop losing update", "err", err)
+		}
+		s.engine.Cache().InvalidateAgent(a.ID)
+		httpError(w, http.StatusConflict, "Memory was changed by another request; fetch it again")
 		return
 	}
 	s.engine.Cache().InvalidateAgent(a.ID)
