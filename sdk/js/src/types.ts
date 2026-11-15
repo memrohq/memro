@@ -32,6 +32,8 @@ export interface SearchResult {
   memory_id: string;
   content: string;
   score: number;
+  /** Cosine similarity to the query; absent when either has no embedding. */
+  similarity?: number;
   memory_type: MemoryType;
   created_at: string;
   document_date?: string | null;
@@ -189,7 +191,7 @@ export interface RecallOptions {
   limit?: number;
   type?: MemoryType;
   mode?: SearchMode;
-  /** Drop results scoring below this (0..1). */
+  /** Drop results whose similarity to the query is below this (0..1). */
   minScore?: number;
   graph?: 'legacy' | 'bounded' | 'rerank' | 'selective';
   adaptiveDiversity?: boolean;

@@ -32,6 +32,8 @@ class SearchResult(BaseModel):
     memory_id: str
     content: str
     score: float
+    # Cosine similarity to the query (None when either has no embedding).
+    similarity: Optional[float] = None
     memory_type: str
     created_at: str
     asset_url: Optional[str] = None

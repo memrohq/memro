@@ -70,9 +70,14 @@ func Classify(content string) []Classification {
 // --- Contradictions & conflict resolution ------------------------------------
 
 var (
+	// Sentiment stems, ignored when deciding whether two statements make the same claim.
 	positiveWords = []string{"love", "like", "enjoy", "great", "good", "best", "prefer"}
 	negativeWords = []string{"hate", "dislike", "bad", "worst", "terrible", "avoid"}
-	negationWords = []string{"not ", "never ", "don't ", "do not ", "doesn't ", "cannot ", "can't ", "avoid ", "stop "}
+	// Whole words only: as substrings, "like" matched "likely" and "dislike",
+	// "bad" matched "badge" and "best" matched "bestseller".
+	rePositive = regexp.MustCompile(`\b(?:lov(?:e|es|ed|ing)|lik(?:e|es|ed|ing)|enjoy(?:s|ed|ing)?|great|good|best|prefer(?:s|red|ring)?)\b`)
+	reNegative = regexp.MustCompile(`\b(?:hat(?:e|es|ed|ing)|dislik(?:e|es|ed|ing)|bad|worst|terrible|avoid(?:s|ed|ing)?)\b`)
+	reNegation = regexp.MustCompile(`\b(?:not|never|don't|do not|doesn't|cannot|can't|avoid|stop)\b`)
 
 	reSlotPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)^(.+?)\s+(?:is|was|are|were|be|has been)\s+(?:a|an|the\s+)?(.+)$`),
@@ -296,21 +301,10 @@ func DetectContradictionWithIntent(a, b string, isAggregation bool) float32 {
 	}
 
 	// 2. Direct Negation with common root topic
-	hasNeg := func(s string) bool {
-		for _, w := range negationWords {
-			if strings.Contains(s, w) {
-				return true
-			}
-		}
-		return false
-	}
-	negA, negB := hasNeg(al), hasNeg(bl)
+	negA, negB := reNegation.MatchString(al), reNegation.MatchString(bl)
 	if negA != negB {
 		stripNeg := func(s string) string {
-			for _, w := range negationWords {
-				s = strings.ReplaceAll(s, w, " ")
-			}
-			return strings.Join(strings.Fields(s), " ")
+			return strings.Join(strings.Fields(reNegation.ReplaceAllString(s, " ")), " ")
 		}
 		// "never use npm" contradicts "we use npm …" whatever else either says.
 		if negatesUse(al, bl) || negatesUse(bl, al) {
@@ -325,11 +319,8 @@ func DetectContradictionWithIntent(a, b string, isAggregation bool) float32 {
 	}
 
 	// 3. Sentiment / polarity flip
-	has := func(s string, words []string) bool {
-		return slices.ContainsFunc(words, func(w string) bool { return strings.Contains(s, w) })
-	}
-	aPos, aNeg := has(al, positiveWords), has(al, negativeWords)
-	bPos, bNeg := has(bl, positiveWords), has(bl, negativeWords)
+	aPos, aNeg := rePositive.MatchString(al), reNegative.MatchString(al)
+	bPos, bNeg := rePositive.MatchString(bl), reNegative.MatchString(bl)
 	if (aPos && bNeg) || (aNeg && bPos) {
 		if sameClaim(al, bl, append(slices.Clone(positiveWords), negativeWords...)) {
 			return 0.7

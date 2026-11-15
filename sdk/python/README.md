@@ -62,8 +62,9 @@ agent.export()                                  # ExportData(total, memories, ..
 ## Search
 
 ```python
+# min_score keeps results whose similarity to the query is at least 0.3
 for r in agent.recall("what language is billing in?", limit=5, mode="hybrid", min_score=0.3):
-    print(r.score, r.content)                    # SearchResult
+    print(r.similarity, r.content)               # SearchResult (score orders, similarity measures relevance)
 
 agent.recall_temporal("deploy incidents", after_date="2026-09-01T00:00:00Z", temporal_weight=0.6)
 ```

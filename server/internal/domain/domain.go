@@ -167,9 +167,13 @@ type ResultGraphInfo struct {
 }
 
 type SearchResult struct {
-	MemoryID     string           `json:"memory_id"`
-	Content      string           `json:"content"`
-	Score        float32          `json:"score"`
+	MemoryID string  `json:"memory_id"`
+	Content  string  `json:"content"`
+	Score    float32 `json:"score"`
+	// Similarity is the cosine similarity between the query and the memory's
+	// embedding, when both exist. Score is rank-based (fused) and suits ordering;
+	// Similarity is the one to threshold on ("only relevant results").
+	Similarity   *float32         `json:"similarity,omitempty"`
 	MemoryType   string           `json:"memory_type"`
 	CreatedAt    string           `json:"created_at"`
 	DocumentDate *string          `json:"document_date,omitempty"`

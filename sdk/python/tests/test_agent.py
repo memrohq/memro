@@ -136,6 +136,14 @@ def test_recall_min_score_filter(mock_agent):
     results = mock_agent.recall("what does user like?", min_score=0.99)
     assert len(results) == 0  # 0.95 < 0.99
 
+def test_recall_min_score_uses_similarity(mock_agent):
+    # The fused score is high for any top-ranked result; similarity decides relevance.
+    mock_agent.client.search.return_value = [
+        {"memory_id": "a", "content": "related", "score": 0.9, "similarity": 0.62, "memory_type": "semantic", "created_at": "2026-11-15T00:00:00Z"},
+        {"memory_id": "b", "content": "unrelated", "score": 0.95, "similarity": 0.12, "memory_type": "semantic", "created_at": "2026-11-15T00:00:00Z"},
+    ]
+    assert [r.content for r in mock_agent.recall("q", min_score=0.4)] == ["related"]
+
 def test_get_recent(mock_agent):
     memories = mock_agent.get_recent(limit=5)
     assert len(memories) == 1
