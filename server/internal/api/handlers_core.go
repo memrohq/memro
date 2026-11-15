@@ -666,7 +666,18 @@ func (s *Server) listMemories(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.Atoi(q.Get("limit")); err == nil && v > 0 {
 		limit = min(v, 100)
 	}
-	mems, err := s.store.ListMemories(r.Context(), agentID, a.TenantID, q.Get("memory_type"), q.Get("visibility"), limit)
+	var mems []domain.Memory
+	var err error
+	if v := q.Get("as_of"); v != "" {
+		asOf, perr := time.Parse(time.RFC3339, v)
+		if perr != nil {
+			httpError(w, http.StatusBadRequest, "as_of must be an RFC 3339 time")
+			return
+		}
+		mems, err = s.store.ListMemoriesAsOf(r.Context(), agentID, a.TenantID, q.Get("memory_type"), q.Get("visibility"), asOf, limit)
+	} else {
+		mems, err = s.store.ListMemories(r.Context(), agentID, a.TenantID, q.Get("memory_type"), q.Get("visibility"), limit)
+	}
 	if err != nil {
 		slog.Error("list memories", "err", err)
 		httpError(w, http.StatusInternalServerError, "Failed to retrieve memories")

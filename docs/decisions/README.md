@@ -39,6 +39,7 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0031](0031-graph-view-at-scale.md) | The memory graph in 2D WebGL, then summaries for millions | 2026-11-14 | Accepted |
 | [0032](0032-temporal-facts-provenance-and-audit.md) | Temporal facts, source-aware writes, agent edits and an auditable history | 2026-11-15 | Proposed |
 | [0033](0033-similarity-thresholds-and-whole-word-rules.md) | Thresholds use similarity, not the fused score; sentiment and negation match whole words | 2026-11-15 | Accepted |
+| [0034](0034-as-of-reads-from-the-archive.md) | "As of" reads: what the agent knew at a past time, from live and archived memories | 2026-11-15 | Accepted |
 
 Template:
 

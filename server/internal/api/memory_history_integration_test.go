@@ -2,8 +2,10 @@ package api_test
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ADR 0032: deleting archives a memory, it can be restored, purging removes
@@ -83,4 +85,41 @@ func TestMemoryArchiveRestorePurgeHistory(t *testing.T) {
 	if !strings.Contains(string(b), `"source":"mcp"`) {
 		t.Fatalf("batch memory source not recorded: %s", b)
 	}
+}
+
+// "What did the agent know at time T?": live memories created by T plus those
+// archived after T.
+func TestListMemoriesAsOf(t *testing.T) {
+	e := setup(t)
+	a := newAgent(t)
+	e.register(a)
+	before := time.Now().UTC().Add(-time.Second).Format(time.RFC3339Nano)
+	pune := e.remember(a, "The office is in Pune.", "semantic")
+	time.Sleep(1100 * time.Millisecond)
+	known := time.Now().UTC().Format(time.RFC3339Nano)
+	time.Sleep(1100 * time.Millisecond)
+	code, b := e.do(&a, "v2", "DELETE", "/memory/"+pune+"?reason=moved", nil, nil)
+	e.must(204, code, b, "archive")
+	delhi := e.remember(a, "The office is in Delhi.", "semantic")
+
+	list := func(asOf string) string {
+		path := "/memory/agent/" + a.id
+		if asOf != "" {
+			path += "?as_of=" + url.QueryEscape(asOf)
+		}
+		code, b := e.do(&a, "v2", "GET", path, nil, nil)
+		e.must(200, code, b, "list as of "+asOf)
+		return string(b)
+	}
+	if got := list(known); !strings.Contains(got, pune) || strings.Contains(got, delhi) {
+		t.Fatalf("as of %s: want Pune only, got %s", known, got)
+	}
+	if got := list(""); strings.Contains(got, pune) || !strings.Contains(got, delhi) {
+		t.Fatalf("now: want Delhi only, got %s", got)
+	}
+	if got := list(before); strings.Contains(got, pune) || strings.Contains(got, delhi) {
+		t.Fatalf("before any write: want nothing, got %s", got)
+	}
+	code, b = e.do(&a, "v2", "GET", "/memory/agent/"+a.id+"?as_of=yesterday", nil, nil)
+	e.must(400, code, b, "bad as_of")
 }

@@ -559,6 +559,31 @@ func (s *Store) ListMemories(ctx context.Context, agentID string, tenantID uuid.
 	return collectMemories(s.Pool.Query(ctx, q, args...))
 }
 
+// ListMemoriesAsOf returns what the agent knew at asOf: memories created by
+// then that were still live, whether they are live now or were archived (by a
+// delete or an update) later. Purged memories are gone from both tables.
+// shortcut: a memory archived and later restored counts as known while it was archived; track restores if that matters.
+func (s *Store) ListMemoriesAsOf(ctx context.Context, agentID string, tenantID uuid.UUID, memType, visibility string, asOf time.Time, limit int) ([]domain.Memory, error) {
+	q := `SELECT ` + memoryColumns + ` FROM (
+		SELECT * FROM memories WHERE agent_id = $1 AND tenant_id = $2 AND created_at <= $3
+		UNION ALL
+		SELECT (jsonb_populate_record(NULL::memories, a.memory)).* FROM memory_archive a
+		WHERE a.agent_id = $1 AND a.tenant_id = $2 AND a.archived_at > $3 AND (a.memory->>'created_at')::timestamptz <= $3
+	) m WHERE TRUE`
+	args := []any{agentID, tenantID, asOf}
+	if memType != "" {
+		args = append(args, memType)
+		q += fmt.Sprintf(" AND memory_type = $%d", len(args))
+	}
+	if visibility != "" {
+		args = append(args, visibility)
+		q += fmt.Sprintf(" AND visibility = $%d", len(args))
+	}
+	args = append(args, limit)
+	q += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d", len(args))
+	return collectMemories(s.Pool.Query(ctx, q, args...))
+}
+
 func (s *Store) AllMemories(ctx context.Context, agentID string, tenantID uuid.UUID) ([]domain.Memory, error) {
 	return collectMemories(s.Pool.Query(ctx, `SELECT `+memoryColumns+` FROM memories
 		WHERE agent_id = $1 AND tenant_id = $2 ORDER BY created_at DESC`, agentID, tenantID))

@@ -79,7 +79,9 @@ Returns the stored [memory](concepts.md#memories):
 ### 🔒 `GET /memory/agent/{agent_id}`
 
 Most recent memories first. Query: `limit` (default and max 100),
-`memory_type`, `visibility`. Returns an array of memories.
+`memory_type`, `visibility`, and `as_of` (RFC 3339): list what the agent knew
+at that time, including memories deleted or replaced since (ADR 0034).
+Returns an array of memories.
 
 ### 🔒 `DELETE /memory/{id}`
 
