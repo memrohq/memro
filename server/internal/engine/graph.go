@@ -79,6 +79,18 @@ func DetectQueryIntent(query string) string {
 	return "multi_hop"
 }
 
+// IsCountingQuery reports whether a query counts or totals things, whatever
+// else it asks ("how many tanks do I currently have" is current and counting).
+func IsCountingQuery(query string) bool {
+	q := strings.ToLower(query)
+	for _, p := range []string{"how many", "how much", "how often", "count", "number of", "amount of", "total", "sum of", "list all"} {
+		if strings.Contains(q, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *Engine) rerankHybridResults(hybridResults []domain.SearchResult, edges []graphEdge) []domain.SearchResult {
 	if len(hybridResults) <= 1 || len(edges) == 0 {
 		return hybridResults

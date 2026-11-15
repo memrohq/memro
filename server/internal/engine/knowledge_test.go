@@ -282,3 +282,30 @@ func TestNearDuplicate(t *testing.T) {
 		}
 	}
 }
+
+// Counting questions keep near-identical memories: they're separate items.
+func TestCountingQueriesKeepNearDuplicates(t *testing.T) {
+	if !IsCountingQuery("How many tanks do I currently have?") || IsCountingQuery("What's my current tank setup?") {
+		t.Fatal("IsCountingQuery misclassified")
+	}
+	day := func(d int) *string { s := time.Date(2026, 1, d, 0, 0, 0, 0, time.UTC).Format(time.RFC3339); return &s }
+	mk := func() []domain.SearchResult {
+		return []domain.SearchResult{
+			{MemoryID: uuid.NewString(), Content: "I set up a new 20 gallon freshwater tank with tetras.", EventDate: day(1)},
+			{MemoryID: uuid.NewString(), Content: "I set up a new 20 gallon freshwater tank with guppies.", EventDate: day(5)},
+			{MemoryID: uuid.NewString(), Content: "Set up a new 20 gallon freshwater tank with tetras today.", EventDate: day(9)},
+		}
+	}
+	counting := mk()
+	resolveSearchContradictions(counting, nil, false, true)
+	for _, r := range counting {
+		if r.IsSuperseded {
+			t.Errorf("counting query superseded %q", r.Content)
+		}
+	}
+	plain := mk()
+	resolveSearchContradictions(plain, nil)
+	if !plain[0].IsSuperseded {
+		t.Errorf("non-counting query should collapse the older restatement %q", plain[0].Content)
+	}
+}

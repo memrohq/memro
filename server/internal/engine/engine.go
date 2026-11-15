@@ -135,7 +135,7 @@ func (e *Engine) Search(ctx context.Context, q domain.SearchQuery, tenantID uuid
 		}
 		relations, _ := e.relationsTouching(ctx, resultIDs)
 		intent := DetectQueryIntent(q.Query)
-		resolveSearchContradictions(results, relations, intent == "aggregation")
+		resolveSearchContradictions(results, relations, intent == "aggregation", IsCountingQuery(q.Query))
 		if q.ResolveContradictions {
 			// Intent-aware demotion:
 			// - "historical": user wants past state, do not demote superseded memories
@@ -487,11 +487,11 @@ func resultTime(r domain.SearchResult) time.Time {
 	return time.Time{}
 }
 
-func resolveSearchContradictions(results []domain.SearchResult, relations []domain.Relation, isAggregation ...bool) {
-	agg := false
-	if len(isAggregation) > 0 && isAggregation[0] {
-		agg = true
-	}
+// flags: [0] the query aggregates across events; [1] it counts things, so
+// near-identical memories are separate items and must not collapse.
+func resolveSearchContradictions(results []domain.SearchResult, relations []domain.Relation, flags ...bool) {
+	agg := len(flags) > 0 && flags[0]
+	counting := agg || (len(flags) > 1 && flags[1])
 
 	// An updates edge points from the newer memory to the older one. Older
 	// Evolve runs wrote some edges in arbitrary order, so when both ends are
@@ -523,8 +523,8 @@ func resolveSearchContradictions(results []domain.SearchResult, relations []doma
 		for j := i + 1; j < len(results); j++ {
 			conf := DetectContradictionWithIntent(results[i].Content, results[j].Content, agg)
 			// A restatement makes the older copy redundant, except when counting
-			// ("how many times…"), where repeats are separate events.
-			if conf >= 0.7 || (!agg && NearDuplicate(results[i].Content, results[j].Content)) {
+			// ("how many tanks do I currently have"), where repeats are separate items.
+			if conf >= 0.7 || (!counting && NearDuplicate(results[i].Content, results[j].Content)) {
 				ti := resultTime(results[i])
 				tj := resultTime(results[j])
 				if !ti.IsZero() && !tj.IsZero() {
