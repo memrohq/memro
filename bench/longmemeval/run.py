@@ -51,7 +51,12 @@ PER_SESSION = int(os.environ.get("PER_SESSION", "0"))
 PER_SESSION_SCOPE = os.environ.get("PER_SESSION_SCOPE", "all")
 AGGREGATE = re.compile(r"\b(how many|how much|in total|total|altogether|combined|sum of|number of|list|"
                        r"all the|each of|every|both)\b", re.I)
-SESSION_EXPANSION = 3  # answer() adds every exchange from the top N retrieved sessions
+# Comparison arms: "none" answers with no memory, "rag" is plain semantic top-k
+# (no keyword fusion, session expansion or conflict handling); unset is Memro.
+BASELINE = os.environ.get("BASELINE", "")
+SEARCH_MODE = "semantic" if BASELINE == "rag" else "hybrid"
+# answer() adds every exchange from the top N retrieved sessions
+SESSION_EXPANSION = 0 if BASELINE == "rag" else int(os.environ.get("SESSION_EXPANSION", "3"))
 NS_SESSION = uuid.UUID("6f1c2a8e-5b8f-4c4e-9d55-0a4f7d1c3b21")
 
 
@@ -174,14 +179,15 @@ def get_server_commit():
 def get_engine_options():
     return {
         "top_k": TOP_K,
-        "mode": "hybrid",
+        "baseline": BASELINE or "memro",
+        "mode": SEARCH_MODE,
         "answer_model": ANSWER_MODEL,
         "session_expansion": SESSION_EXPANSION,
         "per_session": PER_SESSION, "per_session_scope": PER_SESSION_SCOPE,
         "format": os.environ.get("RECALL_FORMAT", "standard"),
         "write_time_supersession": os.environ.get("MEMRO_WRITE_TIME_SUPERSESSION", "false"),
         "per_item_chars": PER_ITEM_CHARS,
-        "resolve_conflicts": os.environ.get("RESOLVE_CONFLICTS", "true").lower() == "true",
+        "resolve_conflicts": BASELINE != "rag" and os.environ.get("RESOLVE_CONFLICTS", "true").lower() == "true",
         "order": os.environ.get("SEARCH_ORDER", "score"),
         # Set by whoever started the server (bench/cf/eval_embeddings.py does).
         "embedding_model": os.environ.get("BENCH_EMBEDDING_MODEL", "text-embedding-3-small"),
@@ -297,7 +303,7 @@ def retrieve(q, client, agent):
         raise RuntimeError(f"{left} memories still not embedded")
     embed_s = time.time() - t0 - ingest_s
     t1 = time.time()
-    resolve_conflicts = os.environ.get("RESOLVE_CONFLICTS", "true").lower() == "true"
+    resolve_conflicts = BASELINE != "rag" and os.environ.get("RESOLVE_CONFLICTS", "true").lower() == "true"
     search_order = os.environ.get("SEARCH_ORDER", "score")
     per_session = None
     if PER_SESSION and (PER_SESSION_SCOPE == "all" or AGGREGATE.search(q["question"])):
@@ -307,7 +313,7 @@ def retrieve(q, client, agent):
         q["question"][:500],
         limit=TOP_K,
         private_key=agent._private_key,
-        mode="hybrid",
+        mode=SEARCH_MODE,
         order=search_order,
         resolve_conflicts=resolve_conflicts,
         max_per_session=per_session,
@@ -318,6 +324,14 @@ def retrieve(q, client, agent):
 
 
 def run_one(q):
+    if BASELINE == "none":
+        return {
+            "question_id": q["question_id"], "question_type": q["question_type"], "question": q["question"],
+            "answer": q["answer"], "hypothesis": ask(build_prompt(q, [], {})),
+            "retrieved_sessions": [], "answer_session_ids": q["answer_session_ids"], "memories": 0,
+            "hit_evidence": [], "evidence_total": len(answer_texts(q)), "evidence_in_context": 0,
+            "ingest_s": 0, "embed_wait_s": 0, "search_ms": 0,
+        }
     client = MemroClient(API, api_key=None)
     agent = new_agent(client)
     try:

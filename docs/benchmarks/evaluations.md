@@ -10,6 +10,26 @@ These tests are fully reproducible using [`bench/eval_suite.py`](../../bench/eva
 
 ---
 
+## Re-run (2026-11-15): 4 / 4
+
+Local server, PostgreSQL 16 + pgvector. At `main` c5e9c83 (with PR #67) the
+suite passed 3 of 4; with the host/URL change rule (`cf4f4bf`) stale facts
+pass too.
+
+| Test Suite | Result | What changed |
+|---|---|---|
+| **Identity Boundaries** | **PASS** | — |
+| **Contradictory Facts** | **PASS** | The suite now asks for conflict resolution (`resolve_conflicts=True`, ADR 0021), which `Agent.recall` can now pass. Without it, search ranks by relevance only and the older fact still comes first. |
+| **Stale/Updated Facts** | **PASS** | "Cluster migrated to *new-host*" now replaces "cluster endpoint is *old-host*" when both values are hosts or URLs (`cf4f4bf`). At c5e9c83 it failed. A wording rule for one value kind; structured facts (ADR 0032 step 4) are the general fix. |
+| **Distractor Rejection** | **PASS** | `min_score` now applies to cosine similarity (PR #67, ADR 0033): target #1, 0 results for the unrelated query. |
+
+The suite also waits until every memory has its embedding before searching.
+Embeddings are written in the background, so searching straight after a write
+saw keyword matches only; in the first run today the distractor target query
+returned nothing for that reason.
+
+---
+
 ## Evaluation Summary (2026-10-22)
 
 **Target**: `https://api.memro.co` (also verified locally against PostgreSQL 16 + pgvector)  

@@ -117,7 +117,7 @@ export class Agent {
       agent_id: this.agentId, query, limit: Math.min(options.limit ?? 10, 50),
       memory_type: options.type, mode: options.mode ?? 'hybrid',
       graph: options.graph, adaptive_diversity: options.adaptiveDiversity,
-      max_per_session: options.maxPerSession,
+      max_per_session: options.maxPerSession, resolve_conflicts: options.resolveConflicts,
     }, this.signer);
     // score is rank-based; similarity measures relevance (score only when there's no embedding).
     return options.minScore === undefined ? res.results : res.results.filter((r) => (r.similarity ?? r.score) >= options.minScore!);
@@ -137,7 +137,7 @@ export class Agent {
   /** Most recent memories, newest first (at most 100). */
   getRecent(options: GetRecentOptions = {}): Promise<Memory[]> {
     return this.client.listMemories(this.agentId, {
-      limit: options.limit ?? 10, memory_type: options.type, visibility: options.visibility,
+      limit: options.limit ?? 10, memory_type: options.type, visibility: options.visibility, as_of: options.asOf,
     }, this.signer);
   }
 

@@ -143,6 +143,10 @@ var (
 	reProperName = regexp.MustCompile(`\b[A-Z][a-z]`)
 	// "invoice 1042", "order #77", "PR 57", "#12"
 	reIdentifier = regexp.MustCompile(`(?:\b(?:invoice|order|ticket|issue|pr|case|ref|id|no)\s*#?|#)\s*\d+`)
+	// "the cluster endpoint is db-old.internal:5432"
+	reIsValue = regexp.MustCompile(`^(.+?)\s+(?:is|was|are|were)\s+(?:at\s+)?(\S+)$`)
+	// a host or URL: "db.internal:5432", "https://api.memro.co/v1"
+	reEndpoint = regexp.MustCompile(`^(?:[a-z][a-z0-9+.-]*://)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?(?:/\S*)?$`)
 )
 
 // changeReplaces reports whether change ("X moved/changed/switched [from A]
@@ -165,6 +169,11 @@ func changeReplaces(changeRaw, otherRaw string) bool {
 		if from != "" && strings.HasPrefix(normSubject(other), subj) && strings.Contains(other, from) {
 			return true
 		}
+	}
+	// "the cluster endpoint is db-old.internal:5432" vs "the cluster migrated to db-new.internal:5432"
+	if m := reIsValue.FindStringSubmatch(strings.TrimRight(other, ".")); m != nil && strings.HasPrefix(normSubject(m[1]), subj) &&
+		reEndpoint.MatchString(m[2]) && reEndpoint.MatchString(strings.TrimRight(to, ".")) {
+		return true
 	}
 	loc := reWhereWhen.FindStringSubmatchIndex(other)
 	if loc == nil || normSubject(other[loc[2]:loc[3]]) != subj {

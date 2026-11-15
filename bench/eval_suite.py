@@ -48,6 +48,18 @@ class MeasurableEvalRunner:
         self.print_report(summary)
         return summary
 
+    @staticmethod
+    def wait_for_embeddings(agent, query: str, n: int, timeout: float = 60):
+        """Embeddings are written in the background; until all n memories have
+        one, hybrid search sees keyword matches only."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            res = agent.recall(query, limit=n, mode="semantic")
+            if len(res) >= n:
+                return
+            time.sleep(0.5)
+        raise RuntimeError(f"embeddings not ready after {timeout}s")
+
     def eval_identity_boundaries(self):
         """Test: Agent A cannot read Agent B's private memories under any circumstance."""
         print("Running Suite 1: Identity Boundaries (Multi-Tenant Isolation)...")
@@ -95,7 +107,8 @@ class MeasurableEvalRunner:
         time.sleep(0.5)
         agent.remember(fact_new, type="semantic")
 
-        res = agent.recall("project deployment branch", limit=3)
+        self.wait_for_embeddings(agent, "project deployment branch", 2)
+        res = agent.recall("project deployment branch", limit=3, resolve_conflicts=True)
         elapsed = (time.perf_counter() - start) * 1000
 
         top_content = getattr(res[0], "content", "") if res else ""
@@ -123,7 +136,8 @@ class MeasurableEvalRunner:
         # Ingest updated configuration
         agent.remember("Staging database cluster migrated to postgres-aurora-v2.internal:5432", type="procedural")
 
-        res = agent.recall("staging database cluster endpoint", limit=2)
+        self.wait_for_embeddings(agent, "staging database cluster endpoint", 2)
+        res = agent.recall("staging database cluster endpoint", limit=2, resolve_conflicts=True)
         elapsed = (time.perf_counter() - start) * 1000
 
         top_content = getattr(res[0], "content", "") if res else ""
@@ -159,6 +173,7 @@ class MeasurableEvalRunner:
         target = "Production release freeze window starts December 15th at 18:00 UTC."
         agent.remember(target, type="semantic")
 
+        self.wait_for_embeddings(agent, target, 5)
         # 1. Target retrieval precision
         res_target = agent.recall("production release freeze window date and time", limit=3)
         target_found = any("December 15th" in getattr(r, "content", "") for r in res_target)

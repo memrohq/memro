@@ -239,6 +239,7 @@ func TestDetectContradictionChangesAndTraps(t *testing.T) {
 		{"Deploys happen on Fridays.", "Deploys moved to Tuesdays."},
 		{"The team offsite is in Lisbon.", "The team offsite moved to Porto."},
 		{"Memro stores its data in MongoDB.", "Memro moved its data from MongoDB to Postgres."},
+		{"Staging database cluster endpoint is postgres-legacy.internal:5432", "Staging database cluster migrated to postgres-aurora-v2.internal:5432"},
 	}
 	for _, c := range conflicts {
 		if got := DetectContradiction(c[0], c[1]); got < 0.7 {
@@ -253,6 +254,8 @@ func TestDetectContradictionChangesAndTraps(t *testing.T) {
 		{"The staging database is Postgres 16.", "The staging database runs in asia-south1."},
 		{"Ana handles billing questions.", "Ana prefers tea over coffee."},
 		{"The office moved to Berlin.", "The office is Ana's favourite place."},
+		{"The API endpoint is api.memro.co.", "The docs site moved to docs.memro.co."},
+		{"The staging cluster endpoint is db.internal:5432.", "The staging cluster migrated to Kubernetes."},
 	}
 	for _, c := range independent {
 		if got := DetectContradiction(c[0], c[1]); got >= 0.7 {

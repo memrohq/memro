@@ -19,6 +19,8 @@ func TestExpandGraph(t *testing.T) {
 	if url == "" {
 		t.Skip("MEMRO_TEST_DATABASE_URL not set; skipping graph test")
 	}
+	// Cold connections under -race can take longer than the production budget.
+	defer engine.SetGraphBudget(5 * time.Second)()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

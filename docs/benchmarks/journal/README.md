@@ -6,6 +6,8 @@ Internal engineering journal tracking Memro's memory retrieval quality, benchmar
 
 ## Entries (Newest First)
 
+- **[2026-11-15: Baselines — No Memory, Plain RAG and Memro](2026-11-15-baselines-no-memory-and-plain-rag.md)**: on LongMemEval-100, no memory 6%, plain semantic top-15 81%, Memro 81% (p = 1.0 vs RAG); memory is the whole score, Memro's extras show no gain on this subset.
+
 - **[2026-11-15: Evolution Engine, Save-Time Graph Edges and False Contradictions](2026-11-15-evolution-engine-and-contradictions.md)**: Evolution benchmark 4/9 → 0/9 unresolved updates; five LongMemEval-100 arms (78–80%, none significant); repeat runs showing answer noise; the negation rule's false contradictions (15 → 1 of 153 pairs).
 - **[2026-10-23: LongMemEval So Far — Progress, Accuracy Plateau, and What's Next](2026-10-23-longmemeval-so-far.md)**: Comprehensive look at runs from the initial pilots to `baseline-100`, the failure diagnosis on 22 misses, and the roadmap forward.
 

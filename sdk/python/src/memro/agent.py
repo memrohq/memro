@@ -186,11 +186,13 @@ class Agent:
         type: Optional[str] = None,
         min_score: Optional[float] = None,
         mode: str = "hybrid",
+        resolve_conflicts: Optional[bool] = None,
     ) -> List[SearchResult]:
         """
         Search memories semantically or via hybrid retrieval.
 
         min_score drops results whose similarity to the query (0..1) is below it.
+        resolve_conflicts ranks a memory below a newer one that contradicts it.
         """
         raw = self.client.search(
             agent_id=self.agent_id,
@@ -199,6 +201,7 @@ class Agent:
             limit=limit,
             memory_type=type,
             mode=mode,
+            resolve_conflicts=resolve_conflicts,
         )
         results = [SearchResult(**r) for r in raw]
         if min_score is not None:
@@ -241,14 +244,17 @@ class Agent:
         limit: int = 10,
         type: Optional[str] = None,
         visibility: Optional[str] = None,
+        as_of: Optional[str] = None,
     ) -> List[Memory]:
-        """Get most recent memories without semantic search."""
+        """Get most recent memories without semantic search. as_of (RFC 3339)
+        returns what the agent knew at that time, including memories deleted since."""
         raw = self.client.get_memories(
             agent_id=self.agent_id,
             private_key=self._private_key,
             memory_type=type,
             visibility=visibility,
             limit=limit,
+            as_of=as_of,
         )
         return [Memory(**m) for m in raw]
 

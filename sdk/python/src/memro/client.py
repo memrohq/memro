@@ -248,9 +248,11 @@ class MemroClient:
         memory_type: Optional[str] = None,
         visibility: Optional[str] = None,
         limit: Optional[int] = None,
+        as_of: Optional[str] = None,
     ) -> List[dict]:
-        """The agent's most recent memories, newest first (at most 100)."""
-        params = {"memory_type": memory_type, "visibility": visibility, "limit": limit}
+        """The agent's most recent memories, newest first (at most 100).
+        as_of (RFC 3339) lists what the agent knew at that time instead."""
+        params = {"memory_type": memory_type, "visibility": visibility, "limit": limit, "as_of": as_of}
         return self._json("GET", f"/memory/agent/{agent_id}", params=params, agent_id=agent_id, private_key=private_key)
 
     def delete_memory(self, agent_id: str, private_key: Optional[str], memory_id: str) -> bool:

@@ -1,0 +1,78 @@
+# 2026-11-15: Baselines — no memory, plain RAG and Memro
+
+- **Date**: 2026-11-15
+- **Server commit**: `c5e9c83` (main with PR #67) for all three arms. Each run's `meta.json` records the harness checkout, not the server binary.
+- **Run directories**: `bench/longmemeval/runs/arm-{none,rag,memro}-100`
+- **Dataset / subset**: LongMemEval_S, `bench/longmemeval/subset_100.json`
+- **Engine options**: as in each `meta.json`. All arms: top-15, `gpt-4o-mini` answers and grades, `text-embedding-3-small`, same prompt.
+  - `none`: no retrieval; the prompt says "(nothing found)".
+  - `rag`: semantic search only, no session expansion, no conflict handling.
+  - `memro`: hybrid search (vectors + full text, RRF), 3-session expansion, conflict resolution on.
+- **Cost**: $0.32 for answers and grading (600 `gpt-4o-mini` calls). Embeddings are called by the server and not in the ledger.
+
+## 1. Goal & hypothesis
+
+An external review asked what memory adds over no memory and over naive
+RAG. Hypotheses: memory beats no memory by a wide margin; Memro beats plain
+semantic top-k.
+
+## 2. Results
+
+| Arm | Accuracy | 95% CI (Wilson) | Abstention | Recall@15 | Evidence exchanges in prompt | Search p50 / p95 |
+|---|---|---|---|---|---|---|
+| none | 6% | 2.8–12.5% | 6/6 | — | 0/176 | — |
+| rag | 81% | 72.2–87.5% | 5/6 | 98.9% | 164/176 | 1,089 / 3,643 ms |
+| memro | 81% | 72.2–87.5% | 6/6 | 98.9% | 167/176 | 757 / 2,341 ms |
+
+| Type | n | none | rag | memro |
+|---|---|---|---|---|
+| knowledge-update | 16 | 0 | 14 | 12 |
+| multi-session | 27 | 2 | 19 | 20 |
+| single-session-assistant | 11 | 0 | 11 | 11 |
+| single-session-preference | 6 | 0 | 4 | 5 |
+| single-session-user | 14 | 4 | 14 | 14 |
+| temporal-reasoning | 26 | 0 | 19 | 19 |
+
+Paired (McNemar): rag vs none, 76 questions only rag got right and 1 only
+none, p < 0.0001. memro vs rag, 4 each way, p = 1.0. The six questions `none`
+got right are abstentions ("I don't know" is correct).
+
+Search latency includes the query embedding call; the two arms ran one after
+the other against the same local server, so they are comparable to each other,
+not to production.
+
+## 3. What this says
+
+- **Memory is the whole score.** Without it the model answers only abstention
+  questions.
+- **On this subset Memro's extras show no gain over plain semantic top-15.**
+  Keyword fusion, session expansion and conflict demotion put three more
+  evidence exchanges into prompts (167 vs 164 of 176) but did not change the
+  number of correct answers. Knowledge updates were 12 vs 14, not significant
+  (n = 16); section 4 traces both misses to the answer step, not to
+  conflict resolution.
+- With ±8-point intervals at n = 100 and answer-model noise of a few points
+  between identical runs (2026-11-15 evolution post), a small real difference
+  either way is not ruled out.
+
+## 4. The two knowledge-update misses
+
+Prompts rebuilt against the same server (`c5e9c83`), then each re-answered
+three times with `gpt-4o-mini`:
+
+| Question | Evidence in both prompts | Prompt chars rag / memro | Re-answers correct rag / memro |
+|---|---|---|---|
+| `184da446` (pages read, gold 220) | "page 200", later "page 220" | 42,063 / 71,363 | 3/3 / 3/3 |
+| `2133c1b5` (time in apartment, gold 3 months) | "a month", later "3 months" | 31,459 / 40,099 | 3/3 / 2/3 |
+
+Neither prompt had a superseded mark, and both arms retrieved the same
+memories, so conflict handling played no part. `184da446` was answer-model
+noise. `2133c1b5` may be the extra session text distracting the model (one
+of three re-answers counted from the session date instead), too few runs to
+tell. Session expansion adds about 30% to the prompt and showed no gain here.
+
+## 5. Next
+
+1. Run on all 500 questions, twice each: rag, memro, and memro with
+   `SESSION_EXPANSION=0`, to see whether session expansion earns its tokens.
+2. Report the comparison in the LongMemEval paper (MR-2026-01) as measured.
