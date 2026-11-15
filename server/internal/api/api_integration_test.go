@@ -130,11 +130,11 @@ func setup(t *testing.T, customize ...func(*api.Deps)) *env {
 	st := store.New(pool)
 	prov := embed.New("openai", "fake-64", "test-key", "", fake.URL, 100)
 	ix := indexer.New(st, prov)
-	go ix.Run(ctx)
 	files, _ := filestore.NewLocal(cfg.FileStoragePath)
 	cfg.BaseURL = "http://example.test"
 	eng := engine.New(pool, prov, ix)
-	ix.OnIndexed = eng.Cache().InvalidateAgent
+	ix.OnIndexed = eng.Cache().InvalidateAgent // before Run: the indexer goroutine reads it
+	go ix.Run(ctx)
 	deps := api.Deps{Config: cfg, Store: st, Engine: eng, Embed: prov,
 		Indexer: ix, Files: files, Email: email.New("", 0, "", "", "")}
 	for _, c := range customize {
