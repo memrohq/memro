@@ -7,6 +7,9 @@ and every release and package raises only the last number of its version (see RE
 
 ## [Unreleased]
 
+### Fixed
+- **Memory evolution can be re-run safely**: `Evolve` (`POST /mee/evolve`, the `mee_evolve` tool) consolidates each episodic memory once, so repeated runs no longer add duplicate summaries of the same memories. One run folds in at most the 50 newest unconsolidated episodes and compares at most the 300 newest facts for contradictions, so its cost no longer grows with the agent's whole history.
+
 ### Added
 - **Claude Code plugin** (`integrations/claude-code`, marketplace `memrohq/memro`): the Memro MCP server, with the API key asked at install and kept in the keychain, plus a SessionStart hook that recalls the project's memories and adds the Memro note at the start of every session.
 
