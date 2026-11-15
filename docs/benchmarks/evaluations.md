@@ -10,6 +10,24 @@ These tests are fully reproducible using [`bench/eval_suite.py`](../../bench/eva
 
 ---
 
+## Re-run (2026-11-15): 3 / 4
+
+Local server at `main` c5e9c83 (with PR #67), PostgreSQL 16 + pgvector.
+
+| Test Suite | Result | What changed |
+|---|---|---|
+| **Identity Boundaries** | **PASS** | — |
+| **Contradictory Facts** | **PASS** | The suite now asks for conflict resolution (`resolve_conflicts=True`, ADR 0021), which `Agent.recall` can now pass. Without it, search ranks by relevance only and the older fact still comes first. |
+| **Stale/Updated Facts** | FAIL | No rule links "cluster endpoint is X" to "cluster migrated to Y". Structured facts (ADR 0032 step 4) are meant to close this. |
+| **Distractor Rejection** | **PASS** | `min_score` now applies to cosine similarity (PR #67, ADR 0033): target #1, 0 results for the unrelated query. |
+
+The suite also waits until every memory has its embedding before searching.
+Embeddings are written in the background, so searching straight after a write
+saw keyword matches only; in the first run today the distractor target query
+returned nothing for that reason.
+
+---
+
 ## Evaluation Summary (2026-10-22)
 
 **Target**: `https://api.memro.co` (also verified locally against PostgreSQL 16 + pgvector)  

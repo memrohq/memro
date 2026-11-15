@@ -144,6 +144,10 @@ def test_recall_min_score_uses_similarity(mock_agent):
     ]
     assert [r.content for r in mock_agent.recall("q", min_score=0.4)] == ["related"]
 
+def test_recall_passes_resolve_conflicts(mock_agent):
+    mock_agent.recall("q", resolve_conflicts=True)
+    assert mock_agent.client.search.call_args.kwargs["resolve_conflicts"] is True
+
 def test_get_recent(mock_agent):
     memories = mock_agent.get_recent(limit=5)
     assert len(memories) == 1

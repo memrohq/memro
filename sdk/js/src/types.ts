@@ -196,6 +196,8 @@ export interface RecallOptions {
   graph?: 'legacy' | 'bounded' | 'rerank' | 'selective';
   adaptiveDiversity?: boolean;
   maxPerSession?: number;
+  /** Rank a memory below a newer one that contradicts it. */
+  resolveConflicts?: boolean;
 }
 
 export interface TemporalOptions {

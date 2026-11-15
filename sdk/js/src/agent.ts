@@ -117,7 +117,7 @@ export class Agent {
       agent_id: this.agentId, query, limit: Math.min(options.limit ?? 10, 50),
       memory_type: options.type, mode: options.mode ?? 'hybrid',
       graph: options.graph, adaptive_diversity: options.adaptiveDiversity,
-      max_per_session: options.maxPerSession,
+      max_per_session: options.maxPerSession, resolve_conflicts: options.resolveConflicts,
     }, this.signer);
     // score is rank-based; similarity measures relevance (score only when there's no embedding).
     return options.minScore === undefined ? res.results : res.results.filter((r) => (r.similarity ?? r.score) >= options.minScore!);
