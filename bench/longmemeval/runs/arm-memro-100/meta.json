@@ -1,0 +1,30 @@
+{
+  "cost_usd": 0.171526,
+  "token_usage": {
+    "gpt-4o-mini": {
+      "usd": 0.171526,
+      "prompt_tokens": 1101372,
+      "completion_tokens": 10541,
+      "calls": 200
+    }
+  },
+  "name": "arm-memro-100",
+  "commit": "6c1ed132855b41b2c7ab621a1a06f666748717c6",
+  "engine_options": {
+    "top_k": 15,
+    "baseline": "memro",
+    "mode": "hybrid",
+    "answer_model": "gpt-4o-mini",
+    "session_expansion": 3,
+    "per_session": 0,
+    "per_session_scope": "all",
+    "format": "standard",
+    "write_time_supersession": "false",
+    "per_item_chars": 4000,
+    "resolve_conflicts": true,
+    "order": "score",
+    "embedding_model": "text-embedding-3-small"
+  },
+  "created_at": "2026-11-15T13:37:38.041093Z",
+  "questions_total": 100
+}

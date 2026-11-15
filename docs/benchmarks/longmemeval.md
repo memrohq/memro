@@ -77,6 +77,18 @@ All LLM and embedding calls were tracked through a deterministic token ledger (`
 
 ---
 
+## 4b. Baselines (2026-11-15, 100-question subset)
+
+Same answer model, prompt and judge; see the [journal post](journal/2026-11-15-baselines-no-memory-and-plain-rag.md).
+
+| Arm | Accuracy | 95% CI |
+|---|---|---|
+| No memory | 6% | 2.8–12.5% |
+| Plain RAG (semantic top-15) | 81% | 72.2–87.5% |
+| Memro (hybrid, session expansion, conflict resolution) | 81% | 72.2–87.5% |
+
+Memory accounts for the score; on this subset Memro's extras show no gain over plain RAG (McNemar p = 1.0).
+
 ## 5. How to Reproduce
 
 The complete benchmark harness, dataset loaders, subset definitions, and run outputs are included in [`bench/longmemeval/`](../../bench/longmemeval/):
@@ -95,6 +107,10 @@ DATABASE_URL="postgres://memro:memro@127.0.0.1:55434/memro?sslmode=disable" \
 python bench/longmemeval/run.py --subset bench/longmemeval/subset_100.json --name ci-subset
 python bench/longmemeval/judge.py bench/longmemeval/runs/ci-subset
 python bench/longmemeval/report.py bench/longmemeval/runs/ci-subset
+
+# No-memory and plain-RAG arms
+BASELINE=none python bench/longmemeval/run.py --subset --name arm-none-100
+BASELINE=rag python bench/longmemeval/run.py --subset --name arm-rag-100
 
 # 4. Compare against baseline with CI quality gate
 python bench/longmemeval/compare.py bench/longmemeval/runs/baseline-100 bench/longmemeval/runs/ci-subset --ci-gate

@@ -1,0 +1,30 @@
+{
+  "cost_usd": 0.133244,
+  "token_usage": {
+    "gpt-4o-mini": {
+      "usd": 0.133244,
+      "prompt_tokens": 844595,
+      "completion_tokens": 10924,
+      "calls": 200
+    }
+  },
+  "name": "arm-rag-100",
+  "commit": "c5e9c83184c4ce440036629f6ab11532c9855a1c",
+  "engine_options": {
+    "top_k": 15,
+    "baseline": "rag",
+    "mode": "semantic",
+    "answer_model": "gpt-4o-mini",
+    "session_expansion": 0,
+    "per_session": 0,
+    "per_session_scope": "all",
+    "format": "standard",
+    "write_time_supersession": "false",
+    "per_item_chars": 4000,
+    "resolve_conflicts": false,
+    "order": "score",
+    "embedding_model": "text-embedding-3-small"
+  },
+  "created_at": "2026-11-15T13:22:37.430368Z",
+  "questions_total": 100
+}
