@@ -83,9 +83,38 @@ Most recent memories first. Query: `limit` (default and max 100),
 
 ### 🔒 `DELETE /memory/{id}`
 
-`204`, or `404` if the agent has no such memory. If the memory was made
-from an uploaded file and no other memory uses that file, the file is
-deleted too.
+`204`, or `404` if the agent has no such memory. The memory is archived: it
+leaves search and listings but can be restored. Optional `?reason=…` is kept
+in its history.
+
+`?purge=true` removes it for good, with its archived copy and the content
+kept in its history (for privacy requests). If the memory was made from an
+uploaded file and no other memory, live or archived, uses that file, the
+file is deleted too.
+
+### 🔒 `POST /memory/restore/{id}`
+
+Puts an archived memory back and returns it. `404` if the agent has no such
+archived memory.
+
+### 🔒 `GET /memory/history/{id}`
+
+Every audited change to the memory, oldest first, including after it was
+archived or purged. `source` is where the change came from (`mcp`,
+`dashboard`, `api`, `import:pdf`…; clients may send `X-Memro-Source`),
+`actor_type` is `agent` or `user`.
+
+```json
+{ "memory_id": "…", "archived": true, "history": [
+  { "at": "…", "action": "memory.create", "actor_type": "agent", "actor_id": "3f9a…", "source": "mcp",
+    "after": { "content": "The billing contact is Ana.", "memory_type": "semantic", "visibility": "private" } },
+  { "at": "…", "action": "memory.delete", "actor_type": "agent", "actor_id": "3f9a…", "source": "mcp",
+    "before": { "content": "The billing contact is Ana.", "memory_type": "semantic", "visibility": "private" },
+    "reason": "wrong person" } ] }
+```
+
+Memories also carry `source` and `author_type` (empty for memories stored
+before these fields existed).
 
 ### 🔒 `GET /export/{agent_id}`
 

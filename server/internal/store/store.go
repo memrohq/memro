@@ -433,7 +433,8 @@ func (s *Store) DeviceCodeStatus(ctx context.Context, deviceHash string) (*Devic
 const memoryColumns = `id, agent_id, tenant_id, content, memory_type, visibility, created_at, file_id, asset_url,
 	COALESCE(document_date, created_at), event_date, session_id, COALESCE(is_atomic, false),
 	COALESCE(entity_tags, '{}'), COALESCE(relationship_types, '{}'), COALESCE(access_count, 0),
-	COALESCE(confidence, 1.0), COALESCE(last_accessed_at, created_at), metadata`
+	COALESCE(confidence, 1.0), COALESCE(last_accessed_at, created_at), metadata, COALESCE(source, ''),
+	COALESCE(author_type, '')`
 
 func scanMemory(row pgx.Row) (domain.Memory, error) {
 	var m domain.Memory
@@ -441,7 +442,7 @@ func scanMemory(row pgx.Row) (domain.Memory, error) {
 	var meta []byte
 	err := row.Scan(&m.ID, &m.AgentID, &m.TenantID, &m.Content, &memType, &vis, &m.CreatedAt, &m.FileID, &m.AssetURL,
 		&m.DocumentDate, &m.EventDate, &m.SessionID, &m.IsAtomic, &m.EntityTags, &m.RelationshipTypes,
-		&m.AccessCount, &m.Confidence, &m.LastAccessedAt, &meta)
+		&m.AccessCount, &m.Confidence, &m.LastAccessedAt, &meta, &m.Source, &m.AuthorType)
 	if err != nil {
 		return m, err
 	}
@@ -482,11 +483,11 @@ func (s *Store) InsertMemory(ctx context.Context, m *domain.Memory) error {
 	}
 	_, err := s.Pool.Exec(ctx, `INSERT INTO memories (id, agent_id, tenant_id, content, memory_type, visibility,
 			created_at, file_id, asset_url, document_date, event_date, session_id, is_atomic, entity_tags,
-			relationship_types, access_count, confidence, last_accessed_at, metadata)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+			relationship_types, access_count, confidence, last_accessed_at, metadata, source, author_type)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NULLIF($20,''),NULLIF($21,''))`,
 		m.ID, m.AgentID, m.TenantID, m.Content, string(m.MemoryType), string(m.Visibility), m.CreatedAt,
 		m.FileID, m.AssetURL, m.DocumentDate, m.EventDate, m.SessionID, m.IsAtomic, m.EntityTags,
-		m.RelationshipTypes, m.AccessCount, m.Confidence, m.LastAccessedAt, meta)
+		m.RelationshipTypes, m.AccessCount, m.Confidence, m.LastAccessedAt, meta, m.Source, m.AuthorType)
 	return err
 }
 
@@ -502,8 +503,8 @@ func (s *Store) InsertMemories(ctx context.Context, memories []*domain.Memory) e
 
 	const insertQuery = `INSERT INTO memories (id, agent_id, tenant_id, content, memory_type, visibility,
 			created_at, file_id, asset_url, document_date, event_date, session_id, is_atomic, entity_tags,
-			relationship_types, access_count, confidence, last_accessed_at, metadata)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`
+			relationship_types, access_count, confidence, last_accessed_at, metadata, source, author_type)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NULLIF($20,''),NULLIF($21,''))`
 
 	batch := &pgx.Batch{}
 	for _, m := range memories {
@@ -520,7 +521,7 @@ func (s *Store) InsertMemories(ctx context.Context, memories []*domain.Memory) e
 		batch.Queue(insertQuery,
 			m.ID, m.AgentID, m.TenantID, m.Content, string(m.MemoryType), string(m.Visibility), m.CreatedAt,
 			m.FileID, m.AssetURL, m.DocumentDate, m.EventDate, m.SessionID, m.IsAtomic, m.EntityTags,
-			m.RelationshipTypes, m.AccessCount, m.Confidence, m.LastAccessedAt, meta)
+			m.RelationshipTypes, m.AccessCount, m.Confidence, m.LastAccessedAt, meta, m.Source, m.AuthorType)
 	}
 
 	br := tx.SendBatch(ctx, batch)
@@ -652,7 +653,8 @@ func (s *Store) InsertFile(ctx context.Context, f *File) error {
 func (s *Store) DeleteOrphanFile(ctx context.Context, fileID uuid.UUID, agentID string) (string, error) {
 	var path string
 	err := s.Pool.QueryRow(ctx, `DELETE FROM files f WHERE f.id = $1 AND f.agent_id = $2
-		AND NOT EXISTS (SELECT 1 FROM memories m WHERE m.file_id = f.id) RETURNING f.file_path`, fileID, agentID).Scan(&path)
+		AND NOT EXISTS (SELECT 1 FROM memories m WHERE m.file_id = f.id)
+		AND NOT EXISTS (SELECT 1 FROM memory_archive a WHERE a.memory->>'file_id' = f.id::text) RETURNING f.file_path`, fileID, agentID).Scan(&path)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
@@ -768,9 +770,191 @@ func (s *Store) GetHooks(ctx context.Context, agentID, eventType string) ([]stri
 // --- Audit log ----------------------------------------------------------------------
 
 func (s *Store) Audit(ctx context.Context, agentID string, tenantID uuid.UUID, action string, resourceID, ip *string) error {
-	_, err := s.Pool.Exec(ctx, `INSERT INTO audit_log (agent_id, tenant_id, action, resource_id, ip_addr) VALUES ($1,$2,$3,$4,$5)`,
-		agentID, tenantID, action, resourceID, ip)
+	return s.Record(ctx, AuditRecord{AgentID: agentID, TenantID: tenantID, Action: action, ResourceID: resourceID, IP: ip})
+}
+
+// AuditRecord is one audit_log row (ADR 0032): who acted and through what,
+// on which resource, the memory's content before and after, and why.
+type AuditRecord struct {
+	AgentID    string
+	TenantID   uuid.UUID
+	Action     string
+	ResourceID *string
+	IP         *string
+	ActorType  string // agent, user, system, llm
+	Source     string // mcp, dashboard, api, import:pdf, connector:slack, evolve…
+	Before     any    // marshalled to JSONB; nil for none
+	After      any
+	Reason     string
+	RequestID  string
+}
+
+const auditInsert = `INSERT INTO audit_log (agent_id, tenant_id, action, resource_id, ip_addr, actor_type, source,
+		before, after, reason, request_id)
+	VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),NULLIF($7,''),$8,$9,NULLIF($10,''),NULLIF($11,''))`
+
+func (r AuditRecord) args() []any {
+	js := func(v any) any {
+		if v == nil {
+			return nil
+		}
+		b, _ := json.Marshal(v)
+		return b
+	}
+	return []any{r.AgentID, r.TenantID, r.Action, r.ResourceID, r.IP, r.ActorType, r.Source,
+		js(r.Before), js(r.After), r.Reason, r.RequestID}
+}
+
+func (s *Store) Record(ctx context.Context, r AuditRecord) error {
+	_, err := s.Pool.Exec(ctx, auditInsert, r.args()...)
 	return err
+}
+
+// RecordMany writes several audit rows in one round trip (a batch of memories).
+func (s *Store) RecordMany(ctx context.Context, recs []AuditRecord) error {
+	if len(recs) == 0 {
+		return nil
+	}
+	b := &pgx.Batch{}
+	for _, r := range recs {
+		b.Queue(auditInsert, r.args()...)
+	}
+	return s.Pool.SendBatch(ctx, b).Close()
+}
+
+// ArchiveMemory moves one of the agent's memories into memory_archive, so it
+// leaves every search and listing but can be restored. It returns the archived
+// row and the memory's file, if any.
+func (s *Store) ArchiveMemory(ctx context.Context, id uuid.UUID, agentID string, tenantID uuid.UUID, reason string) (json.RawMessage, *uuid.UUID, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback(ctx)
+	var row json.RawMessage
+	var fileID *uuid.UUID
+	err = tx.QueryRow(ctx, `INSERT INTO memory_archive (id, tenant_id, agent_id, memory, archived_by, reason)
+		SELECT m.id, m.tenant_id, m.agent_id, to_jsonb(m), $2, NULLIF($4,'') FROM memories m
+		WHERE m.id = $1 AND m.agent_id = $2 AND m.tenant_id = $3
+		ON CONFLICT (id) DO UPDATE SET memory = EXCLUDED.memory, archived_at = NOW(), reason = EXCLUDED.reason
+		RETURNING memory, (memory->>'file_id')::uuid`, id, agentID, tenantID, reason).Scan(&row, &fileID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM memories WHERE id = $1 AND agent_id = $2 AND tenant_id = $3`, id, agentID, tenantID); err != nil {
+		return nil, nil, err
+	}
+	return row, fileID, tx.Commit(ctx)
+}
+
+// RestoreMemory puts an archived memory back. It returns the restored memory,
+// or nil when the agent has no such archived memory.
+func (s *Store) RestoreMemory(ctx context.Context, id uuid.UUID, agentID string, tenantID uuid.UUID) (*domain.Memory, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	var row json.RawMessage
+	err = tx.QueryRow(ctx, `DELETE FROM memory_archive WHERE id = $1 AND agent_id = $2 AND tenant_id = $3 RETURNING memory`,
+		id, agentID, tenantID).Scan(&row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	// The row is put back column for column; columns added later get their defaults.
+	if _, err := tx.Exec(ctx, `INSERT INTO memories SELECT * FROM jsonb_populate_record(NULL::memories, $1)`, row); err != nil {
+		return nil, err
+	}
+	var m domain.Memory
+	if err := json.Unmarshal(row, &m); err != nil {
+		return nil, err
+	}
+	return &m, tx.Commit(ctx)
+}
+
+// PurgeMemory removes a memory for good: from memories and the archive, and
+// it empties the content kept in its audit rows. The audit rows themselves
+// stay, so the history shows that something was purged.
+func (s *Store) PurgeMemory(ctx context.Context, id uuid.UUID, agentID string, tenantID uuid.UUID) (bool, *uuid.UUID, error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return false, nil, err
+	}
+	defer tx.Rollback(ctx)
+	var fileID *uuid.UUID
+	n := 0
+	err = tx.QueryRow(ctx, `DELETE FROM memories WHERE id = $1 AND agent_id = $2 AND tenant_id = $3 RETURNING file_id`,
+		id, agentID, tenantID).Scan(&fileID)
+	if err == nil {
+		n++
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return false, nil, err
+	}
+	var archivedFile *uuid.UUID
+	err = tx.QueryRow(ctx, `DELETE FROM memory_archive WHERE id = $1 AND agent_id = $2 AND tenant_id = $3
+		RETURNING (memory->>'file_id')::uuid`, id, agentID, tenantID).Scan(&archivedFile)
+	if err == nil {
+		n++
+		if fileID == nil {
+			fileID = archivedFile
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return false, nil, err
+	}
+	if n == 0 {
+		return false, nil, nil
+	}
+	if _, err := tx.Exec(ctx, `UPDATE audit_log SET before = NULL, after = NULL
+		WHERE resource_id = $1 AND tenant_id = $2`, id.String(), tenantID); err != nil {
+		return false, nil, err
+	}
+	return true, fileID, tx.Commit(ctx)
+}
+
+// HistoryEntry is one change to a memory, from audit_log.
+type HistoryEntry struct {
+	At        time.Time       `json:"at"`
+	Action    string          `json:"action"`
+	ActorType string          `json:"actor_type,omitempty"`
+	ActorID   string          `json:"actor_id"`
+	Source    string          `json:"source,omitempty"`
+	Before    json.RawMessage `json:"before,omitempty"`
+	After     json.RawMessage `json:"after,omitempty"`
+	Reason    string          `json:"reason,omitempty"`
+}
+
+// MemoryHistory returns the audited changes to one of the agent's memories,
+// oldest first, and whether it is currently archived.
+func (s *Store) MemoryHistory(ctx context.Context, id uuid.UUID, agentID string, tenantID uuid.UUID) ([]HistoryEntry, bool, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT created_at, action, COALESCE(actor_type,''), agent_id, COALESCE(source,''),
+			before, after, COALESCE(reason,'')
+		FROM audit_log WHERE resource_id = $1 AND tenant_id = $2 AND agent_id = $3 ORDER BY created_at, id`,
+		id.String(), tenantID, agentID)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	out := []HistoryEntry{}
+	for rows.Next() {
+		var h HistoryEntry
+		if err := rows.Scan(&h.At, &h.Action, &h.ActorType, &h.ActorID, &h.Source, &h.Before, &h.After, &h.Reason); err != nil {
+			return nil, false, err
+		}
+		out = append(out, h)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	var archived bool
+	err = s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM memory_archive WHERE id = $1 AND agent_id = $2 AND tenant_id = $3)`,
+		id, agentID, tenantID).Scan(&archived)
+	return out, archived, err
 }
 
 type AuditEntry struct {

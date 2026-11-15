@@ -180,6 +180,8 @@ func (s *Server) Handler() http.Handler {
 	protected("POST /memories/batch", s.createMemoriesBatch)
 	protected("GET /memory/agent/{agent_id}", s.listMemories)
 	protected("DELETE /memory/{id}", s.deleteMemory)
+	protected("POST /memory/restore/{id}", s.restoreMemory)
+	protected("GET /memory/history/{id}", s.memoryHistory)
 	protected("GET /memory/chain/{id}", s.memoryChain)
 	protected("GET /memory/graph", s.memoryGraph)
 	protected("POST /memory/generate-atoms", s.generateAtoms)
