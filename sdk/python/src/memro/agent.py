@@ -257,6 +257,19 @@ class Agent:
             memory_id=memory_id,
         )
 
+    def update_memory(self, memory_id: str, content: str, reason: str) -> Memory:
+        """Replace a memory with corrected content; the old version is archived. Returns the new memory."""
+        res = self.client.update_memory(self.agent_id, self._private_key, memory_id, content, reason)
+        return Memory(**res["memory"])
+
+    def restore_memory(self, memory_id: str) -> Memory:
+        """Put a deleted (archived) memory back."""
+        return Memory(**self.client.restore_memory(self.agent_id, self._private_key, memory_id))
+
+    def memory_history(self, memory_id: str) -> dict:
+        """Every audited change to a memory, oldest first."""
+        return self.client.memory_history(self.agent_id, self._private_key, memory_id)
+
     def export(self) -> ExportData:
         """Export all memories for this agent."""
         data = self.client.export(self.agent_id, self._private_key)

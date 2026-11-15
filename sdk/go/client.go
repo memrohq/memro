@@ -286,6 +286,32 @@ func (c *Client) DeleteMemory(ctx context.Context, memoryID string, signer *Sign
 	return err == nil, err
 }
 
+// UpdateMemoryResponse is the corrected memory and the ID of the version it replaced.
+type UpdateMemoryResponse struct {
+	Memory   Memory `json:"memory"`
+	Replaced string `json:"replaced"`
+}
+
+// UpdateMemory saves content as a new version of a memory and archives the
+// old one; reason is kept in both histories.
+func (c *Client) UpdateMemory(ctx context.Context, memoryID, content, reason string, signer *Signer) (*UpdateMemoryResponse, error) {
+	var out UpdateMemoryResponse
+	body := map[string]string{"content": content, "reason": reason}
+	return &out, c.call(ctx, http.MethodPut, "/memory/"+url.PathEscape(memoryID), nil, body, signer, &out)
+}
+
+// RestoreMemory puts a deleted (archived) memory back.
+func (c *Client) RestoreMemory(ctx context.Context, memoryID string, signer *Signer) (*Memory, error) {
+	var out Memory
+	return &out, c.call(ctx, http.MethodPost, "/memory/restore/"+url.PathEscape(memoryID), nil, nil, signer, &out)
+}
+
+// MemoryHistory returns every audited change to a memory, oldest first.
+func (c *Client) MemoryHistory(ctx context.Context, memoryID string, signer *Signer) (map[string]any, error) {
+	var out map[string]any
+	return out, c.call(ctx, http.MethodGet, "/memory/history/"+url.PathEscape(memoryID), nil, nil, signer, &out)
+}
+
 // Export returns every memory of an agent.
 func (c *Client) Export(ctx context.Context, agentID string, signer *Signer) (*ExportData, error) {
 	var out ExportData
