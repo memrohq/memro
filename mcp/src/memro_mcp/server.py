@@ -11,7 +11,7 @@ import time
 from collections import OrderedDict
 from contextvars import ContextVar
 from dotenv import load_dotenv
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 
 # Load local .env if it exists
 load_dotenv()
@@ -57,6 +57,8 @@ searching files: Memro holds what was decided, and files can be incomplete.
 - Call `remember` with one short, self-contained sentence when something will \
 matter in a later session: a decision and why, a fix or workflow worth reusing, \
 a preference or correction from the user, or an important project constraint.
+- When a recalled memory is wrong or out of date, call `update_memory` with its \
+id, the corrected sentence and why, instead of saving a second, contradicting one.
 
 Types: "semantic" for facts ("Memro uses PostgreSQL"), "profile" for the user's \
 preferences and working style ("User prefers reviewing migrations before \
@@ -340,12 +342,28 @@ def _all_tools() -> list[Tool]:
             },
         ),
         Tool(
-            name="delete_memory",
-            description="Delete one memory by ID, e.g. when the user says it is wrong or asks you to forget it.",
+            name="update_memory",
+            description="Correct a memory that is out of date or wrong: saves the new content as a new version and "
+                        "archives the old one, keeping both in its history. Prefer this over saving a contradicting memory.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "memory_id": {"type": "string"},
+                    "content": {"type": "string", "description": "The corrected memory, one self-contained statement."},
+                    "reason": {"type": "string", "description": "Why it changed, e.g. 'user said Ana replaced Marco'."},
+                },
+                "required": ["memory_id", "content", "reason"],
+            },
+        ),
+        Tool(
+            name="delete_memory",
+            description="Forget one memory by ID, e.g. when the user asks you to forget it. It is archived (hidden "
+                        "from search, kept in its history) and can be restored.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "memory_id": {"type": "string"},
+                    "reason": {"type": "string", "description": "Why it is being forgotten."},
                 },
                 "required": ["memory_id"],
             },
@@ -453,8 +471,28 @@ def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolR
         return _text([{"id": m.id, "content": m.content, "type": m.memory_type,
                        "created_at": m.created_at.isoformat(), "metadata": m.metadata or {}} for m in memories])
 
+    if name == "update_memory":
+        # Called directly so this works with the published SDK (memro 0.2).
+        try:
+            res = agent.client._json("PUT", f"/memory/{quote(str(args.get('memory_id', '')), safe='')}",
+                                     agent_id=agent.agent_id, private_key=agent._private_key,
+                                     json_body={"content": args.get("content", ""), "reason": args.get("reason", "")})
+        except MemroError as e:
+            if e.status_code == 404:
+                return _text("Memory not found.")
+            raise
+        return _text(f"Memory updated: new id {res['memory']['id']}, old version archived.")
+
     if name == "delete_memory":
-        return _text("Memory deleted." if agent.delete_memory(args.get("memory_id")) else "Memory not found.")
+        try:
+            agent.client.request("DELETE", f"/memory/{quote(str(args.get('memory_id', '')), safe='')}",
+                                 params={"reason": args.get("reason", "")} if args.get("reason") else None,
+                                 agent_id=agent.agent_id, private_key=agent._private_key)
+        except MemroError as e:
+            if e.status_code == 404:
+                return _text("Memory not found.")
+            raise
+        return _text("Memory archived; it can be restored from its history.")
 
     if name == "export_memories":
         return _text(f"Exported {agent.export().total} memories.")

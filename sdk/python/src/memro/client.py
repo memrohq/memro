@@ -9,7 +9,7 @@ import mimetypes
 import os
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import requests
 from requests import Response
@@ -264,6 +264,19 @@ class MemroClient:
             if e.status_code == 404:
                 return False
             raise
+
+    def update_memory(self, agent_id: str, private_key: Optional[str], memory_id: str, content: str, reason: str) -> dict:
+        """Save content as a new version of a memory and archive the old one: {memory, replaced}."""
+        return self._json("PUT", f"/memory/{quote(memory_id, safe='')}", agent_id=agent_id, private_key=private_key,
+                          json_body={"content": content, "reason": reason})
+
+    def restore_memory(self, agent_id: str, private_key: Optional[str], memory_id: str) -> dict:
+        """Put a deleted (archived) memory back."""
+        return self._json("POST", f"/memory/restore/{quote(memory_id, safe='')}", agent_id=agent_id, private_key=private_key)
+
+    def memory_history(self, agent_id: str, private_key: Optional[str], memory_id: str) -> dict:
+        """Every audited change to a memory, oldest first: {memory_id, archived, history}."""
+        return self._json("GET", f"/memory/history/{quote(memory_id, safe='')}", agent_id=agent_id, private_key=private_key)
 
     def export(self, agent_id: str, private_key: Optional[str] = None) -> dict:
         """Every memory the agent has: {agent_id, exported_at, total, memories}."""

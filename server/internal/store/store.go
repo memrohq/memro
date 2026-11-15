@@ -851,16 +851,12 @@ func (s *Store) RecordMany(ctx context.Context, recs []AuditRecord) error {
 // leaves every search and listing but can be restored. It returns the archived
 // row and the memory's file, if any.
 func (s *Store) ArchiveMemory(ctx context.Context, id uuid.UUID, agentID string, tenantID uuid.UUID, reason string) (json.RawMessage, *uuid.UUID, error) {
-	tx, err := s.Pool.Begin(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer tx.Rollback(ctx)
+	// Delete first: of two concurrent archives (or updates) only one gets the row.
 	var row json.RawMessage
 	var fileID *uuid.UUID
-	err = tx.QueryRow(ctx, `INSERT INTO memory_archive (id, tenant_id, agent_id, memory, archived_by, reason)
-		SELECT m.id, m.tenant_id, m.agent_id, to_jsonb(m), $2, NULLIF($4,'') FROM memories m
-		WHERE m.id = $1 AND m.agent_id = $2 AND m.tenant_id = $3
+	err := s.Pool.QueryRow(ctx, `WITH d AS (DELETE FROM memories WHERE id = $1 AND agent_id = $2 AND tenant_id = $3 RETURNING *)
+		INSERT INTO memory_archive (id, tenant_id, agent_id, memory, archived_by, reason)
+		SELECT d.id, d.tenant_id, d.agent_id, to_jsonb(d), $2, NULLIF($4,'') FROM d
 		ON CONFLICT (id) DO UPDATE SET memory = EXCLUDED.memory, archived_at = NOW(), reason = EXCLUDED.reason
 		RETURNING memory, (memory->>'file_id')::uuid`, id, agentID, tenantID, reason).Scan(&row, &fileID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -869,10 +865,7 @@ func (s *Store) ArchiveMemory(ctx context.Context, id uuid.UUID, agentID string,
 	if err != nil {
 		return nil, nil, err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM memories WHERE id = $1 AND agent_id = $2 AND tenant_id = $3`, id, agentID, tenantID); err != nil {
-		return nil, nil, err
-	}
-	return row, fileID, tx.Commit(ctx)
+	return row, fileID, nil
 }
 
 // RestoreMemory puts an archived memory back. It returns the restored memory,

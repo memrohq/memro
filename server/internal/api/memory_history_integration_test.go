@@ -123,3 +123,69 @@ func TestListMemoriesAsOf(t *testing.T) {
 	code, b = e.do(&a, "v2", "GET", "/memory/agent/"+a.id+"?as_of=yesterday", nil, nil)
 	e.must(400, code, b, "bad as_of")
 }
+
+// ADR 0032: an agent corrects a memory; the old version is archived and both
+// histories say why.
+func TestUpdateMemoryReplacesAndRecords(t *testing.T) {
+	e := setup(t)
+	a, other := newAgent(t), newAgent(t)
+	e.register(a)
+	e.register(other)
+	id := e.remember(a, "The billing contact is Marco.", "semantic")
+
+	upd := j(map[string]any{"content": "The billing contact is Ana.", "reason": "Marco left in October"})
+	code, b := e.do(&other, "v2", "PUT", "/memory/"+id, upd, nil)
+	e.must(404, code, b, "another agent updates")
+	code, b = e.do(&a, "v2", "PUT", "/memory/"+id, j(map[string]any{"content": " "}), nil)
+	e.must(400, code, b, "empty content")
+
+	code, b = e.do(&a, "v2", "PUT", "/memory/"+id, upd, nil)
+	e.must(200, code, b, "update")
+	var got struct {
+		Memory struct {
+			ID         string `json:"id"`
+			Content    string `json:"content"`
+			MemoryType string `json:"memory_type"`
+		} `json:"memory"`
+		Replaced string `json:"replaced"`
+	}
+	_ = json.Unmarshal(b, &got)
+	if got.Replaced != id || got.Memory.Content != "The billing contact is Ana." || got.Memory.MemoryType != "semantic" {
+		t.Fatalf("update = %s", b)
+	}
+
+	code, b = e.do(&a, "v2", "GET", "/memory/agent/"+a.id, nil, nil)
+	if strings.Contains(string(b), "Marco") || !strings.Contains(string(b), got.Memory.ID) {
+		t.Fatalf("after update, memories = %s", b)
+	}
+	code, b = e.do(&a, "v2", "GET", "/memory/history/"+id, nil, nil)
+	e.must(200, code, b, "old history")
+	if !strings.Contains(string(b), `"action":"memory.update"`) || !strings.Contains(string(b), `"replaced_by":"`+got.Memory.ID) ||
+		!strings.Contains(string(b), "Marco left in October") || !strings.Contains(string(b), `"archived":true`) {
+		t.Fatalf("old history = %s", b)
+	}
+	code, b = e.do(&a, "v2", "GET", "/memory/history/"+got.Memory.ID, nil, nil)
+	if !strings.Contains(string(b), `"action":"memory.replaces"`) || !strings.Contains(string(b), "The billing contact is Marco.") {
+		t.Fatalf("new history = %s", b)
+	}
+	code, b = e.do(&a, "v2", "PUT", "/memory/"+id, upd, nil)
+	e.must(404, code, b, "update an archived memory")
+
+	// Two updates at once: exactly one wins and only one version stays live.
+	id2 := e.remember(a, "The office is in Pune.", "semantic")
+	codes := make(chan int, 2)
+	for _, c := range []string{"The office is in Delhi.", "The office is in Goa."} {
+		go func(c string) {
+			code, _ := e.do(&a, "v2", "PUT", "/memory/"+id2, j(map[string]any{"content": c, "reason": "moved"}), nil)
+			codes <- code
+		}(c)
+	}
+	c1, c2 := <-codes, <-codes
+	if c1+c2 != 200+409 && c1+c2 != 200+404 {
+		t.Fatalf("concurrent updates = %d, %d", c1, c2)
+	}
+	_, b = e.do(&a, "v2", "GET", "/memory/agent/"+a.id, nil, nil)
+	if strings.Contains(string(b), "Delhi") == strings.Contains(string(b), "Goa") {
+		t.Fatalf("want exactly one live version, memories = %s", b)
+	}
+}

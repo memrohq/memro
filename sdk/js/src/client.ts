@@ -202,6 +202,16 @@ export class MemroClient {
       throw e;
     }
   }
+  /** Saves content as a new version of a memory and archives the old one. */
+  updateMemory(memoryId: string, content: string, reason: string, signer?: Signer) {
+    return this.request<{ memory: Memory; replaced: string }>('PUT', `/memory/${encodeURIComponent(memoryId)}`, { json: { content, reason }, signer });
+  }
+  /** Puts a deleted (archived) memory back. */
+  restoreMemory(memoryId: string, signer?: Signer) { return this.request<Memory>('POST', `/memory/restore/${encodeURIComponent(memoryId)}`, { signer }); }
+  /** Every audited change to a memory, oldest first. */
+  memoryHistory(memoryId: string, signer?: Signer) {
+    return this.request<{ memory_id: string; archived: boolean; history: Record<string, unknown>[] }>('GET', `/memory/history/${encodeURIComponent(memoryId)}`, { signer });
+  }
   export(agentId: string, signer?: Signer) { return this.request<ExportData>('GET', `/export/${agentId}`, { signer }); }
 
   // ── Search ──────────────────────────────────────────────────────────────

@@ -143,6 +143,10 @@ export class Agent {
 
   /** Returns false if the memory does not exist. */
   deleteMemory(memoryId: string): Promise<boolean> { return this.client.deleteMemory(memoryId, this.signer); }
+  /** Replaces a memory with corrected content; the old version is archived. */
+  updateMemory(memoryId: string, content: string, reason: string) { return this.client.updateMemory(memoryId, content, reason, this.signer); }
+  restoreMemory(memoryId: string) { return this.client.restoreMemory(memoryId, this.signer); }
+  memoryHistory(memoryId: string) { return this.client.memoryHistory(memoryId, this.signer); }
   export(): Promise<ExportData> { return this.client.export(this.agentId, this.signer); }
 
   // ── Memory engine ───────────────────────────────────────────────────────
