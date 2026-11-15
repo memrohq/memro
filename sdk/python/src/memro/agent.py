@@ -244,14 +244,17 @@ class Agent:
         limit: int = 10,
         type: Optional[str] = None,
         visibility: Optional[str] = None,
+        as_of: Optional[str] = None,
     ) -> List[Memory]:
-        """Get most recent memories without semantic search."""
+        """Get most recent memories without semantic search. as_of (RFC 3339)
+        returns what the agent knew at that time, including memories deleted since."""
         raw = self.client.get_memories(
             agent_id=self.agent_id,
             private_key=self._private_key,
             memory_type=type,
             visibility=visibility,
             limit=limit,
+            as_of=as_of,
         )
         return [Memory(**m) for m in raw]
 

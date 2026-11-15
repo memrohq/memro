@@ -216,6 +216,8 @@ export interface GetRecentOptions {
   limit?: number;
   type?: MemoryType;
   visibility?: Visibility;
+  /** RFC 3339 time: list what the agent knew then, including memories deleted since. */
+  asOf?: string;
 }
 
 export interface AgentIdentity {

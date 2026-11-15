@@ -148,6 +148,10 @@ def test_recall_passes_resolve_conflicts(mock_agent):
     mock_agent.recall("q", resolve_conflicts=True)
     assert mock_agent.client.search.call_args.kwargs["resolve_conflicts"] is True
 
+def test_get_recent_passes_as_of(mock_agent):
+    mock_agent.get_recent(as_of="2026-11-01T00:00:00Z")
+    assert mock_agent.client.get_memories.call_args.kwargs["as_of"] == "2026-11-01T00:00:00Z"
+
 def test_get_recent(mock_agent):
     memories = mock_agent.get_recent(limit=5)
     assert len(memories) == 1

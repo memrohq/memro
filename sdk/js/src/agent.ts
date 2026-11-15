@@ -137,7 +137,7 @@ export class Agent {
   /** Most recent memories, newest first (at most 100). */
   getRecent(options: GetRecentOptions = {}): Promise<Memory[]> {
     return this.client.listMemories(this.agentId, {
-      limit: options.limit ?? 10, memory_type: options.type, visibility: options.visibility,
+      limit: options.limit ?? 10, memory_type: options.type, visibility: options.visibility, as_of: options.asOf,
     }, this.signer);
   }
 
