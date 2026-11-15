@@ -49,8 +49,8 @@ not to production.
   Keyword fusion, session expansion and conflict demotion put three more
   evidence exchanges into prompts (167 vs 164 of 176) but did not change the
   number of correct answers. Knowledge updates were 12 vs 14, not significant
-  (n = 16), and the opposite of what conflict resolution is meant to do;
-  those two questions are the first to look at.
+  (n = 16); section 4 traces both misses to the answer step, not to
+  conflict resolution.
 - With ±8-point intervals at n = 100 and answer-model noise of a few points
   between identical runs (2026-11-15 evolution post), a small real difference
   either way is not ruled out.
