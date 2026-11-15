@@ -111,6 +111,7 @@ python bench/longmemeval/report.py bench/longmemeval/runs/ci-subset
 # No-memory and plain-RAG arms
 BASELINE=none python bench/longmemeval/run.py --subset --name arm-none-100
 BASELINE=rag python bench/longmemeval/run.py --subset --name arm-rag-100
+# Memro variants: SESSION_EXPANSION=0 (no whole-session context), HIDE_SUPERSEDED=true (drop superseded results)
 
 # 4. Compare against baseline with CI quality gate
 python bench/longmemeval/compare.py bench/longmemeval/runs/baseline-100 bench/longmemeval/runs/ci-subset --ci-gate
