@@ -8,6 +8,7 @@ and every release and package raises only the last number of its version (see RE
 ## [Unreleased]
 
 ### Fixed
+- **MCP `recall` shows which memories are out of date**: it ranks a memory below a newer one that contradicts it and marks it with `superseded_by`. Before, the tool dropped the flag and did not ask for conflict resolution. The Python SDK's `SearchResult` now keeps `is_superseded` and `superseded_by`.
 - **`min_score` now filters irrelevant results** (ADR 0033): search results include `similarity`, the cosine similarity to the query, and the Python, JS and Go SDKs apply `min_score` to it. Before, `min_score` filtered the rank-based fused score, which is above 0.4 for any of the top 16 candidates however unrelated.
 - **Sentiment and negation words match whole words only** (ADR 0033): "badge" no longer counts as "bad", nor "likely" or "dislike" as "like", which had marked unrelated memories as contradicting.
 - **Far fewer false contradictions in search**: the negation and sentiment rules now need the two statements to make the same claim (most content words shared), so ordinary chat messages that happen to share a word and contain "not" no longer demote each other (15 → 1 of 153 message pairs on one LongMemEval question). "Never use npm" still replaces "we use npm".

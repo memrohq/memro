@@ -38,6 +38,9 @@ class SearchResult(BaseModel):
     created_at: str
     asset_url: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+    # Set when a newer memory contradicts this one (ADR 0021).
+    is_superseded: bool = False
+    superseded_by: Optional[str] = None
 
 
 class TemporalSearchResult(BaseModel):

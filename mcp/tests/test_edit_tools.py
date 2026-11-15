@@ -50,3 +50,17 @@ def test_delete_memory_archives_with_reason():
 def test_missing_memory():
     for tool, args in [("update_memory", {"memory_id": "x", "content": "c", "reason": "r"}), ("delete_memory", {"memory_id": "x"})]:
         assert text(srv._run_tool(agent(StubClient(404)), "s", tool, args)) == "Memory not found."
+
+
+def test_recall_ranks_and_marks_superseded():
+    class SearchClient:
+        def search(self, **kw):
+            self.kw = kw
+            return [{"memory_id": "new", "content": "Ana lives in Berlin.", "memory_type": "semantic", "score": 0.9,
+                     "created_at": "2026-11-15T00:00:00Z"},
+                    {"memory_id": "old", "content": "Ana lives in Paris.", "memory_type": "semantic", "score": 0.2,
+                     "created_at": "2026-10-01T00:00:00Z", "is_superseded": True, "superseded_by": "new"}]
+    c = SearchClient()
+    out = text(srv._run_tool(agent(c), "s", "recall", {"query": "where does Ana live"}))
+    assert c.kw["resolve_conflicts"] is True
+    assert '"superseded_by": "new"' in out and out.count("superseded_by") == 1

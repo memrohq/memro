@@ -73,8 +73,8 @@ instructions (`CLAUDE.md`, `AGENTS.md`, …):
 |---|---|---|
 | `remember` | `content`, `type?`, `visibility?`, `event_date?`, `session_id?`, `is_atomic?` | Store a memory |
 | `remember_with_context` | `content`, `context_metadata?`, `type?`, `event_date?`, `session_id?` | Store with metadata (file, branch, function) and when it happened |
-| `recall` | `query`, `limit?` (5), `type?` | Hybrid search |
-| `recall_multi_session` | `query`, `limit?` (15) | Search across all sessions |
+| `recall` | `query`, `limit?` (5), `type?` | Hybrid search; a memory contradicted by a newer one ranks lower and carries `superseded_by` |
+| `recall_multi_session` | `query`, `limit?` (15) | Search across all sessions, same ranking |
 | `search_temporal` | `query`, `after_date?`, `before_date?`, `after_event_date?`, `before_event_date?`, `temporal_weight?`, `atomic_only?`, `limit?` | Search by time |
 | `get_recent_memories` | `limit?`, `type?` | Newest first |
 | `update_memory` | `memory_id`, `content`, `reason` | Saves a corrected version and archives the old one |
