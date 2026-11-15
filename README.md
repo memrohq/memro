@@ -5,6 +5,7 @@
 [![npm](https://img.shields.io/npm/v/memro-cli?label=memro-cli)](https://www.npmjs.com/package/memro-cli)
 [![PyPI](https://img.shields.io/pypi/v/memro?label=pypi%20memro)](https://pypi.org/project/memro/)
 [![MCP Ready](https://img.shields.io/badge/MCP-ready-purple.svg)](mcp)
+[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/ykTeRFRpQP)
 
 **One long-term memory for all your AI tools.** Claude Code, Cursor, Codex, GitHub Copilot and any MCP client remember your decisions, preferences and project context across sessions. Tell one tool once, and they all know.
 
@@ -240,5 +241,5 @@ Please review [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) 
 
 ---
 
-Repository: [github.com/memrohq/memro](https://github.com/memrohq/memro) · Documentation: [https://memro.co](https://memro.co)
+Repository: [github.com/memrohq/memro](https://github.com/memrohq/memro) · Documentation: [https://memro.co](https://memro.co) · Community: [Discord](https://discord.gg/ykTeRFRpQP)
 License: Source available under [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0). Free for non-commercial use; commercial use requires Memro Cloud or a commercial license.
