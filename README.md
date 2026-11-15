@@ -1,6 +1,17 @@
 # Memro — Verified Memory Infrastructure for AI Agents
 
-Give your AI agents persistent memory across sessions: agent identity, memory storage and hybrid retrieval through an API, SDKs and MCP.
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](LICENSE)
+[![CI](https://github.com/memrohq/memro/actions/workflows/ci.yml/badge.svg)](https://github.com/memrohq/memro/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/memro-cli?label=memro-cli)](https://www.npmjs.com/package/memro-cli)
+[![PyPI](https://img.shields.io/pypi/v/memro?label=pypi%20memro)](https://pypi.org/project/memro/)
+[![MCP Ready](https://img.shields.io/badge/MCP-ready-purple.svg)](mcp)
+
+**One long-term memory for all your AI tools.** Claude Code, Cursor, Codex, GitHub Copilot and any MCP client remember your decisions, preferences and project context across sessions. Tell one tool once, and they all know.
+
+```bash
+npx memro-cli connect   # sign in and add Memro to the AI tools on this machine
+npx memro-cli doctor    # check which config each tool really uses, and that the key works
+```
 
 <p align="center">
   <a href="https://memro.co/#graph"><img src="docs/assets/memro-graph.gif" width="720" alt="The Memro dashboard's memory graph: a million memories, linked by the people, companies and conversations in them"></a>
@@ -8,10 +19,14 @@ Give your AI agents persistent memory across sessions: agent identity, memory st
   <sub>The dashboard's memory graph on an account with a million memories; it draws the newest 5,000 at most at a time. <a href="https://memro.co/#graph">Watch the tour with sound</a>.</sub>
 </p>
 
-[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](LICENSE)
-[![CI](https://github.com/memrohq/memro/actions/workflows/ci.yml/badge.svg)](https://github.com/memrohq/memro/actions/workflows/ci.yml)
-[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
-[![MCP Ready](https://img.shields.io/badge/MCP-ready-purple.svg)](mcp)
+<p align="center">
+  <a href="https://memro.co">Website</a> ·
+  <a href="https://memro.co/docs/">Docs</a> ·
+  <a href="https://memro.co/demo/voice/">Voice demo</a> ·
+  <a href="https://dev.to/subal_bain_059153c5cbc1cc/i-gave-claude-code-codex-cursor-and-copilot-one-shared-memory-heres-what-broke-3g56">What broke wiring one memory into 4 AI tools</a>
+</p>
+
+> ⭐ **If Memro saves you from re-explaining your project, a star helps other developers find it.**
 
 > **License (Source Available)**
 > 
