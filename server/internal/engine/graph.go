@@ -37,6 +37,11 @@ type graphWalk struct {
 }
 
 // DetectQueryIntent classifies query into "evolution", "historical", "current", "aggregation", or "multi_hop".
+
+// graphBudget is how long graph expansion may add to a search; past it, search
+// returns the plain hybrid results.
+var graphBudget = 150 * time.Millisecond
+
 func DetectQueryIntent(query string) string {
 	q := strings.ToLower(strings.TrimSpace(query))
 
@@ -147,7 +152,7 @@ func (e *Engine) ExpandGraph(ctx context.Context, q domain.SearchQuery, tenantID
 
 	intent := DetectQueryIntent(q.Query)
 	start := time.Now()
-	timeoutCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+	timeoutCtx, cancel := context.WithTimeout(ctx, graphBudget)
 	defer cancel()
 
 	numSeeds := min(len(hybridResults), min(q.Limit, GraphMaxSeeds))
