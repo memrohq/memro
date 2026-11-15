@@ -55,7 +55,8 @@ AGGREGATE = re.compile(r"\b(how many|how much|in total|total|altogether|combined
 # (no keyword fusion, session expansion or conflict handling); unset is Memro.
 BASELINE = os.environ.get("BASELINE", "")
 SEARCH_MODE = "semantic" if BASELINE == "rag" else "hybrid"
-SESSION_EXPANSION = 0 if BASELINE == "rag" else 3  # answer() adds every exchange from the top N retrieved sessions
+# answer() adds every exchange from the top N retrieved sessions
+SESSION_EXPANSION = 0 if BASELINE == "rag" else int(os.environ.get("SESSION_EXPANSION", "3"))
 NS_SESSION = uuid.UUID("6f1c2a8e-5b8f-4c4e-9d55-0a4f7d1c3b21")
 
 

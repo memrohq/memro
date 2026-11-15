@@ -55,10 +55,24 @@ not to production.
   between identical runs (2026-11-15 evolution post), a small real difference
   either way is not ruled out.
 
-## 4. Next
+## 4. The two knowledge-update misses
 
-1. Look at the two knowledge-update questions where rag was right and memro
-   wrong: `184da446` (memro answered 20 pages, gold 220, so conflict handling
-   may have kept the older count) and `2133c1b5`.
-2. Run both arms on all 500 questions, twice each.
-3. Report the comparison in the LongMemEval paper (MR-2026-01) as measured.
+Prompts rebuilt against the same server (`c5e9c83`), then each re-answered
+three times with `gpt-4o-mini`:
+
+| Question | Evidence in both prompts | Prompt chars rag / memro | Re-answers correct rag / memro |
+|---|---|---|---|
+| `184da446` (pages read, gold 220) | "page 200", later "page 220" | 42,063 / 71,363 | 3/3 / 3/3 |
+| `2133c1b5` (time in apartment, gold 3 months) | "a month", later "3 months" | 31,459 / 40,099 | 3/3 / 2/3 |
+
+Neither prompt had a superseded mark, and both arms retrieved the same
+memories, so conflict handling played no part. `184da446` was answer-model
+noise. `2133c1b5` may be the extra session text distracting the model (one
+of three re-answers counted from the session date instead), too few runs to
+tell. Session expansion adds about 30% to the prompt and showed no gain here.
+
+## 5. Next
+
+1. Run on all 500 questions, twice each: rag, memro, and memro with
+   `SESSION_EXPANSION=0`, to see whether session expansion earns its tokens.
+2. Report the comparison in the LongMemEval paper (MR-2026-01) as measured.
