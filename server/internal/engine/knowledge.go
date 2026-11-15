@@ -190,6 +190,53 @@ func NearDuplicate(a, b string) bool {
 	return float64(shared)/float64(len(wa)+len(wb)-shared) >= 0.8
 }
 
+var (
+	reNegatedUse = regexp.MustCompile(`\b(?:never|don't|do not|doesn't|does not|stop|stopped|no longer)\s+(?:use|using|uses|run|running|install|installing)\s+([a-z0-9][a-z0-9.+-]*)`)
+	reUse        = regexp.MustCompile(`\b(?:use|uses|using|runs?|install|installs)\s+([a-z0-9][a-z0-9.+-]*)`)
+)
+
+// negatesUse reports whether neg says to stop using a tool that other says is
+// used ("never use npm" vs "we use npm to install packages").
+func negatesUse(neg, other string) bool {
+	for _, m := range reNegatedUse.FindAllStringSubmatch(neg, -1) {
+		tool := m[1]
+		if reNegatedUse.MatchString(other) && strings.Contains(other, " "+tool) {
+			continue // other also negates it
+		}
+		for _, u := range reUse.FindAllStringSubmatch(other, -1) {
+			if u[1] == tool {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// sameClaim reports whether two statements share most of their content words
+// (Jaccard >= 0.5), ignoring words that start with any of the ignore prefixes.
+func sameClaim(a, b string, ignore []string) bool {
+	keep := func(ws map[string]bool) map[string]bool {
+		out := map[string]bool{}
+		for w := range ws {
+			if !slices.ContainsFunc(ignore, func(p string) bool { return strings.HasPrefix(w, p) }) {
+				out[w] = true
+			}
+		}
+		return out
+	}
+	wa, wb := keep(contentWords(a)), keep(contentWords(b))
+	if len(wa) == 0 || len(wb) == 0 {
+		return false
+	}
+	shared := 0
+	for w := range wa {
+		if wb[w] {
+			shared++
+		}
+	}
+	return float64(shared)/float64(len(wa)+len(wb)-shared) >= 0.5
+}
+
 var stopWords = map[string]bool{"the": true, "and": true, "for": true, "are": true, "was": true, "with": true,
 	"this": true, "that": true, "its": true, "our": true, "your": true, "has": true, "have": true}
 
@@ -265,16 +312,14 @@ func DetectContradictionWithIntent(a, b string, isAggregation bool) float32 {
 			}
 			return strings.Join(strings.Fields(s), " ")
 		}
-		cleanA, cleanB := stripNeg(al), stripNeg(bl)
-		wordsA := strings.Fields(cleanA)
-		wordsB := strings.Fields(cleanB)
-		overlap := 0
-		for _, wa := range wordsA {
-			if len(wa) > 3 && slices.Contains(wordsB, wa) {
-				overlap++
-			}
+		// "never use npm" contradicts "we use npm …" whatever else either says.
+		if negatesUse(al, bl) || negatesUse(bl, al) {
+			return 0.8
 		}
-		if overlap >= 1 {
+		// Otherwise the two must make the same claim apart from the negation: one shared
+		// word let "I'm not sure how to use it with my products" contradict any
+		// chat message about products.
+		if sameClaim(stripNeg(al), stripNeg(bl), nil) {
 			return 0.8
 		}
 	}
@@ -286,12 +331,8 @@ func DetectContradictionWithIntent(a, b string, isAggregation bool) float32 {
 	aPos, aNeg := has(al, positiveWords), has(al, negativeWords)
 	bPos, bNeg := has(bl, positiveWords), has(bl, negativeWords)
 	if (aPos && bNeg) || (aNeg && bPos) {
-		wordsA := strings.Fields(al)
-		wordsB := strings.Fields(bl)
-		for _, wa := range wordsA {
-			if len(wa) > 3 && slices.Contains(wordsB, wa) {
-				return 0.7
-			}
+		if sameClaim(al, bl, append(slices.Clone(positiveWords), negativeWords...)) {
+			return 0.7
 		}
 		return 0.6
 	}

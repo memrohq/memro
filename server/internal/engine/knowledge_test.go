@@ -309,3 +309,32 @@ func TestCountingQueriesKeepNearDuplicates(t *testing.T) {
 		t.Errorf("non-counting query should collapse the older restatement %q", plain[0].Content)
 	}
 }
+
+// Chat messages sharing a word aren't contradictions just because one says
+// "not" or "like" (LongMemEval: about 1 in 10 pairs of a session were).
+func TestNegationNeedsTheSameClaim(t *testing.T) {
+	independent := [][2]string{
+		{"I like the idea of a seasonal theme, but I'm not sure how to incorporate it with my products.",
+			"I'm thinking of expanding my product line to include some herbal teas and spice blends for my products."},
+		{"I don't have time to cook during the week.", "I cook pasta on weekends with my partner."},
+		{"I love the new office plants.", "The office printer is terrible this week."},
+		{"Never use force push on main.", "We use npm to install packages."},
+		{"Don't use npm in the docs repo either.", "Never use npm here."},
+	}
+	for _, c := range independent {
+		if got := DetectContradiction(c[0], c[1]); got >= 0.7 {
+			t.Errorf("DetectContradiction(%q, %q) = %.2f, want < 0.7", c[0], c[1], got)
+		}
+	}
+	conflicts := [][2]string{
+		{"Use TypeScript for backend", "Don't use TypeScript for backend"},
+		{"I love hiking", "I hate hiking"},
+		{"The team uses Slack for standups.", "The team does not use Slack for standups."},
+		{"We use npm to install packages in this project.", "We switched this project to pnpm; never use npm."},
+	}
+	for _, c := range conflicts {
+		if got := DetectContradiction(c[0], c[1]); got < 0.7 {
+			t.Errorf("DetectContradiction(%q, %q) = %.2f, want >= 0.7", c[0], c[1], got)
+		}
+	}
+}
