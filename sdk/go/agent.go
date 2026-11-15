@@ -260,6 +260,21 @@ func (a *Agent) DeleteMemory(ctx context.Context, memoryID string) (bool, error)
 	return a.Client.DeleteMemory(ctx, memoryID, a.signer)
 }
 
+// UpdateMemory replaces a memory with corrected content; the old version is archived.
+func (a *Agent) UpdateMemory(ctx context.Context, memoryID, content, reason string) (*UpdateMemoryResponse, error) {
+	return a.Client.UpdateMemory(ctx, memoryID, content, reason, a.signer)
+}
+
+// RestoreMemory puts a deleted (archived) memory back.
+func (a *Agent) RestoreMemory(ctx context.Context, memoryID string) (*Memory, error) {
+	return a.Client.RestoreMemory(ctx, memoryID, a.signer)
+}
+
+// MemoryHistory returns every audited change to a memory, oldest first.
+func (a *Agent) MemoryHistory(ctx context.Context, memoryID string) (map[string]any, error) {
+	return a.Client.MemoryHistory(ctx, memoryID, a.signer)
+}
+
 // Export returns every memory.
 func (a *Agent) Export(ctx context.Context) (*ExportData, error) {
 	return a.Client.Export(ctx, a.AgentID, a.signer)

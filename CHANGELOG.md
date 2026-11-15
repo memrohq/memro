@@ -18,6 +18,7 @@ and every release and package raises only the last number of its version (see RE
 - **Deleting a memory archives it** (ADR 0032): `DELETE /memory/{id}` and the `delete_memory` tool move it out of search and listings, and `POST /memory/restore/{id}` brings it back. `?purge=true` removes it for good, together with the content kept in its history.
 
 ### Added
+- **Agents can correct their memories** (ADR 0032): `PUT /memory/{id}` and the `update_memory` MCP tool save a corrected version and archive the old one, with the reason in both histories; `delete_memory` takes a `reason`. The Python, JS and Go SDKs add `update_memory`/`updateMemory`/`UpdateMemory`, plus restore and history.
 - **Memory history and provenance** (ADR 0032): `GET /memory/history/{id}` lists every change to a memory (who, from where, content before and after, why). Memories record their `source` (`mcp`, `dashboard`, `api`, `import:pdf`…) and `author_type`; the MCP server identifies itself with `X-Memro-Source: mcp`, and batch writes are audited per memory.
 - **Claude Code plugin** (`integrations/claude-code`, marketplace `memrohq/memro`): the Memro MCP server, with the API key asked at install and kept in the keychain, plus a SessionStart hook that recalls the project's memories and adds the Memro note at the start of every session.
 

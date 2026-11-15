@@ -732,6 +732,88 @@ func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// PUT /memory/{id} {"content", "reason", "memory_type"?} replaces a memory
+// with a corrected version (ADR 0032). The new memory keeps the old one's type,
+// visibility, session and dates unless given; the old one is archived, and
+// both histories record the change.
+func (s *Server) updateMemory(w http.ResponseWriter, r *http.Request) {
+	a, raw := agentFrom(r), r.PathValue("id")
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		httpError(w, http.StatusBadRequest, "Invalid memory ID format")
+		return
+	}
+	var req struct {
+		Content    string  `json:"content"`
+		Reason     string  `json:"reason"`
+		MemoryType *string `json:"memory_type"`
+	}
+	if err := decodeJSON(body(r), &req); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Content) == "" {
+		httpError(w, http.StatusBadRequest, "content cannot be empty")
+		return
+	}
+	if utf8.RuneCountInString(req.Content) > maxContentChars {
+		httpError(w, http.StatusBadRequest, "content exceeds 10,000 character limit")
+		return
+	}
+	old, err := s.store.GetMemory(r.Context(), id, a.ID, a.TenantID)
+	if err != nil {
+		slog.Error("get memory", "err", err)
+		httpError(w, http.StatusInternalServerError, "Failed to load memory")
+		return
+	}
+	if old == nil {
+		httpError(w, http.StatusNotFound, "Memory not found")
+		return
+	}
+	memType := old.MemoryType
+	if req.MemoryType != nil && !isAutoType(*req.MemoryType) {
+		t, ok := domain.ParseMemoryType(*req.MemoryType)
+		if !ok {
+			httpError(w, http.StatusBadRequest, fmt.Sprintf("Invalid memory_type: '%s'", *req.MemoryType))
+			return
+		}
+		memType = t
+	}
+	now := time.Now().UTC()
+	m := &domain.Memory{
+		ID: uuid.New(), AgentID: a.ID, TenantID: a.TenantID, Content: req.Content, MemoryType: memType,
+		Visibility: old.Visibility, CreatedAt: now, DocumentDate: now, LastAccessedAt: now, Confidence: 1,
+		EventDate: old.EventDate, SessionID: old.SessionID, IsAtomic: old.IsAtomic,
+		EntityTags: extract.Entities(req.Content), RelationshipTypes: []string{}, Metadata: old.Metadata,
+	}
+	// Saved first: if archiving the old version then fails, nothing is lost.
+	if !s.saveMemory(w, r, a, m, "memory.create") {
+		return
+	}
+	row, _, err := s.store.ArchiveMemory(r.Context(), id, a.ID, a.TenantID, req.Reason)
+	if err != nil {
+		slog.Error("archive replaced memory", "err", err)
+		httpError(w, http.StatusInternalServerError, "Saved the new version but failed to archive the old one")
+		return
+	}
+	if row == nil {
+		// A concurrent update or delete got there first; drop our version so two don't stay live.
+		if _, _, err := s.store.DeleteMemory(r.Context(), m.ID, a.ID, a.TenantID); err != nil {
+			slog.Error("drop losing update", "err", err)
+		}
+		s.engine.Cache().InvalidateAgent(a.ID)
+		httpError(w, http.StatusConflict, "Memory was changed by another request; fetch it again")
+		return
+	}
+	s.engine.Cache().InvalidateAgent(a.ID)
+	newID := m.ID.String()
+	after := auditedMemory(m)
+	after["replaced_by"] = newID
+	s.auditChange(r, a, "memory.update", &raw, auditedMemory(old), after, req.Reason)
+	s.auditChange(r, a, "memory.replaces", &newID, auditedMemory(old), auditedMemory(m), req.Reason)
+	writeJSON(w, http.StatusOK, map[string]any{"memory": m, "replaced": id})
+}
+
 // POST /memory/restore/{id} puts an archived memory back.
 func (s *Server) restoreMemory(w http.ResponseWriter, r *http.Request) {
 	a, raw := agentFrom(r), r.PathValue("id")

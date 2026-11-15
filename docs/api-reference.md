@@ -92,6 +92,15 @@ kept in its history (for privacy requests). If the memory was made from an
 uploaded file and no other memory, live or archived, uses that file, the
 file is deleted too.
 
+### 🔒 `PUT /memory/{id}`
+
+`{"content": "The billing contact is Ana.", "reason": "Marco left in October", "memory_type": "semantic"}`
+(`memory_type` optional). Saves the content as a new memory that keeps the
+old one's type, visibility, session and event date, archives the old one,
+and records the change and reason in both histories. Returns
+`{"memory": {…}, "replaced": "<old id>"}`; `404` if the agent has no such
+live memory.
+
 ### 🔒 `POST /memory/restore/{id}`
 
 Puts an archived memory back and returns it. `404` if the agent has no such
