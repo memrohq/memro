@@ -55,6 +55,8 @@ AGGREGATE = re.compile(r"\b(how many|how much|in total|total|altogether|combined
 # (no keyword fusion, session expansion or conflict handling); unset is Memro.
 BASELINE = os.environ.get("BASELINE", "")
 SEARCH_MODE = "semantic" if BASELINE == "rag" else "hybrid"
+# Drop memories search marks superseded instead of showing them demoted and labelled.
+HIDE_SUPERSEDED = os.environ.get("HIDE_SUPERSEDED", "false").lower() == "true"
 # answer() adds every exchange from the top N retrieved sessions
 SESSION_EXPANSION = 0 if BASELINE == "rag" else int(os.environ.get("SESSION_EXPANSION", "3"))
 NS_SESSION = uuid.UUID("6f1c2a8e-5b8f-4c4e-9d55-0a4f7d1c3b21")
@@ -180,6 +182,7 @@ def get_engine_options():
     return {
         "top_k": TOP_K,
         "baseline": BASELINE or "memro",
+        "hide_superseded": HIDE_SUPERSEDED,
         "mode": SEARCH_MODE,
         "answer_model": ANSWER_MODEL,
         "session_expansion": SESSION_EXPANSION,
@@ -319,6 +322,8 @@ def retrieve(q, client, agent):
         max_per_session=per_session,
     )
     search_ms = (time.time() - t1) * 1000
+    if HIDE_SUPERSEDED:
+        hits = [h for h in hits if not h.get("is_superseded")]
     return hits, meta, session_memories, {"ingest_s": round(ingest_s, 1), "embed_wait_s": round(embed_s, 1),
                                           "search_ms": round(search_ms, 1)}
 
