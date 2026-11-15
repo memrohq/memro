@@ -522,7 +522,9 @@ func resolveSearchContradictions(results []domain.SearchResult, relations []doma
 	for i := 0; i < len(results); i++ {
 		for j := i + 1; j < len(results); j++ {
 			conf := DetectContradictionWithIntent(results[i].Content, results[j].Content, agg)
-			if conf >= 0.7 {
+			// A restatement makes the older copy redundant, except when counting
+			// ("how many times…"), where repeats are separate events.
+			if conf >= 0.7 || (!agg && NearDuplicate(results[i].Content, results[j].Content)) {
 				ti := resultTime(results[i])
 				tj := resultTime(results[j])
 				if !ti.IsZero() && !tj.IsZero() {

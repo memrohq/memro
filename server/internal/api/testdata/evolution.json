@@ -1,0 +1,173 @@
+[
+ {
+  "name": "slot: billing contact",
+  "memories": [
+   "The billing contact is Marco.",
+   "The billing contact is Ana."
+  ],
+  "query": "billing contact",
+  "current": "Ana",
+  "stale": "Marco"
+ },
+ {
+  "name": "preference changed",
+  "memories": [
+   "User prefers TypeScript for new services.",
+   "User prefers Python for new services."
+  ],
+  "query": "prefers new services",
+  "current": "Python",
+  "stale": "TypeScript"
+ },
+ {
+  "name": "owner, different wording",
+  "memories": [
+   "The renewal owner is Marco.",
+   "Renewal owner: Ana, since September."
+  ],
+  "query": "renewal owner",
+  "current": "Ana",
+  "stale": "Marco"
+ },
+ {
+  "name": "port changed",
+  "memories": [
+   "The database port is 5432.",
+   "The database port is 6432 after the migration."
+  ],
+  "query": "database port",
+  "current": "6432",
+  "stale": "5432"
+ },
+ {
+  "name": "version bumped",
+  "memories": [
+   "The memro-cli version is 0.1.6.",
+   "The memro-cli version is 0.1.7."
+  ],
+  "query": "memro-cli version",
+  "current": "0.1.7",
+  "stale": "0.1.6"
+ },
+ {
+  "name": "switch without a slot",
+  "memories": [
+   "We use npm to install packages in this project.",
+   "We switched this project to pnpm; never use npm."
+  ],
+  "query": "install packages npm pnpm",
+  "current": "pnpm",
+  "stale": "We use npm"
+ },
+ {
+  "name": "moved database",
+  "memories": [
+   "Memro stores its data in MongoDB.",
+   "Memro moved its data from MongoDB to Postgres."
+  ],
+  "query": "Memro data MongoDB Postgres",
+  "current": "Postgres",
+  "stale": "stores its data in MongoDB"
+ },
+ {
+  "name": "schedule moved",
+  "memories": [
+   "Deploys happen on Fridays.",
+   "Deploys moved to Tuesdays."
+  ],
+  "query": "deploys",
+  "current": "Tuesdays",
+  "stale": "Fridays"
+ },
+ {
+  "name": "location moved",
+  "memories": [
+   "The team offsite is in Lisbon.",
+   "The team offsite moved to Porto."
+  ],
+  "query": "team offsite",
+  "current": "Porto",
+  "stale": "Lisbon"
+ },
+ {
+  "name": "duplicate restatement",
+  "memories": [
+   "The API server is written in Go.",
+   "The API server is written in Go."
+  ],
+  "query": "API server written",
+  "duplicate": true
+ },
+ {
+  "name": "near-duplicate restatement",
+  "memories": [
+   "Always review database migrations by hand before deploying.",
+   "Review database migrations by hand before deploying, always."
+  ],
+  "query": "review database migrations",
+  "duplicate": true
+ },
+ {
+  "name": "unrelated facts about one person",
+  "memories": [
+   "Ana handles billing questions.",
+   "Ana prefers tea over coffee."
+  ],
+  "query": "Ana",
+  "independent": true
+ },
+ {
+  "name": "additive facts",
+  "memories": [
+   "Memro supports Cursor.",
+   "Memro supports Codex."
+  ],
+  "query": "Memro supports",
+  "independent": true
+ },
+ {
+  "name": "same subject, different attribute",
+  "memories": [
+   "The staging database is Postgres 16.",
+   "The staging database runs in asia-south1."
+  ],
+  "query": "staging database",
+  "independent": true
+ },
+ {
+  "name": "move vs platform (trap)",
+  "memories": [
+   "Deploys run on Kubernetes.",
+   "Deploys moved to Tuesdays."
+  ],
+  "query": "deploys",
+  "independent": true
+ },
+ {
+  "name": "move vs team (trap)",
+  "memories": [
+   "Ana is in the design team.",
+   "Ana moved to the Berlin office."
+  ],
+  "query": "Ana",
+  "independent": true
+ },
+ {
+  "name": "similar invoices (trap)",
+  "memories": [
+   "Paid invoice 1042 to Acme on Monday.",
+   "Paid invoice 1043 to Acme on Monday."
+  ],
+  "query": "invoice Acme",
+  "independent": true
+ },
+ {
+  "name": "same tools, one differs (trap)",
+  "memories": [
+   "Memro supports Cursor, Codex and Windsurf.",
+   "Memro supports Cursor, Codex and Copilot."
+  ],
+  "query": "Memro supports",
+  "independent": true
+ }
+]

@@ -8,6 +8,7 @@ and every release and package raises only the last number of its version (see RE
 ## [Unreleased]
 
 ### Fixed
+- **Fewer stale answers and duplicates in search**: contradiction detection now matches "X is Y" with "X: Y", understands "X moved/switched [from A] to B" (only against a where/when value of the same kind, so "Ana moved to the Berlin office" leaves "Ana is in the design team" alone), treats invoice/order/ticket numbers as identifiers rather than changed quantities, and marks near-duplicate restatements as superseded (except for counting questions). The save-time linker (`GRAPH_WRITE_EDGES`, still off by default) also finds candidates by shared words, not only entity tags, and links duplicates of non-episodic memories. On the new evolution benchmark (`TestEvolutionBench`): unresolved updates 4/9 → 0/9, duplicates left 2/2 → 0/2, false updates 0/7.
 - **Memory evolution can be re-run safely**: `Evolve` (`POST /mee/evolve`, the `mee_evolve` tool) consolidates each episodic memory once, so repeated runs no longer add duplicate summaries of the same memories. One run folds in at most the 50 newest unconsolidated episodes and compares at most the 300 newest facts for contradictions, so its cost no longer grows with the agent's whole history.
 
 ### Added
