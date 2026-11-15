@@ -461,10 +461,15 @@ def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolR
         return _text(f"Remembered with context: {memory.content[:100]} (ID: {memory.id})")
 
     if name in ("recall", "recall_multi_session"):
-        results = agent.recall(query=args.get("query"), limit=_limit(args, 5 if name == "recall" else 15),
-                               type=args.get("type"))
-        return _text([{"id": r.memory_id, "content": r.content, "type": r.memory_type, "score": r.score,
-                       "created_at": r.created_at} for r in results])
+        # Raw search so this works with the published SDK (0.2 drops is_superseded).
+        # Conflict resolution ranks a memory below a newer one that contradicts it.
+        results = agent.client.search(agent_id=agent.agent_id, private_key=agent._private_key,
+                                      query=args.get("query"), limit=_limit(args, 5 if name == "recall" else 15),
+                                      memory_type=args.get("type"), resolve_conflicts=True)
+        return _text([{"id": r["memory_id"], "content": r["content"], "type": r["memory_type"], "score": r["score"],
+                       "created_at": r["created_at"],
+                       **({"superseded_by": r.get("superseded_by")} if r.get("is_superseded") else {})}
+                      for r in results])
 
     if name == "get_recent_memories":
         memories = agent.get_recent(limit=_limit(args, 10), type=args.get("type"))
