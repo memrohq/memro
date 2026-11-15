@@ -1,10 +1,10 @@
 {
-  "timestamp": "2026-11-15T13:18:05Z",
+  "timestamp": "2026-11-15T13:53:43Z",
   "base_url": "http://localhost:18090",
   "total_tests": 4,
-  "passed": 3,
-  "failed": 1,
-  "pass_rate_pct": 75.0,
+  "passed": 4,
+  "failed": 0,
+  "pass_rate_pct": 100.0,
   "results": [
     {
       "suite": "Identity Boundaries",
@@ -12,7 +12,7 @@
       "passed": true,
       "expected": "Agent A can recall secret; Agent B receives 0 results",
       "actual": "Agent A found: 1, Agent B found: 0",
-      "latency_ms": 7779.06,
+      "latency_ms": 4885.67,
       "details": "Cryptographic identity separation between distinct Ed25519 public keys."
     },
     {
@@ -21,16 +21,16 @@
       "passed": true,
       "expected": "Top result contains 'release-v2'",
       "actual": "Top result: 'The project deployment branch is updated to release-v2'",
-      "latency_ms": 2013.0,
+      "latency_ms": 1746.38,
       "details": "Reciprocal Rank Fusion with temporal decay ranks the latest state highest."
     },
     {
       "suite": "Stale/Updated Facts",
       "case_name": "Database Endpoint Migration",
-      "passed": false,
+      "passed": true,
       "expected": "Top result points to postgres-aurora-v2",
-      "actual": "Top result: 'Staging database cluster endpoint is postgres-legacy.internal:5432'",
-      "latency_ms": 4998.73,
+      "actual": "Top result: 'Staging database cluster migrated to postgres-aurora-v2.internal:5432'",
+      "latency_ms": 11372.31,
       "details": "Verifies newer procedural memory outranks legacy procedural record."
     },
     {
@@ -39,7 +39,7 @@
       "passed": true,
       "expected": "Target memory is #1 rank; unrelated query returns 0 results at min_score 0.4",
       "actual": "Target #1: True, Irrelevant count: 0",
-      "latency_ms": 3051.29,
+      "latency_ms": 3585.07,
       "details": "Tests dense/sparse RRF fusion score cutoff against unrelated corpus."
     }
   ]
