@@ -279,17 +279,20 @@ const claudeCode = {
   },
 };
 
-// --- Coordination hooks for Claude Code and Codex (src/hook.js) ---------------------------
+// --- Coordination hooks (src/hook.js) ---------------------------------------------------
 
 export const HOOK_FILE = () => path.join(home(), ".memro", "hooks", "memro-hook.mjs");
 const codexHome = () => process.env.CODEX_HOME || path.join(home(), ".codex");
+const xdgConfig = () => process.env.XDG_CONFIG_HOME || path.join(home(), ".config");
 // Our entries are the ones running a script from ~/.memro/hooks/ (memro-cli
-// 0.1.8 called it claude-code.mjs).
-const isOurs = (group) => group?.hooks?.some((h) => h.command?.includes(".memro/hooks/"));
+// 0.1.8 called it claude-code.mjs). Cursor's entries are flat, the others nest.
+const ours = (h) => h?.command?.includes(".memro/hooks/");
+const isOurs = (group) => ours(group) || group?.hooks?.some(ours);
 
-/** Where each tool keeps its hooks and which events Memro hooks into. The
- * project Claude Code file is the local, uncommitted one because the command
- * names a path on this machine. */
+/** Where each tool keeps its hooks and which events Memro hooks into (event →
+ * matcher). The project Claude Code file is the local, uncommitted one because
+ * the command names a path on this machine. Timeouts are in seconds unless
+ * `msTimeouts`. OpenCode takes a plugin file instead (src/opencode-plugin.js). */
 export const HOOK_TARGETS = {
   "claude-code": {
     file: (scope, cwd) => (scope === "project" ? path.join(cwd, ".claude", "settings.local.json") : path.join(home(), ".claude", "settings.json")),
@@ -301,23 +304,48 @@ export const HOOK_TARGETS = {
     events: { PreToolUse: "^apply_patch$|^Bash$|^mcp__memro__", UserPromptSubmit: null, Stop: null, SessionEnd: null },
     timeouts: { SessionEnd: 3 },
   },
+  "gemini-cli": {
+    file: (scope, cwd) => path.join(scope === "project" ? cwd : home(), ".gemini", "settings.json"),
+    events: { BeforeTool: "write_file|replace|run_shell_command", BeforeAgent: null, AfterAgent: null, Notification: null, SessionEnd: null },
+    msTimeouts: true,
+  },
+  cursor: {
+    file: (scope, cwd) => path.join(scope === "project" ? cwd : home(), ".cursor", "hooks.json"),
+    // Cursor runs every hook for every tool; the adapter picks what it needs.
+    events: { preToolUse: null, beforeShellExecution: null, beforeSubmitPrompt: null, stop: null, sessionEnd: null },
+    flat: true,
+  },
+  opencode: {
+    plugin: (scope, cwd) => path.join(scope === "project" ? path.join(cwd, ".opencode") : path.join(xdgConfig(), "opencode"), "plugins", "memro.js"),
+  },
 };
 
-export const hookSettingsFile = (scope = "user", cwd = process.cwd(), tool = "claude-code") => HOOK_TARGETS[tool].file(scope, cwd);
+export const hookSettingsFile = (scope = "user", cwd = process.cwd(), tool = "claude-code") =>
+  (HOOK_TARGETS[tool].plugin || HOOK_TARGETS[tool].file)(scope, cwd);
 
 /** Copy the hook to ~/.memro/hooks/ and register it for the tool's coordination events. */
 export function installHooks({ scope = "user", cwd = process.cwd(), tool = "claude-code" } = {}) {
-  const { events, timeouts = {} } = HOOK_TARGETS[tool];
+  const t = HOOK_TARGETS[tool];
   fs.mkdirSync(path.dirname(HOOK_FILE()), { recursive: true });
   fs.copyFileSync(new URL("./hook.js", import.meta.url), HOOK_FILE());
   const target = hookSettingsFile(scope, cwd, tool);
+  if (t.plugin) {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(new URL("./opencode-plugin.js", import.meta.url), target);
+    return target;
+  }
   const cfg = readJSON(target);
+  if (t.flat) cfg.version ??= 1;
   cfg.hooks ||= {};
   const command = `node ${JSON.stringify(HOOK_FILE().split(path.sep).join("/"))} ${tool}`;
-  for (const [event, matcher] of Object.entries(events)) {
-    // PreToolUse may wait up to 60 s for a held file (hook.js waitMs).
-    const ours = { ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command, timeout: timeouts[event] || (event === "PreToolUse" ? 90 : 10) }] };
-    cfg.hooks[event] = [...(cfg.hooks[event] || []).filter((g) => !isOurs(g)), ours];
+  for (const [event, matcher] of Object.entries(t.events)) {
+    // A tool-call hook may wait up to 60 s for a held file (hook.js waitMs).
+    const seconds = t.timeouts?.[event] || (/tool|shell/i.test(event) ? 90 : 10);
+    const timeout = t.msTimeouts ? seconds * 1000 : seconds;
+    const entry = t.flat
+      ? { command, timeout }
+      : { ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command, timeout }] };
+    cfg.hooks[event] = [...(cfg.hooks[event] || []).filter((g) => !isOurs(g)), entry];
   }
   writeJSON(target, cfg);
   return target;
@@ -327,6 +355,10 @@ export function installHooks({ scope = "user", cwd = process.cwd(), tool = "clau
 export function removeHooks({ scope = "user", cwd = process.cwd(), tool = "claude-code" } = {}) {
   const target = hookSettingsFile(scope, cwd, tool);
   if (!fs.existsSync(target)) return false;
+  if (HOOK_TARGETS[tool].plugin) {
+    fs.rmSync(target);
+    return true;
+  }
   const cfg = readJSON(target);
   let removed = false;
   for (const event of Object.keys(cfg.hooks || {})) {

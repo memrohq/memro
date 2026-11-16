@@ -58,10 +58,73 @@ export const TOOLS = {
     files: (i) => (["apply_patch", "Edit", "Write"].includes(i.tool_name) ? patchFiles(i.tool_input?.command) : []),
   },
 };
+// These tools' adapters (below) turn their events into Claude Code's shape.
+for (const [id, name] of [["gemini-cli", "Gemini CLI"], ["cursor", "Cursor"], ["opencode", "OpenCode"]]) {
+  // OpenCode's patch tool arrives as apply_patch, like Codex's.
+  TOOLS[id] = { name, files: (i) => (i.tool_name === "apply_patch" ? patchFiles(i.tool_input?.command) : TOOLS["claude-code"].files(i)) };
+}
+
+const first = (...v) => v.find((x) => typeof x === "string" && x) || "";
+const asObject = (v) => { if (typeof v !== "string") return v || {}; try { return JSON.parse(v); } catch { return {}; } };
+const editInput = (args) => ({ file_path: first(args.file_path, args.filePath, args.path, args.target_file) });
+
+/** Per tool: `in` turns its hook input into Claude Code's (null to ignore the
+ * event), `out` turns the reply back into its format (null when it has no way
+ * to say it, e.g. a note on a tool call in Gemini CLI). */
+export const ADAPTERS = {
+  "gemini-cli": {
+    in(raw) {
+      const event = { BeforeTool: "PreToolUse", BeforeAgent: "UserPromptSubmit", AfterAgent: "Stop", SessionEnd: "SessionEnd", Notification: "Notification" }[raw.hook_event_name];
+      if (!event) return null;
+      const args = asObject(raw.tool_input);
+      const tool = raw.tool_name === "run_shell_command" ? "Bash" : ["write_file", "replace"].includes(raw.tool_name) ? "Edit" : raw.tool_name;
+      return { ...raw, hook_event_name: event, tool_name: tool, tool_input: tool === "Bash" ? { command: args.command } : tool === "Edit" ? editInput(args) : args };
+    },
+    out(event, r) {
+      const h = r.hookSpecificOutput;
+      if (h?.permissionDecision === "deny") return { decision: "deny", reason: h.permissionDecisionReason };
+      // AfterAgent: a denied response goes back to the agent as a new prompt.
+      if (r.decision === "block") return { decision: "deny", reason: r.reason };
+      if (event === "UserPromptSubmit" && h?.additionalContext) return { hookSpecificOutput: { hookEventName: "BeforeAgent", additionalContext: h.additionalContext } };
+      return null;
+    },
+  },
+  cursor: {
+    in(raw) {
+      const base = { session_id: raw.conversation_id || raw.session_id, cwd: first(raw.cwd, raw.workspace_roots?.[0]) };
+      switch (raw.hook_event_name) {
+        case "beforeShellExecution": return { ...base, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: raw.command } };
+        // Shell runs through beforeShellExecution; preToolUse is used for file writes.
+        case "preToolUse": return ["Write", "Delete"].includes(raw.tool_name)
+          ? { ...base, hook_event_name: "PreToolUse", tool_name: "Edit", tool_input: editInput(asObject(raw.tool_input)) } : null;
+        case "beforeSubmitPrompt": return { ...base, hook_event_name: "UserPromptSubmit", prompt: raw.prompt };
+        case "stop": return { ...base, hook_event_name: "Stop", stop_hook_active: (raw.loop_count || 0) > 0, transcript_path: raw.transcript_path };
+        case "sessionEnd": return { ...base, hook_event_name: "SessionEnd" };
+        default: return null;
+      }
+    },
+    out(event, r) {
+      const h = r.hookSpecificOutput;
+      if (h?.permissionDecision === "deny") return { permission: "deny", agent_message: h.permissionDecisionReason, user_message: h.permissionDecisionReason };
+      // stop: a follow-up message is submitted as the next prompt.
+      if (r.decision === "block") return { followup_message: r.reason };
+      return null;
+    },
+  },
+};
+
+/** Run one hook event for `tool`: its native input in, its native reply out (or null). */
+export async function run(raw, cfg, tool) {
+  const adapter = ADAPTERS[tool];
+  const input = adapter ? adapter.in(raw) : raw;
+  if (!input) return null;
+  const out = await handle(input, cfg, tool);
+  return out && adapter ? adapter.out(input.hook_event_name, out) : out;
+}
 
 /** This window as a lease holder: two windows are two holders. Every window's
  * MCP tools share the bare tool id (the MCP URL's ?session_id=<tool>). */
-export const sessionOf = (input, tool = "claude-code") => `${tool}:${String(input.session_id || "unknown").slice(0, 8)}`;
+export const sessionOf = (input, tool = "claude-code") => `${tool}:${String(input.session_id || "unknown").replace(/^ses_/, "").slice(0, 8)}`;
 
 const git = (cwd, ...args) => {
   try {
@@ -433,7 +496,7 @@ export async function main(stdin = process.stdin, stdout = process.stdout) {
   let text = "";
   for await (const chunk of stdin) text += chunk;
   try {
-    const out = await handle(JSON.parse(text), loadConfig(), process.argv[2] || "claude-code");
+    const out = await run(JSON.parse(text), loadConfig(), process.argv[2] || "claude-code");
     if (out) stdout.write(JSON.stringify(out) + "\n");
   } catch {
     // fail open: see the top of this file

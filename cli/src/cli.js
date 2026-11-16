@@ -43,8 +43,9 @@ Options
   --yes, -y                  Don't ask: use every detected tool
   --no-instructions          Don't add the "use Memro automatically" note to
                              the tools' instructions (CLAUDE.md, AGENTS.md…)
-  --no-hooks                 Don't add the Claude Code and Codex hooks that claim each file
-                             before it is edited, so two agents never edit one file
+  --no-hooks                 Don't add the hooks that claim each file before it is
+                             edited, so two agents never edit one file (Claude Code,
+                             Codex, Cursor, Gemini CLI, OpenCode)
   --staging | --local        Use staging or a local server instead of Memro Cloud
   --api <url>                Use a specific Memro API (self-hosted)
   --from <agent>             With send: who the message is from (default: you)

@@ -354,3 +354,72 @@ test("lastAssistantText reads the final assistant message from a transcript", ()
   assert.equal(lastAssistantText(f), "Done: renamed x.");
   assert.equal(lastAssistantText(path.join(TEST_DIR, "missing.jsonl")), "");
 });
+
+const { run } = await import("../src/hook.js");
+const { toolEvent } = (await import("../src/opencode-plugin.js")).MemroPlugin;
+const pluginExports = Object.keys(await import("../src/opencode-plugin.js"));
+const heldHere = () => serve(() => ({ granted: false, holder_session: "codex:9", intent: `x [${rootOf("/w")}]` }));
+
+test("Gemini CLI: write_file and shell are claimed, a refusal is a deny decision, AfterAgent wakes with a new prompt", async () => {
+  heldHere();
+  const out = await run({ hook_event_name: "BeforeTool", session_id: "g1234567890", cwd: "/w", tool_name: "write_file", tool_input: { file_path: "/w/a.js", content: "x" } }, cfg, "gemini-cli");
+  assert.equal(out.decision, "deny");
+  assert.match(out.reason, /is being changed by codex:9/);
+  assert.equal(calls[0].body.session_id, "gemini-cli:g1234567");
+  serve(() => ({ granted: true }));
+  assert.equal(await run({ hook_event_name: "BeforeTool", session_id: "g1", cwd: "/w", tool_name: "run_shell_command", tool_input: { command: "echo x > b.txt" } }, cfg, "gemini-cli"), null);
+  assert.deepEqual(calls.map((c) => c.body.resource), [P("/w/b.txt", "/w")]);
+  serve(inbox([]));
+  assert.equal(await run({ hook_event_name: "BeforeTool", session_id: "g1", cwd: "/w", tool_name: "read_file", tool_input: {} }, cfg, "gemini-cli"), null);
+  serve((route) => (route.startsWith("/coordination/active")
+    ? { claims: [], intents: [{ id: "gm1", resource: "inbox/gemini-cli:g1", session_id: "codex:1", intent: "ping" }] } : { granted: true }));
+  const woke = await run({ hook_event_name: "AfterAgent", session_id: "g1", cwd: "/w", stop_hook_active: false }, cfg, "gemini-cli");
+  assert.equal(woke.decision, "deny");
+  assert.match(woke.reason, /from codex:1: ping/);
+});
+
+test("Cursor: file writes and shell commands are claimed, refusals use permission deny, stop wakes with a follow-up", async () => {
+  heldHere();
+  const out = await run({ hook_event_name: "preToolUse", conversation_id: "c1234567890", workspace_roots: ["/w"], tool_name: "Write", tool_input: { file_path: "/w/a.js" } }, cfg, "cursor");
+  assert.equal(out.permission, "deny");
+  assert.equal(calls[0].body.session_id, "cursor:c1234567");
+  serve(() => ({ granted: true }));
+  await run({ hook_event_name: "beforeShellExecution", conversation_id: "c1", command: "rm old.js", cwd: "/w" }, cfg, "cursor");
+  assert.deepEqual(calls.map((c) => c.body.resource), [P("/w/old.js", "/w")]);
+  serve(() => assert.fail("no call expected"));
+  assert.equal(await run({ hook_event_name: "preToolUse", conversation_id: "c1", workspace_roots: ["/w"], tool_name: "Shell", tool_input: {} }, cfg, "cursor"), null, "shell is handled by beforeShellExecution");
+  serve((route) => (route.startsWith("/coordination/active")
+    ? { claims: [], intents: [{ id: "cm1", resource: "inbox/cursor:c1", session_id: "codex:1", intent: "ping" }] } : { granted: true }));
+  const woke = await run({ hook_event_name: "stop", conversation_id: "c1", workspace_roots: ["/w"], loop_count: 0 }, cfg, "cursor");
+  assert.match(woke.followup_message, /from codex:1: ping/);
+});
+
+test("OpenCode plugin maps its tools onto the hook's, including patches", () => {
+  assert.deepEqual(toolEvent("bash", { command: "ls" }), { tool_name: "Bash", tool_input: { command: "ls" } });
+  assert.deepEqual(toolEvent("edit", { filePath: "/w/a.js" }), { tool_name: "Edit", tool_input: { file_path: "/w/a.js" } });
+  assert.deepEqual(toolEvent("patch", { patchText: "*** Update File: a.js" }).tool_name, "apply_patch");
+  assert.equal(toolEvent("read", {}), null);
+  assert.deepEqual(pluginExports, ["MemroPlugin"], "OpenCode loads every export as a plugin");
+});
+
+test("installers: Gemini nests with ms timeouts, Cursor is flat with a version, OpenCode gets a plugin file", () => {
+  process.env.XDG_CONFIG_HOME = path.join(HOME, ".config");
+  const g = JSON.parse(fs.readFileSync(installHooks({ tool: "gemini-cli" }), "utf8"));
+  assert.equal(g.hooks.BeforeTool[0].matcher, "write_file|replace|run_shell_command");
+  assert.equal(g.hooks.BeforeTool[0].hooks[0].timeout, 90000);
+  assert.match(g.hooks.AfterAgent[0].hooks[0].command, /memro-hook\.mjs" gemini-cli$/);
+  const cfile = installHooks({ tool: "cursor" });
+  const c = JSON.parse(fs.readFileSync(cfile, "utf8"));
+  assert.equal(c.version, 1);
+  assert.deepEqual(Object.keys(c.hooks), ["preToolUse", "beforeShellExecution", "beforeSubmitPrompt", "stop", "sessionEnd"]);
+  assert.match(c.hooks.stop[0].command, / cursor$/);
+  installHooks({ tool: "cursor" });
+  assert.equal(JSON.parse(fs.readFileSync(cfile, "utf8")).hooks.stop.length, 1, "idempotent");
+  assert.equal(removeHooks({ tool: "cursor" }), true);
+  assert.equal(JSON.parse(fs.readFileSync(cfile, "utf8")).hooks, undefined);
+  const plugin = installHooks({ tool: "opencode" });
+  assert.equal(plugin, path.join(HOME, ".config", "opencode", "plugins", "memro.js"));
+  assert.ok(fs.readFileSync(plugin, "utf8").includes("export const MemroPlugin"));
+  assert.equal(removeHooks({ tool: "opencode" }), true);
+  assert.equal(fs.existsSync(plugin), false);
+});

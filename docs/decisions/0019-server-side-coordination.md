@@ -101,6 +101,16 @@ A lease held by the shared MCP session `claude-code` doesn't block the hook, bec
 
 **Handoff notes** (2026-11-16): a `Stop` with no new messages now hands each file lease off (`/coordination/handoff`) instead of releasing it, with the note `<session> (task: <task>): <start of the last assistant message>`, from Stop's `last_assistant_message` or the end of the Claude Code transcript. The server already returns the newest handoff summary to the next claimer; the hook shows it once per window as `additionalContext` and skips the window's own notes (the note starts with the session, since `handoff_from` is the shared agent id). In a live test, a second agent editing the same file was shown what the first changed and why.
 
+**More tools** (2026-11-17): Gemini CLI, Cursor and OpenCode run the same script through per-tool adapters (`ADAPTERS` in `hook.js`) that turn their hook input into Claude Code's shape and the reply back:
+
+| Tool | Hooks | Refuse edits/shell | Briefing, messages | Notes on edits | Wake on message |
+|---|---|---|---|---|---|
+| Gemini CLI | `settings.json`: BeforeTool (`write_file`, `replace`, `run_shell_command`), BeforeAgent, AfterAgent, Notification, SessionEnd | `decision: deny` | BeforeAgent `additionalContext` | no (BeforeTool can't add context) | AfterAgent `deny` → new prompt |
+| Cursor | `hooks.json` (flat, `version: 1`): preToolUse (Write, Delete), beforeShellExecution, beforeSubmitPrompt, stop, sessionEnd | `permission: deny` | no | no | stop `followup_message` |
+| OpenCode | plugin file: `tool.execute.before` (edit, write, patch, bash), `chat.message`, `session.idle`, `session.deleted` | throw | no | no | no |
+
+OpenCode loads every export of a plugin file as a plugin, so the plugin exports only `MemroPlugin`. Copilot CLI's hooks fit too, but memro-cli doesn't connect Copilot CLI yet; that comes with a client entry for it. MCP holder rewriting stays Claude Code and Codex only.
+
 **Per-window MCP holder** (2026-11-16): the hosted MCP server is stateless and every window of a tool connects with the same URL, so MCP claims could only name the tool. The coordination tools (`claim_task`, `heartbeat_task`, `release_task`, `handoff_task`, `log_intent`, `pre_action_check`) now take an optional `holder_session`, and the hook's PreToolUse on `mcp__memro__*` fills it with the window's session through `updatedInput` (with `permissionDecision: "allow"`, which the rewrite requires; these tools only touch the user's own leases). A window's MCP and hook claims are then one holder, so overlapping claims by the same window pass, and two windows block each other. Clients without the hooks keep the connection's session.
 
 ## Consequences

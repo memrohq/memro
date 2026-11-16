@@ -49,10 +49,12 @@ npx memro-cli connect --project
 
    Untick "Teach these tools…" in the list, or pass `--no-instructions`, to
    skip it. `disconnect` removes the note and leaves the rest of the file.
-4. **Claude Code and Codex: claim each file before it is edited.** A hook in
-   `~/.claude/settings.json` (or `./.claude/settings.local.json` for a project)
-   and `~/.codex/hooks.json` (or `./.codex/hooks.json`) claims the file in Memro
-   before every edit (Codex: every file in an `apply_patch`), so two agents never edit
+4. **Claim each file before it is edited** (Claude Code, Codex, Cursor, Gemini
+   CLI, OpenCode). A hook in `~/.claude/settings.json` (or
+   `./.claude/settings.local.json` for a project), `~/.codex/hooks.json`,
+   `~/.cursor/hooks.json`, `~/.gemini/settings.json` or an OpenCode plugin
+   claims the file in Memro before every edit (Codex: every file in an
+   `apply_patch`), so two agents never edit
    one file at once: an edit to a file another session is changing in the same
    folder is refused, naming who holds it. In another worktree or clone the edit
    goes ahead with a warning to expect a merge conflict. Each Claude Code window
