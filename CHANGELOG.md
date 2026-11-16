@@ -7,6 +7,9 @@ and every release and package raises only the last number of its version (see RE
 
 ## [Unreleased]
 
+### Added
+- **MCP `recall` takes a `token_budget`**: it returns the best-ranked memories that fit in about that many tokens (estimated at ~4 characters per token), skips superseded and duplicate memories, and emits compact JSON. Without it, `recall` behaves as before.
+
 ### Fixed
 - **MCP `recall` shows which memories are out of date**: it ranks a memory below a newer one that contradicts it and marks it with `superseded_by`. Before, the tool dropped the flag and did not ask for conflict resolution. The Python SDK's `SearchResult` now keeps `is_superseded` and `superseded_by`.
 - **`min_score` now filters irrelevant results** (ADR 0033): search results include `similarity`, the cosine similarity to the query, and the Python, JS and Go SDKs apply `min_score` to it. Before, `min_score` filtered the rank-based fused score, which is above 0.4 for any of the top 16 candidates however unrelated.

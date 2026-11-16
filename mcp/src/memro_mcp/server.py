@@ -259,6 +259,11 @@ def _all_tools() -> list[Tool]:
                     "query": {"type": "string"},
                     "limit": {"type": "integer", "default": 5},
                     "type": {"type": "string", "enum": ["episodic", "semantic", "procedural", "profile"]},
+                    "token_budget": {
+                        "type": "integer",
+                        "description": "Return the best-ranked memories that fit in about this many tokens, "
+                                       "skipping superseded and duplicate ones. Limit defaults to 50 when set.",
+                    },
                 },
                 "required": ["query"],
             },
@@ -444,6 +449,27 @@ def _limit(args: dict, default: int) -> int:
         return default
 
 
+def _tokens(item: dict) -> int:
+    # shortcut: ~4 chars per token, off by ~20% for non-English text; use a real tokenizer if budgets must be exact.
+    return len(json.dumps(item, separators=(",", ":"), default=str)) // 4 + 1
+
+
+def _fit_budget(items: list, budget: int) -> list:
+    """Best-ranked items whose total estimated tokens fit the budget, without superseded or duplicate memories."""
+    out, seen, used = [], set(), 0
+    for item in items:
+        key = " ".join(item["content"].lower().split())
+        if "superseded_by" in item or key in seen:
+            continue
+        cost = _tokens(item)
+        if used + cost > budget:
+            continue  # a shorter, lower-ranked memory may still fit
+        seen.add(key)
+        out.append(item)
+        used += cost
+    return out
+
+
 def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolResult:
     """Executes one tool. Runs in a worker thread: the SDK is synchronous."""
     if name == "remember":
@@ -463,13 +489,22 @@ def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolR
     if name in ("recall", "recall_multi_session"):
         # Raw search so this works with the published SDK (0.2 drops is_superseded).
         # Conflict resolution ranks a memory below a newer one that contradicts it.
+        try:
+            budget = max(0, int(args.get("token_budget") or 0))
+        except (TypeError, ValueError):
+            budget = 0
+        default = MAX_LIMIT if budget else (5 if name == "recall" else 15)
         results = agent.client.search(agent_id=agent.agent_id, private_key=agent._private_key,
-                                      query=args.get("query"), limit=_limit(args, 5 if name == "recall" else 15),
+                                      query=args.get("query"), limit=_limit(args, default),
                                       memory_type=args.get("type"), resolve_conflicts=True)
-        return _text([{"id": r["memory_id"], "content": r["content"], "type": r["memory_type"], "score": r["score"],
-                       "created_at": r["created_at"],
-                       **({"superseded_by": r.get("superseded_by")} if r.get("is_superseded") else {})}
-                      for r in results])
+        items = [{"id": r["memory_id"], "content": r["content"], "type": r["memory_type"], "score": r["score"],
+                  "created_at": r["created_at"],
+                  **({"superseded_by": r.get("superseded_by")} if r.get("is_superseded") else {})}
+                 for r in results]
+        if budget:
+            # Compact JSON so the output matches what _tokens counted.
+            return _text(json.dumps(_fit_budget(items, budget), separators=(",", ":"), default=str))
+        return _text(items)
 
     if name == "get_recent_memories":
         memories = agent.get_recent(limit=_limit(args, 10), type=args.get("type"))
