@@ -52,8 +52,12 @@ PER_SESSION_SCOPE = os.environ.get("PER_SESSION_SCOPE", "all")
 AGGREGATE = re.compile(r"\b(how many|how much|in total|total|altogether|combined|sum of|number of|list|"
                        r"all the|each of|every|both)\b", re.I)
 # Comparison arms: "none" answers with no memory, "rag" is plain semantic top-k
-# (no keyword fusion, session expansion or conflict handling); unset is Memro.
+# (no keyword fusion, session expansion or conflict handling), "full" puts the
+# whole chat history in the prompt (no Memro); unset is Memro.
 BASELINE = os.environ.get("BASELINE", "")
+# Pack the prompt context into ~N tokens, best-ranked first, without superseded
+# or duplicate memories: the same rule as MCP recall's token_budget. 0 = off.
+TOKEN_BUDGET = int(os.environ.get("TOKEN_BUDGET", "0"))
 SEARCH_MODE = "semantic" if BASELINE == "rag" else "hybrid"
 # Drop memories search marks superseded instead of showing them demoted and labelled.
 HIDE_SUPERSEDED = os.environ.get("HIDE_SUPERSEDED", "false").lower() == "true"
@@ -190,6 +194,7 @@ def get_engine_options():
         "format": os.environ.get("RECALL_FORMAT", "standard"),
         "write_time_supersession": os.environ.get("MEMRO_WRITE_TIME_SUPERSESSION", "false"),
         "per_item_chars": PER_ITEM_CHARS,
+        "token_budget": TOKEN_BUDGET,
         "resolve_conflicts": BASELINE != "rag" and os.environ.get("RESOLVE_CONFLICTS", "true").lower() == "true",
         "order": os.environ.get("SEARCH_ORDER", "score"),
         # Set by whoever started the server (bench/cf/eval_embeddings.py does).
@@ -254,7 +259,27 @@ def context_ids(hits, meta, session_memories):
         for mid in session_memories.get(sid, []):
             if mid not in expanded_ids:
                 expanded_ids.append(mid)
+    if TOKEN_BUDGET:
+        expanded_ids = fit_budget(expanded_ids, meta, {h["memory_id"] for h in hits if h.get("is_superseded")})
     return sorted(expanded_ids, key=lambda mid: meta[mid]["date"])
+
+
+def fit_budget(ids, meta, superseded):
+    """ids in priority order -> those whose estimated tokens fit TOKEN_BUDGET,
+    skipping superseded and duplicate memories (mirrors mcp server _fit_budget)."""
+    out, seen, used = [], set(), 0
+    for mid in ids:
+        key = " ".join(meta[mid]["content"].lower().split())
+        if mid in superseded or key in seen:
+            continue
+        # shortcut: ~4 chars per token, +20 for the session header; rows record the real prompt_tokens.
+        cost = len(meta[mid]["content"][:PER_ITEM_CHARS]) // 4 + 20
+        if used + cost > TOKEN_BUDGET:
+            continue
+        seen.add(key)
+        out.append(mid)
+        used += cost
+    return out
 
 
 def build_prompt(q, ids, meta, superseded_ids=None):
@@ -271,15 +296,16 @@ def build_prompt(q, ids, meta, superseded_ids=None):
                                 question=q["question"])
 
 
-def ask(prompt, model=ANSWER_MODEL):
+def ask(prompt, model=ANSWER_MODEL, usage=None):
     pin, pout = PRICES[model]
     est = len(prompt) / 3.0 * pin / 1e6 + 400 * pout / 1e6
-    return chat(model, [{"role": "user", "content": prompt}], 400, est)
+    return chat(model, [{"role": "user", "content": prompt}], 400, est, usage)
 
 
-def answer(q, hits, meta, session_memories):
+def answer(q, hits, meta, session_memories, usage=None):
     superseded_ids = {h["memory_id"] for h in hits if h.get("is_superseded")}
-    return ask(build_prompt(q, context_ids(hits, meta, session_memories), meta, superseded_ids=superseded_ids))
+    return ask(build_prompt(q, context_ids(hits, meta, session_memories), meta, superseded_ids=superseded_ids),
+               usage=usage)
 
 
 def retrieve(q, client, agent):
@@ -329,19 +355,29 @@ def retrieve(q, client, agent):
 
 
 def run_one(q):
-    if BASELINE == "none":
+    usage = {}
+    if BASELINE in ("none", "full"):
+        meta = {}
+        if BASELINE == "full":
+            for sid, date, session in zip(q["haystack_session_ids"], q["haystack_dates"], q["haystack_sessions"]):
+                for i, text in enumerate(rounds(session)):
+                    meta[f"{sid}:{i}"] = {"session": sid, "date": date, "content": text}
+        ids = sorted(meta, key=lambda mid: meta[mid]["date"])
+        hyp = ask(build_prompt(q, ids, meta), usage=usage)
+        gold = answer_texts(q)
         return {
             "question_id": q["question_id"], "question_type": q["question_type"], "question": q["question"],
-            "answer": q["answer"], "hypothesis": ask(build_prompt(q, [], {})),
-            "retrieved_sessions": [], "answer_session_ids": q["answer_session_ids"], "memories": 0,
-            "hit_evidence": [], "evidence_total": len(answer_texts(q)), "evidence_in_context": 0,
-            "ingest_s": 0, "embed_wait_s": 0, "search_ms": 0,
+            "answer": q["answer"], "hypothesis": hyp,
+            "retrieved_sessions": [], "answer_session_ids": q["answer_session_ids"], "memories": len(meta),
+            "hit_evidence": [], "evidence_total": len(gold),
+            "evidence_in_context": len(gold & {m["content"] for m in meta.values()}),
+            "ingest_s": 0, "embed_wait_s": 0, "search_ms": 0, "prompt_tokens": usage.get("prompt_tokens", 0),
         }
     client = MemroClient(API, api_key=None)
     agent = new_agent(client)
     try:
         hits, meta, session_memories, timings = retrieve(q, client, agent)
-        hyp = "(no LLM: dry run)" if os.environ.get("BENCH_NO_LLM") else answer(q, hits, meta, session_memories)
+        hyp = "(no LLM: dry run)" if os.environ.get("BENCH_NO_LLM") else answer(q, hits, meta, session_memories, usage)
         # Exchange-level evidence: which hits are exchanges LongMemEval marks
         # as holding the answer, and how many of those reached the prompt.
         gold = answer_texts(q)
@@ -353,6 +389,7 @@ def run_one(q):
             "answer_session_ids": q["answer_session_ids"], "memories": len(meta),
             "hit_evidence": [meta[h["memory_id"]]["content"] in gold for h in hits],
             "evidence_total": len(gold), "evidence_in_context": len(gold & shown),
+            "prompt_tokens": usage.get("prompt_tokens", 0),
             **timings,
         }
     finally:

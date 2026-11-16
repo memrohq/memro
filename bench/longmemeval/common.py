@@ -172,10 +172,13 @@ def openai_post(path: str, body: dict, retries: int = 8) -> dict:
     raise RuntimeError("unreachable")
 
 
-def chat(model: str, messages: list, max_tokens: int, estimate_usd: float) -> str:
+def chat(model: str, messages: list, max_tokens: int, estimate_usd: float, usage: Optional[dict] = None) -> str:
+    """usage, if given, receives the call's OpenAI token counts."""
     check_budget(estimate_usd)
     r = openai_post("/v1/chat/completions", {"model": model, "messages": messages,
                                              "temperature": 0, "max_tokens": max_tokens})
     u = r.get("usage", {})
+    if usage is not None:
+        usage.update(u)
     record(model, u.get("prompt_tokens", 0), u.get("completion_tokens", 0))
     return r["choices"][0]["message"]["content"]
