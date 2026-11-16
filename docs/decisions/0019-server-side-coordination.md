@@ -73,6 +73,28 @@ Found in production on the first two-tool test (Claude Code and Antigravity on o
 - **A folder claim didn't cover its files.** Leases matched the exact resource string, so a claim on `memro/bench` didn't block `memro/bench/run.py`. Claims and checks now treat path resources as a tree: a lease on a folder blocks claims and checks on paths inside it, and a lease on a path blocks claiming a folder that contains it. URLs and plain names still match exactly. Claims within one scope take a transaction-level advisory lock, so two overlapping claims can't both pass. A denied claim returns `holder_resource` when the conflicting lease is on a different path.
 - **Messages name the tool.** Tools on one account share an agent ID, so MCP block messages name the holder's session (the tool) instead.
 
+### 7. Amendment (2026-11-16): claims made by hooks, not by the model
+Agents often skipped `pre_action_check` and `claim_task`, so a lease existed only when the model remembered it. And every Claude Code window shared the holder `claude-code` (the MCP URL's `?session_id=`), so two windows could edit one file. `memro connect` now installs a Claude Code hook (`cli/src/hook.js`, copied to `~/.memro/hooks/`) that:
+- claims the file before every Edit, Write, MultiEdit and NotebookEdit, as holder `claude-code:<first 8 characters of the Claude Code session id>`, and denies the edit when another holder has it. Re-claiming extends the lease, so editing is the heartbeat.
+- names the file `<origin repo name>/<path in repo>`, so every clone and worktree of a repo claims the same resource, matching the `memro/cli` style agents already use.
+- releases the window's leases on `SessionEnd`.
+- lets the edit through on any error (no key, offline, timeout of 3 s): Memro being down must not stop work.
+
+The hooks also give agents status and messages, without new tables:
+- **Status** is a lease on `agents/<session>` (TTL 2 hours, released on `SessionEnd`) whose intent is `<state> · <folder>`: `working` on `UserPromptSubmit`, `waiting for you` on `Notification`, `idle` on `Stop`. Re-claiming updates the intent. `memro agents` lists the status leases and the file leases by session.
+- **Messages** are intents on `inbox/<session>` (TTL 2 hours), sent with `memro send`. The hook reads the inbox on `UserPromptSubmit` (added as context) and on `Stop` (returned as a block, which wakes the agent to act on it), remembering seen ids in `~/.memro/hooks/`. A stop that a message already restarted (`stop_hook_active`) doesn't read again, so agents can't wake each other in a loop. Messages are labelled as coming from other agents, not the user. An agent sitting idle at its prompt runs no hooks; outside herdr it reads the message when it next gets a prompt.
+
+Refinements from a live test with three Claude Code agents in [herdr](https://herdr.dev) panes:
+- **Files are held for one turn.** A `Stop` with no new messages releases the window's file leases (the status lease stays). The agent never knew it held them, so it couldn't honour "please release"; now an idle agent blocks nobody, and a refused agent is told the file frees up when the holder's turn ends.
+- **Wait in line.** A file held in the same checkout is re-claimed every 3 s for up to 60 s (`MEMRO_HOOK_WAIT_SECONDS`) before the edit is refused, so an agent running on its own finishes its task instead of giving up. The PreToolUse hook timeout is 90 s.
+- **Worktrees warn instead of deny.** The lease intent ends with `[<checkout folder>@<host>]`. When the holder is in a different checkout, the edit goes ahead with `additionalContext` warning of a merge conflict; separate branches only meet at merge time, and worktrees are how herdr and our own rules keep agents apart.
+- **herdr wake.** Inside herdr (`HERDR_ENV=1`) the status intent ends with `[herdr <session> <pane>@<host>]`. `memro send` to an idle agent on the same machine runs `herdr agent prompt <pane>` with a short nudge, which fires the agent's `UserPromptSubmit` hook and shows it the message. Across machines it waits for the next prompt.
+- The location tags live in free-text intents until leases get a metadata field.
+
+**Codex** uses the same script (`~/.memro/hooks/memro-hook.mjs codex`) from `~/.codex/hooks.json`, since Codex hooks take the same input and output as Claude Code's. Differences: every file edit is `apply_patch`, so the hook claims each path in the patch's `*** Add/Update/Delete File:` and `*** Move to:` lines; there is no Notification event; SessionEnd may run for at most 3 seconds; and Codex skips a new or changed hook until the user trusts it in `/hooks`. Holders are `codex:<session>`.
+
+A lease held by the shared MCP session `claude-code` doesn't block the hook, because it may be the same window. The reverse remains: a window's MCP `claim_task` on a folder is refused if the same window's hook already holds a file inside it. Both go away once the MCP connection carries a per-window session.
+
 ## Consequences
 - Multi-agent teams sharing a tenant space or user account work safely without collision or race conditions.
 - Abandoned leases from crashed agents or sessions automatically expire after the TTL without blocking resources.

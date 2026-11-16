@@ -49,6 +49,29 @@ npx memro-cli connect --project
 
    Untick "Teach these tools…" in the list, or pass `--no-instructions`, to
    skip it. `disconnect` removes the note and leaves the rest of the file.
+4. **Claude Code and Codex: claim each file before it is edited.** A hook in
+   `~/.claude/settings.json` (or `./.claude/settings.local.json` for a project)
+   and `~/.codex/hooks.json` (or `./.codex/hooks.json`) claims the file in Memro
+   before every edit (Codex: every file in an `apply_patch`), so two agents never edit
+   one file at once: an edit to a file another session is changing in the same
+   folder is refused, naming who holds it. In another worktree or clone the edit
+   goes ahead with a warning to expect a merge conflict. Each Claude Code window
+   is its own holder, a file is named `<repo>/<path>` so every worktree of a repo
+   agrees, and files are held only while the agent works: they are released when
+   its turn ends. If Memro can't be reached the edit goes ahead.
+   The same hooks report each window's status (working, waiting for you,
+   idle) and deliver messages, so agents can see and talk to each other:
+
+   ```bash
+   npx memro-cli agents                      # who is doing what, and the files each holds
+   npx memro-cli send claude-code:1a2b3c4d "please release memro/cli"
+   ```
+
+   A message is added to the agent's next prompt, or wakes it when it stops,
+   within two hours. An idle agent running in a [herdr](https://herdr.dev) pane
+   on the same machine is prompted right away through herdr. An agent told a file is taken gets the command to ask the
+   holder. Codex runs a new hook only after you trust it once: open Codex and
+   run `/hooks`. Pass `--no-hooks` to skip all of this; `disconnect` removes it.
 
 Existing settings and other servers are kept; the original file is saved
 once as `<file>.memro-backup`. Restart the tool afterwards.
@@ -148,6 +171,7 @@ project whose `.mcp.json` overrides it; Claude Code itself uses the project's.
 * `--env-key`: Claude Code and Codex read the key from `$MEMRO_API_KEY` instead of storing it (see above).
 * `-y, --yes`: Configure every detected tool without prompting.
 * `--no-instructions`: Do not add Memro guidance to instruction files (`CLAUDE.md`, `AGENTS.md`, etc.).
+* `--no-hooks`: Do not add the Claude Code and Codex hooks that claim each file before it is edited.
 * `--staging`, `--local` or `--api <url>`: Target another Memro server (e.g. self-hosted: `--api https://memro.example.com`).
 
 ---

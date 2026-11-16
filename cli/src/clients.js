@@ -279,6 +279,68 @@ const claudeCode = {
   },
 };
 
+// --- Coordination hooks for Claude Code and Codex (src/hook.js) ---------------------------
+
+export const HOOK_FILE = () => path.join(home(), ".memro", "hooks", "memro-hook.mjs");
+const codexHome = () => process.env.CODEX_HOME || path.join(home(), ".codex");
+// Our entries are the ones running a script from ~/.memro/hooks/ (memro-cli
+// 0.1.8 called it claude-code.mjs).
+const isOurs = (group) => group?.hooks?.some((h) => h.command?.includes(".memro/hooks/"));
+
+/** Where each tool keeps its hooks and which events Memro hooks into. The
+ * project Claude Code file is the local, uncommitted one because the command
+ * names a path on this machine. */
+export const HOOK_TARGETS = {
+  "claude-code": {
+    file: (scope, cwd) => (scope === "project" ? path.join(cwd, ".claude", "settings.local.json") : path.join(home(), ".claude", "settings.json")),
+    events: { PreToolUse: "Edit|Write|MultiEdit|NotebookEdit", UserPromptSubmit: null, Notification: null, Stop: null, SessionEnd: null },
+  },
+  codex: {
+    file: (scope, cwd) => path.join(scope === "project" ? path.join(cwd, ".codex") : codexHome(), "hooks.json"),
+    // Codex has no Notification event, and gives SessionEnd at most 3 seconds.
+    events: { PreToolUse: "^apply_patch$", UserPromptSubmit: null, Stop: null, SessionEnd: null },
+    timeouts: { SessionEnd: 3 },
+  },
+};
+
+export const hookSettingsFile = (scope = "user", cwd = process.cwd(), tool = "claude-code") => HOOK_TARGETS[tool].file(scope, cwd);
+
+/** Copy the hook to ~/.memro/hooks/ and register it for the tool's coordination events. */
+export function installHooks({ scope = "user", cwd = process.cwd(), tool = "claude-code" } = {}) {
+  const { events, timeouts = {} } = HOOK_TARGETS[tool];
+  fs.mkdirSync(path.dirname(HOOK_FILE()), { recursive: true });
+  fs.copyFileSync(new URL("./hook.js", import.meta.url), HOOK_FILE());
+  const target = hookSettingsFile(scope, cwd, tool);
+  const cfg = readJSON(target);
+  cfg.hooks ||= {};
+  const command = `node ${JSON.stringify(HOOK_FILE().split(path.sep).join("/"))} ${tool}`;
+  for (const [event, matcher] of Object.entries(events)) {
+    // PreToolUse may wait up to 60 s for a held file (hook.js waitMs).
+    const ours = { ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command, timeout: timeouts[event] || (event === "PreToolUse" ? 90 : 10) }] };
+    cfg.hooks[event] = [...(cfg.hooks[event] || []).filter((g) => !isOurs(g)), ours];
+  }
+  writeJSON(target, cfg);
+  return target;
+}
+
+/** Unregister the hooks; true if any were there. The copied script stays for other tools. */
+export function removeHooks({ scope = "user", cwd = process.cwd(), tool = "claude-code" } = {}) {
+  const target = hookSettingsFile(scope, cwd, tool);
+  if (!fs.existsSync(target)) return false;
+  const cfg = readJSON(target);
+  let removed = false;
+  for (const event of Object.keys(cfg.hooks || {})) {
+    const groups = cfg.hooks[event];
+    if (!Array.isArray(groups) || !groups.some(isOurs)) continue;
+    removed = true;
+    cfg.hooks[event] = groups.filter((g) => !isOurs(g));
+    if (!cfg.hooks[event].length) delete cfg.hooks[event];
+  }
+  if (cfg.hooks && !Object.keys(cfg.hooks).length) delete cfg.hooks;
+  if (removed) writeJSON(target, cfg);
+  return removed;
+}
+
 export const CLIENTS = [
   claudeCode,
   codex,
