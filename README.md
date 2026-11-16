@@ -1,42 +1,47 @@
-# Memro — Verified Memory Infrastructure for AI Agents
+# Memro: one memory for all your AI coding tools
 
-[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](LICENSE)
-[![CI](https://github.com/memrohq/memro/actions/workflows/ci.yml/badge.svg)](https://github.com/memrohq/memro/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/memro-cli?label=memro-cli)](https://www.npmjs.com/package/memro-cli)
-[![PyPI](https://img.shields.io/pypi/v/memro?label=pypi%20memro)](https://pypi.org/project/memro/)
-[![MCP Ready](https://img.shields.io/badge/MCP-ready-purple.svg)](mcp)
-[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/ykTeRFRpQP)
-
-**One long-term memory for all your AI tools.** Claude Code, Cursor, Codex, GitHub Copilot and any MCP client remember your decisions, preferences and project context across sessions. Tell one tool once, and they all know.
-
-```bash
-npx memro-cli connect   # sign in and add Memro to the AI tools on this machine
-npx memro-cli doctor    # check which config each tool really uses, and that the key works
-```
+**Tell one tool once, and they all know.** Claude Code, Cursor, Codex, GitHub Copilot and any MCP client share one long-term memory of your decisions, preferences and project context, across sessions and across tools.
 
 <p align="center">
-  <a href="https://memro.co/#graph"><img src="docs/assets/memro-graph.gif" width="720" alt="The Memro dashboard's memory graph: a million memories, linked by the people, companies and conversations in them"></a>
-  <br/>
-  <sub>The dashboard's memory graph on an account with a million memories; it draws the newest 5,000 at most at a time. <a href="https://memro.co/#graph">Watch the tour with sound</a>.</sub>
+  <img src="docs/assets/memro-aha.gif" width="720" alt="Cursor forgets the deploy day decided in Claude Code; with Memro, a new Cursor session recalls it: Tuesdays, decided with Claude Code on Monday.">
 </p>
+
+```bash
+npx memro-cli connect   # sign in and add Memro to every AI tool on this machine
+```
+
+- **Shared across tools:** what you tell Claude Code, Cursor recalls tomorrow. No more re-explaining your project.
+- **Current, not just similar:** memories are typed, linked and checked for contradictions, so agents recall what's true now.
+- **Your team's context too:** sync Slack, GitHub, Linear, Notion and [40+ more](https://memro.co/docs/connectors.html), hosted or self-hosted with Docker.
+
+⭐ **If Memro saves you from re-explaining your project, star the repo (top right): it helps other developers find it.**
 
 <p align="center">
   <a href="https://memro.co">Website</a> ·
   <a href="https://memro.co/docs/">Docs</a> ·
+  <a href="https://discord.gg/ykTeRFRpQP">Discord</a> ·
   <a href="https://memro.co/demo/voice/">Voice demo</a> ·
   <a href="https://dev.to/subal_bain_059153c5cbc1cc/i-gave-claude-code-codex-cursor-and-copilot-one-shared-memory-heres-what-broke-3g56">What broke wiring one memory into 4 AI tools</a>
 </p>
 
-> ⭐ **If Memro saves you from re-explaining your project, a star helps other developers find it.**
+[![npm](https://img.shields.io/npm/v/memro-cli?label=memro-cli)](https://www.npmjs.com/package/memro-cli)
+[![PyPI](https://img.shields.io/pypi/v/memro?label=pypi%20memro)](https://pypi.org/project/memro/)
+[![CI](https://github.com/memrohq/memro/actions/workflows/ci.yml/badge.svg)](https://github.com/memrohq/memro/actions/workflows/ci.yml)
+[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/ykTeRFRpQP)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](LICENSE)
 
-> **License (Source Available)**
-> 
-> Memro is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
-> - **Free for Non-Commercial Use**: Personal study, experiments, hobby projects, research, and testing without commercial application.
-> - **Commercial Use**: Using Memro for commercial products or production services requires a managed subscription on [Memro Cloud](https://memro.co) or an enterprise commercial license.
-> - **How to Get a Commercial License**: Visit [memro.co/pricing](https://memro.co/pricing) or contact `subal@memro.co`.
+**Source-available:** free for personal, research and other non-commercial use, including self-hosting; commercial use runs on [Memro Cloud](https://memro.co/pricing/) or a commercial license.
 
-> **Repository Notice**: `github.com/memrohq/memro` is the single public repository for Memro. It contains the Go server, official SDKs (Python, JavaScript/TypeScript, Go), Model Context Protocol (MCP) server, and the CLI.
+<details>
+<summary>License details</summary>
+
+Memro is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+- **Free for non-commercial use:** personal study, experiments, hobby projects, research, and testing without commercial application.
+- **Commercial use:** using Memro for commercial products or production services requires a managed subscription on [Memro Cloud](https://memro.co) or an enterprise commercial license.
+- **Getting a commercial license:** see [memro.co/pricing](https://memro.co/pricing) or contact `subal@memro.co`.
+
+`github.com/memrohq/memro` is the single public repository for Memro: the Go server, official SDKs (Python, JavaScript/TypeScript, Go), the MCP server and the CLI.
+</details>
 
 ---
 
@@ -96,6 +101,14 @@ curl http://localhost:8081/health
 For complete deployment options, production topologies, and configuration tables, see [docs/self-hosting.md](docs/self-hosting.md).
 
 ---
+
+## See your memory
+
+<p align="center">
+  <a href="https://memro.co/#graph"><img src="docs/assets/memro-graph.gif" width="720" alt="The Memro dashboard's memory graph: a million memories, linked by the people, companies and conversations in them"></a>
+  <br/>
+  <sub>The dashboard's memory graph on an account with a million memories; it draws the newest 5,000 at most at a time. <a href="https://memro.co/#graph">Watch the tour with sound</a>.</sub>
+</p>
 
 ## Architecture
 
