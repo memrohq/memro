@@ -16,6 +16,11 @@ const { handle, patchFiles, resourceFor, sessionOf, whereOf } = await import("..
 const { HOOK_FILE, hookSettingsFile, installHooks, removeHooks } = await import("../src/clients.js");
 
 const cfg = { api: "https://api.test", apiKey: "memro_sk_test" };
+// How the hook names a file outside git (absolute, forward slashes on every OS),
+// and the checkout of /x/a.js: /x doesn't exist, so the nearest folder, the root.
+const P = (p) => path.resolve(p).split(path.sep).join("/");
+const ROOT_CHECKOUT = `${P("/")}@${os.hostname()}`;
+const A = P("/x/a.js");
 let calls;
 /** A fake Memro API: records each call and answers with reply(route, body). */
 const serve = (reply) => {
@@ -42,7 +47,7 @@ test("resourceFor names a file by its repo's origin, so worktrees and clones agr
   // Write may target a folder that doesn't exist yet.
   assert.equal(resourceFor(path.join(repo, "new", "deep", "a.go")), "memro/new/deep/a.go");
   const outside = path.join(TEST_DIR, "loose.txt");
-  assert.equal(resourceFor(outside), outside);
+  assert.equal(resourceFor(outside), P(outside));
 });
 
 const edit = (file, extra = {}) => ({
@@ -53,24 +58,23 @@ test("an edit claims the file for this window and passes when granted", async ()
   serve(() => ({ granted: true }));
   assert.equal(await handle(edit("/x/a.js"), cfg), null);
   assert.equal(calls[0].route, "/coordination/claim");
-  assert.equal(calls[0].body.resource, "/x/a.js");
+  assert.equal(calls[0].body.resource, A);
   assert.equal(calls[0].body.session_id, "claude-code:abcdef12");
   assert.equal(sessionOf({ session_id: "abcdef123456" }), "claude-code:abcdef12");
 });
 
 test("an edit to a file another session holds is denied, naming the holder", async () => {
-  const here = `/@${os.hostname()}`; // /x does not exist, so its checkout is the nearest existing folder
-  serve(() => ({ granted: false, holder_session: "codex", holder_resource: "/x", intent: `refactor x [${here}]` }));
+  serve(() => ({ granted: false, holder_session: "codex", holder_resource: "/x", intent: `refactor x [${ROOT_CHECKOUT}]` }));
   const out = await handle(edit("/x/a.js"), cfg);
   assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
-  assert.match(out.hookSpecificOutput.permissionDecisionReason, /\/x\/a\.js \(inside \/x\) is being changed by codex \(refactor x\)\. It is released/);
+  assert.ok(out.hookSpecificOutput.permissionDecisionReason.includes(`${A} (inside /x) is being changed by codex (refactor x). It is released`));
 });
 
 test("a held file in the same checkout is waited for, then claimed", async () => {
   process.env.MEMRO_HOOK_WAIT_SECONDS = "5";
   try {
     let n = 0;
-    serve(() => (++n === 1 ? { granted: false, holder_session: "codex:1", intent: `x [/@${os.hostname()}]` } : { granted: true }));
+    serve(() => (++n === 1 ? { granted: false, holder_session: "codex:1", intent: `x [${ROOT_CHECKOUT}]` } : { granted: true }));
     assert.equal(await handle(edit("/x/a.js"), cfg), null);
     assert.equal(n, 2);
   } finally {
@@ -82,7 +86,7 @@ test("a holder in another worktree only warns about a merge conflict", async () 
   serve(() => ({ granted: false, holder_session: "codex", intent: "Codex editing a.js [/other/worktree@laptop]" }));
   const out = await handle(edit("/x/a.js"), cfg);
   assert.equal(out.hookSpecificOutput.permissionDecision, undefined);
-  assert.match(out.hookSpecificOutput.additionalContext, /also changing \/x\/a\.js \(Codex editing a\.js\) in another checkout \(\/other\/worktree@laptop\)/);
+  assert.ok(out.hookSpecificOutput.additionalContext.includes(`also changing ${A} (Codex editing a.js) in another checkout (/other/worktree@laptop)`));
 });
 
 test("a claim from the shared Claude Code MCP session doesn't block", async () => {
@@ -190,13 +194,13 @@ test("Codex: apply_patch claims each file as codex:<session> and is denied if on
   const input = { hook_event_name: "PreToolUse", session_id: "c0dex123456", cwd: "/w", tool_name: "apply_patch", tool_input: { command: PATCH } };
   serve(() => ({ granted: true }));
   assert.equal(await handle(input, cfg, "codex"), null);
-  assert.deepEqual(calls.map((c) => c.body.resource), ["/w/src/a.js", "/w/docs/new.md", "/w/old/name.js", "/w/new/name.js"]);
+  assert.deepEqual(calls.map((c) => c.body.resource), ["/w/src/a.js", "/w/docs/new.md", "/w/old/name.js", "/w/new/name.js"].map(P));
   assert.equal(calls[0].body.session_id, "codex:c0dex123");
   assert.match(calls[0].body.intent, /^Codex editing a\.js/);
 
-  serve((route, body) => (body.resource === "/w/docs/new.md" ? { granted: false, holder_session: "claude-code:aaaa1111", intent: `x [/@${os.hostname()}]` } : { granted: true }));
+  serve((route, body) => (body.resource === P("/w/docs/new.md") ? { granted: false, holder_session: "claude-code:aaaa1111", intent: `x [${ROOT_CHECKOUT}]` } : { granted: true }));
   const out = await handle(input, cfg, "codex");
-  assert.match(out.hookSpecificOutput.permissionDecisionReason, /\/w\/docs\/new\.md is being changed by claude-code:aaaa1111/);
+  assert.ok(out.hookSpecificOutput.permissionDecisionReason.includes(`${P("/w/docs/new.md")} is being changed by claude-code:aaaa1111`));
   // Claude Code's tools mean nothing to Codex, and vice versa.
   serve(() => assert.fail("no call expected"));
   assert.equal(await handle({ ...input, tool_name: "Bash" }, cfg, "codex"), null);

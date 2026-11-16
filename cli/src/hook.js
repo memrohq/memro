@@ -82,15 +82,18 @@ export function locate(file, cwd = process.cwd()) {
   let dir = path.dirname(abs);
   while (!fs.existsSync(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir); // Write may create folders
   const top = git(dir, "rev-parse", "--show-toplevel");
-  const checkout = `${top || dir}@${os.hostname()}`;
-  if (!top) return { resource: abs, checkout };
+  const checkout = `${posix(top || dir)}@${os.hostname()}`;
+  if (!top) return { resource: posix(abs), checkout };
   const remote = git(top, "remote", "get-url", "origin");
   const repo = (remote ? remote.replace(/\.git$/, "").split(/[/:]/).pop() : "") || path.basename(top);
-  // Compare real paths: git reports /private/var/… where the hook may say /var/….
-  const real = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
-  const rel = path.relative(real(top), path.join(real(dir), path.relative(dir, abs)));
-  return { resource: [repo, ...rel.split(path.sep)].join("/"), checkout };
+  // Git gives the folder's place in the repo itself: comparing paths breaks on
+  // /private/var vs /var (macOS) and short vs long names (Windows).
+  const prefix = git(dir, "rev-parse", "--show-prefix");
+  return { resource: `${repo}/${prefix}${posix(path.relative(dir, abs))}`, checkout };
 }
+
+/** Lease names use forward slashes on every OS. */
+const posix = (p) => p.split(path.sep).join("/");
 
 // shortcut: where a holder works travels at the end of its free-text intent as
 // "[…]" until leases get a metadata field.
