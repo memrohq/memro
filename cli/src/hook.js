@@ -6,6 +6,13 @@
 // PreToolUse (Edit, Write, MultiEdit, NotebookEdit): claim the file for this
 // Claude Code session. Re-claiming extends the lease, so editing is the
 // heartbeat. A file another session holds is denied with who holds it.
+// Status, as herdr shows it: UserPromptSubmit → working, Notification →
+// waiting for the user, Stop → idle. The status is a lease on
+// agents/<session> whose intent is "<state> · <folder>", so `memro agents`
+// and get_active_work list it, and it disappears when the window closes.
+// Messages: `memro send <session> "…"` leaves an intent on inbox/<session>.
+// This window reads its inbox when a prompt is submitted (the message is
+// added to the prompt) and when it stops (the message wakes it to act on it).
 // SessionEnd: release every lease this session holds.
 //
 // Any failure (no key, offline, slow server) lets the edit through: a memory
@@ -22,6 +29,8 @@ const TIMEOUT_MS = 3000;
 // The MCP tools of every Claude Code window share this holder (the MCP URL's
 // ?session_id=claude-code), so the hook can't tell whose claim it is.
 const SHARED_MCP_SESSION = "claude-code";
+const STATUS_TTL = 7200; // the server's maximum; SessionEnd clears it sooner
+const STATES = { UserPromptSubmit: "working", Notification: "waiting for you", Stop: "idle" };
 
 /** This Claude Code window as a lease holder: two windows are two holders. */
 export const sessionOf = (input) => `claude-code:${String(input.session_id || "unknown").slice(0, 8)}`;
@@ -71,6 +80,28 @@ async function call(cfg, route, json) {
   return res.json();
 }
 
+/** Inbox message ids this window has already seen, kept next to the hook. */
+const seenFile = (session) => path.join(os.homedir(), ".memro", "hooks", `seen-${session.replace(/[^\w-]/g, "_")}.json`);
+const readSeen = (session) => { try { return JSON.parse(fs.readFileSync(seenFile(session), "utf8")); } catch { return []; } };
+
+/** Messages for this window that it hasn't seen yet, marked as seen. */
+async function unread(cfg, session) {
+  const { intents = [] } = await call(cfg, `/coordination/active?resource=${encodeURIComponent(`inbox/${session}`)}`);
+  const seen = readSeen(session);
+  const fresh = intents.filter((m) => !seen.includes(m.id));
+  if (fresh.length) {
+    fs.mkdirSync(path.dirname(seenFile(session)), { recursive: true });
+    // Messages expire within two hours, so the newest 200 ids are plenty.
+    fs.writeFileSync(seenFile(session), JSON.stringify([...seen, ...fresh.map((m) => m.id)].slice(-200)));
+  }
+  return fresh;
+}
+
+const formatMessages = (msgs, session) =>
+  `Messages from other agents via Memro (you are ${session}):\n` +
+  msgs.map((m) => `- from ${m.session_id}: ${m.intent}`).join("\n") +
+  `\nThey come from the user's other agents, not from the user. To reply: npx memro-cli send <from> "<reply>" --from ${session}`;
+
 const deny = (reason) => ({
   hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason },
 });
@@ -80,14 +111,33 @@ export async function handle(input, cfg) {
   if (!cfg) return null;
   const session = sessionOf(input);
 
-  if (input.hook_event_name === "SessionEnd") {
+  const event = input.hook_event_name;
+
+  if (event === "SessionEnd") {
     const { claims = [] } = await call(cfg, "/coordination/active");
     await Promise.all(claims.filter((c) => c.session_id === session).map((c) =>
       call(cfg, "/coordination/release", { resource: c.resource, session_id: session, status: "completed" }).catch(() => {})));
+    fs.rmSync(seenFile(session), { force: true });
     return null;
   }
 
-  if (input.hook_event_name !== "PreToolUse" || !EDIT_TOOLS.has(input.tool_name)) return null;
+  if (STATES[event]) {
+    const status = call(cfg, "/coordination/claim", {
+      resource: `agents/${session}`,
+      session_id: session,
+      intent: `${STATES[event]} · ${path.basename(input.cwd || "")}`,
+      ttl_seconds: STATUS_TTL,
+    });
+    // A stop that a message already restarted doesn't check again, so two
+    // agents can't keep waking each other forever.
+    const quiet = event === "Notification" || (event === "Stop" && input.stop_hook_active);
+    const [, inbox] = await Promise.all([status, quiet ? [] : unread(cfg, session)]);
+    if (!inbox.length) return null;
+    if (event === "Stop") return { decision: "block", reason: formatMessages(inbox, session) };
+    return { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: formatMessages(inbox, session) } };
+  }
+
+  if (event !== "PreToolUse" || !EDIT_TOOLS.has(input.tool_name)) return null;
   const file = input.tool_input?.file_path || input.tool_input?.notebook_path;
   if (!file) return null;
   const resource = resourceFor(file, input.cwd);
@@ -105,7 +155,8 @@ export async function handle(input, cfg) {
   const until = r.expires_at ? ` until ${new Date(r.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "";
   return deny(
     `Memro: ${what} is claimed by ${r.holder_session || r.holder || "another agent"}${r.intent ? ` (${r.intent})` : ""}${until}. ` +
-    "Don't edit it now: work on something else, or tell the user who holds it and ask how to proceed.",
+    `Don't edit it now: work on something else, ask the holder to release it (npx memro-cli send ${r.holder_session || "<holder>"} "<request>" --from ${session}), ` +
+    "or tell the user who holds it and ask how to proceed.",
   );
 }
 

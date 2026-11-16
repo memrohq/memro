@@ -27,6 +27,10 @@ Usage
   npx memro-cli doctor       Check each tool: which config it uses, its key, and
                              whether the Memro server accepts it
   npx memro-cli disconnect   Remove Memro from your tools and forget the key
+  npx memro-cli agents       Show your agents: what each is doing and the files it holds
+  npx memro-cli send <agent> <message>
+                             Message an agent (a name from \`agents\`); Claude Code
+                             reads it at its next prompt or when it stops
 
 Options
   --project                  Configure the current project instead of global tools
@@ -42,10 +46,11 @@ Options
                              before it is edited, so two agents never edit one file
   --staging | --local        Use staging or a local server instead of Memro Cloud
   --api <url>                Use a specific Memro API (self-hosted)
+  --from <agent>             With send: who the message is from (default: you)
 `;
 
 export function parseArgs(argv) {
-  const opts = { command: null, clients: null, yes: false, api: null, instructions: true, hooks: true, scope: null, key: null, envKey: false };
+  const opts = { command: null, clients: null, yes: false, api: null, instructions: true, hooks: true, scope: null, key: null, envKey: false, args: [], from: null };
   let projectFlag = false;
   let scopeFlagValue = null;
 
@@ -57,6 +62,9 @@ export function parseArgs(argv) {
       opts.yes = true;
     } else if (a === "--no-instructions") {
       opts.instructions = false;
+    } else if (a === "--from") {
+      opts.from = argv[++i];
+      if (!opts.from || opts.from.startsWith("-")) throw new Error("--from needs an agent name");
     } else if (a === "--no-hooks") {
       opts.hooks = false;
     } else if (a === "--env-key") {
@@ -85,6 +93,8 @@ export function parseArgs(argv) {
       opts.command = "help";
     } else if (!opts.command) {
       opts.command = a;
+    } else if (opts.command === "send") {
+      opts.args.push(a);
     } else {
       throw new Error(`Unexpected argument: ${a}`);
     }
@@ -525,6 +535,52 @@ async function status(opts) {
   console.log(`Tools:  ${configured.map((c) => c.name).join(", ") || "none"}`);
 }
 
+/** The key and API for account commands: --key / $MEMRO_API_KEY, else the saved sign-in. */
+function account(opts) {
+  const creds = loadCredentials();
+  const key = opts.key || process.env.MEMRO_API_KEY || creds?.api_key;
+  if (!key) throw new Error("Not connected. Run `npx memro-cli connect`.");
+  return { api: creds?.api_url || opts.api, key };
+}
+
+const ago = (t) => {
+  const s = Math.max(0, Math.round((Date.now() - new Date(t)) / 1000));
+  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`;
+};
+
+/** Every agent session with a status or a claim, like herdr's sidebar. */
+async function agents(opts) {
+  const { api, key } = account(opts);
+  const res = await request(api, "/coordination/active", { key });
+  if (!res.ok) throw new Error(`Memro API returned ${res.status}`);
+  const bySession = new Map();
+  const row = (s) => bySession.get(s) || bySession.set(s, { status: null, files: [] }).get(s);
+  for (const c of res.data?.claims || []) {
+    if (c.resource.startsWith("agents/")) row(c.session_id).status = c;
+    else row(c.session_id).files.push(c.resource);
+  }
+  if (!bySession.size) return console.log("No agents are active right now.");
+  const width = Math.max(...[...bySession.keys()].map((s) => s.length)) + 2;
+  for (const [session, { status: st, files }] of bySession) {
+    console.log(`${session.padEnd(width)}${st ? `${st.reason}  ${ui.c.dim(ago(st.heartbeat_at))}` : ui.c.dim("no status (MCP tools only)")}`);
+    for (const f of files) console.log(ui.c.dim(`${"".padEnd(width)}holds ${f}`));
+  }
+}
+
+async function send(opts) {
+  const [to, ...words] = opts.args;
+  const message = words.join(" ").trim();
+  if (!to || !message) throw new Error("Usage: npx memro-cli send <agent> <message>  (names from `npx memro-cli agents`)");
+  const { api, key } = account(opts);
+  const res = await request(api, "/coordination/intent", {
+    method: "POST",
+    key,
+    json: { resource: `inbox/${to}`, intent: message, session_id: opts.from || "user", ttl_seconds: 7200 },
+  });
+  if (!res.ok) throw new Error(`Couldn't send: ${res.data?.message || res.status}`);
+  console.log(`Sent to ${to}. It reads it at its next prompt or when it stops (within 2 hours).`);
+}
+
 async function doctor(opts) {
   const root = resolveProjectRoot(process.cwd());
   const inProject = !isHomeOrRoot(root);
@@ -612,6 +668,8 @@ export async function main(argv) {
     case "doctor": return doctor(opts);
     case "disconnect": return disconnect(opts);
     case "hook": return (await import("./hook.js")).main();
+    case "agents": return agents(opts);
+    case "send": return send(opts);
     case null:
     case "help": console.log(HELP); return;
     default: throw new Error(`Unknown command "${opts.command}". Try \`npx memro-cli --help\`.`);

@@ -282,7 +282,7 @@ const claudeCode = {
 // --- Claude Code coordination hooks (src/hook.js) ------------------------------------
 
 export const HOOK_FILE = () => path.join(home(), ".memro", "hooks", "claude-code.mjs");
-const HOOK_EVENTS = { PreToolUse: "Edit|Write|MultiEdit|NotebookEdit", SessionEnd: null };
+const HOOK_EVENTS = { PreToolUse: "Edit|Write|MultiEdit|NotebookEdit", UserPromptSubmit: null, Notification: null, Stop: null, SessionEnd: null };
 const isOurs = (group) => group?.hooks?.some((h) => h.command?.includes(".memro/hooks/claude-code.mjs"));
 
 /** Claude Code's settings file for hooks; the project one is the local,

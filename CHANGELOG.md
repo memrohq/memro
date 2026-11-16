@@ -9,6 +9,7 @@ and every release and package raises only the last number of its version (see RE
 
 ### Added
 - **`memro connect` makes Claude Code claim each file before editing it** (ADR 0019 §7): a hook claims the file in Memro before every Edit or Write and refuses the edit when another agent or window holds it, so coordination no longer depends on the model remembering to call `claim_task`. Each Claude Code window is its own holder, files are named `<repo>/<path>` so every worktree agrees, and a window's claims are released when it closes. `--no-hooks` skips it.
+- **`memro agents` and `memro send`**: the same hooks report each Claude Code window's status (working, waiting for you, idle), and `agents` lists every agent with its status and the files it holds. `send <agent> <message>` messages an agent; Claude Code reads it at its next prompt, or is woken by it when it stops.
 
 ### Fixed
 - **MCP `recall` shows which memories are out of date**: it ranks a memory below a newer one that contradicts it and marks it with `superseded_by`. Before, the tool dropped the flag and did not ask for conflict resolution. The Python SDK's `SearchResult` now keeps `is_superseded` and `superseded_by`.

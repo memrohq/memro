@@ -73,7 +73,32 @@ test("other tools, missing keys and other events do nothing", async () => {
   serve(() => assert.fail("no call expected"));
   assert.equal(await handle(edit("/x/a.js", { tool_name: "Read" }), cfg), null);
   assert.equal(await handle(edit("/x/a.js"), null), null);
-  assert.equal(await handle(edit("/x/a.js", { hook_event_name: "Stop" }), cfg), null);
+  assert.equal(await handle(edit("/x/a.js", { hook_event_name: "PostToolUse" }), cfg), null);
+});
+
+const inbox = (msgs) => (route) => (route.startsWith("/coordination/active") ? { intents: msgs } : { granted: true });
+const ev = (hook_event_name, extra = {}) => ({ hook_event_name, session_id: "feedbeef99", cwd: "/w/memro", ...extra });
+
+test("prompt, notification and stop set this window's status", async () => {
+  for (const [event, state] of [["UserPromptSubmit", "working"], ["Notification", "waiting for you"], ["Stop", "idle"]]) {
+    serve(inbox([]));
+    await handle(ev(event), cfg);
+    const claim = calls.find((c) => c.route === "/coordination/claim").body;
+    assert.deepEqual([claim.resource, claim.intent], ["agents/claude-code:feedbeef", `${state} · memro`]);
+  }
+});
+
+test("a message is added to the next prompt once, and wakes a stopping agent", async () => {
+  serve(inbox([{ id: "m1", session_id: "codex", intent: "release memro/cli please" }]));
+  const out = await handle(ev("UserPromptSubmit"), cfg);
+  assert.match(out.hookSpecificOutput.additionalContext, /from codex: release memro\/cli please/);
+  assert.match(out.hookSpecificOutput.additionalContext, /--from claude-code:feedbeef/);
+  assert.equal(await handle(ev("Stop"), cfg), null, "already seen");
+
+  serve(inbox([{ id: "m2", session_id: "user", intent: "check the build" }]));
+  assert.equal((await handle(ev("Stop"), cfg)).decision, "block");
+  serve(inbox([{ id: "m3", session_id: "codex", intent: "ping" }]));
+  assert.equal(await handle(ev("Stop", { stop_hook_active: true }), cfg), null, "no wake loops");
 });
 
 test("session end releases only this window's leases", async () => {
@@ -95,7 +120,7 @@ test("installHooks is idempotent, keeps the user's own hooks, and removeHooks un
   const cfgAfter = JSON.parse(fs.readFileSync(file, "utf8"));
   assert.equal(cfgAfter.hooks.PreToolUse.length, 2);
   assert.deepEqual(cfgAfter.hooks.PreToolUse[0], mine);
-  assert.equal(cfgAfter.hooks.SessionEnd.length, 1);
+  for (const event of ["UserPromptSubmit", "Notification", "Stop", "SessionEnd"]) assert.equal(cfgAfter.hooks[event].length, 1);
   assert.ok(fs.existsSync(HOOK_FILE()));
 
   assert.equal(removeHooks(), true);

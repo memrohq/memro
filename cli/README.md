@@ -56,7 +56,17 @@ npx memro-cli connect --project
    who holds it. Each Claude Code window is its own holder, a file is named
    `<repo>/<path>` so every worktree of a repo agrees, and the window's claims
    are released when it closes. If Memro can't be reached the edit goes ahead.
-   Pass `--no-hooks` to skip it; `disconnect` removes it.
+   The same hooks report each window's status (working, waiting for you,
+   idle) and deliver messages, so agents can see and talk to each other:
+
+   ```bash
+   npx memro-cli agents                      # who is doing what, and the files each holds
+   npx memro-cli send claude-code:1a2b3c4d "please release memro/cli"
+   ```
+
+   A message is added to the agent's next prompt, or wakes it when it stops,
+   within two hours. An agent told a file is taken gets the command to ask the
+   holder. Pass `--no-hooks` to skip all of this; `disconnect` removes it.
 
 Existing settings and other servers are kept; the original file is saved
 once as `<file>.memro-backup`. Restart the tool afterwards.

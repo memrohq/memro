@@ -80,6 +80,10 @@ Agents often skipped `pre_action_check` and `claim_task`, so a lease existed onl
 - releases the window's leases on `SessionEnd`.
 - lets the edit through on any error (no key, offline, timeout of 3 s): Memro being down must not stop work.
 
+The hooks also give agents status and messages, without new tables:
+- **Status** is a lease on `agents/<session>` (TTL 2 hours, released on `SessionEnd`) whose intent is `<state> · <folder>`: `working` on `UserPromptSubmit`, `waiting for you` on `Notification`, `idle` on `Stop`. Re-claiming updates the intent. `memro agents` lists the status leases and the file leases by session.
+- **Messages** are intents on `inbox/<session>` (TTL 2 hours), sent with `memro send`. The hook reads the inbox on `UserPromptSubmit` (added as context) and on `Stop` (returned as a block, which wakes the agent to act on it), remembering seen ids in `~/.memro/hooks/`. A stop that a message already restarted (`stop_hook_active`) doesn't read again, so agents can't wake each other in a loop. Messages are labelled as coming from other agents, not the user. An agent sitting idle at its prompt is not woken; it reads the message when it next gets a prompt.
+
 A lease held by the shared MCP session `claude-code` doesn't block the hook, because it may be the same window. The reverse remains: a window's MCP `claim_task` on a folder is refused if the same window's hook already holds a file inside it. Both go away once the MCP connection carries a per-window session.
 
 ## Consequences
