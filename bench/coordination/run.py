@@ -24,6 +24,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -159,9 +160,10 @@ def main():
     ap.add_argument("--runs", type=int, default=3)
     ap.add_argument("--out", default=str(ROOT / "bench" / "runs" / "coordination" / time.strftime("%Y%m%d-%H%M%S")))
     args = ap.parse_args()
-    out = Path(args.out)
-    workdir = out / "repos"
-    workdir.mkdir(parents=True, exist_ok=True)
+    out = Path(args.out).resolve()  # agents run in other folders
+    out.mkdir(parents=True, exist_ok=True)
+    # Outside any project: Claude Code reads CLAUDE.md files from parent folders.
+    workdir = Path(tempfile.mkdtemp(prefix="memro-cbench-")).resolve()
     arms = args.arms.split(",")
     with open(out / "results.jsonl", "a") as f:
         # Interleave arms so a slow model hour doesn't land on one arm.
@@ -172,7 +174,7 @@ def main():
                 f.flush()
                 print(f"run {i + 1} {arm:9} {r['tasks_passed']}/6 tasks  base {'ok' if r['base_tests_pass'] else 'BROKEN'}"
                       f"  {r['wall_seconds']}s  ${r['claude_cost_usd']} + {r['codex_tokens']} codex tokens  {r['merge'] or ''}", flush=True)
-    print(f"results: {out / 'results.jsonl'}")
+    print(f"results: {out / 'results.jsonl'}  repos: {workdir}")
 
 
 if __name__ == "__main__":
