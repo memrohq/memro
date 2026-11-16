@@ -11,6 +11,7 @@ const HOME = path.join(TEST_DIR, "home");
 process.env.HOME = HOME;
 process.env.USERPROFILE = HOME;
 
+process.env.MEMRO_HOOK_WAIT_SECONDS = "0"; // the wait is tested on its own below
 const { handle, patchFiles, resourceFor, sessionOf, whereOf } = await import("../src/hook.js");
 const { HOOK_FILE, hookSettingsFile, installHooks, removeHooks } = await import("../src/clients.js");
 
@@ -63,6 +64,18 @@ test("an edit to a file another session holds is denied, naming the holder", asy
   const out = await handle(edit("/x/a.js"), cfg);
   assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
   assert.match(out.hookSpecificOutput.permissionDecisionReason, /\/x\/a\.js \(inside \/x\) is being changed by codex \(refactor x\)\. It is released/);
+});
+
+test("a held file in the same checkout is waited for, then claimed", async () => {
+  process.env.MEMRO_HOOK_WAIT_SECONDS = "5";
+  try {
+    let n = 0;
+    serve(() => (++n === 1 ? { granted: false, holder_session: "codex:1", intent: `x [/@${os.hostname()}]` } : { granted: true }));
+    assert.equal(await handle(edit("/x/a.js"), cfg), null);
+    assert.equal(n, 2);
+  } finally {
+    process.env.MEMRO_HOOK_WAIT_SECONDS = "0";
+  }
 });
 
 test("a holder in another worktree only warns about a merge conflict", async () => {

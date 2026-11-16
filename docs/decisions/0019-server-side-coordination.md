@@ -86,6 +86,7 @@ The hooks also give agents status and messages, without new tables:
 
 Refinements from a live test with three Claude Code agents in [herdr](https://herdr.dev) panes:
 - **Files are held for one turn.** A `Stop` with no new messages releases the window's file leases (the status lease stays). The agent never knew it held them, so it couldn't honour "please release"; now an idle agent blocks nobody, and a refused agent is told the file frees up when the holder's turn ends.
+- **Wait in line.** A file held in the same checkout is re-claimed every 3 s for up to 60 s (`MEMRO_HOOK_WAIT_SECONDS`) before the edit is refused, so an agent running on its own finishes its task instead of giving up. The PreToolUse hook timeout is 90 s.
 - **Worktrees warn instead of deny.** The lease intent ends with `[<checkout folder>@<host>]`. When the holder is in a different checkout, the edit goes ahead with `additionalContext` warning of a merge conflict; separate branches only meet at merge time, and worktrees are how herdr and our own rules keep agents apart.
 - **herdr wake.** Inside herdr (`HERDR_ENV=1`) the status intent ends with `[herdr <session> <pane>@<host>]`. `memro send` to an idle agent on the same machine runs `herdr agent prompt <pane>` with a short nudge, which fires the agent's `UserPromptSubmit` hook and shows it the message. Across machines it waits for the next prompt.
 - The location tags live in free-text intents until leases get a metadata field.

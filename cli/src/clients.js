@@ -315,7 +315,8 @@ export function installHooks({ scope = "user", cwd = process.cwd(), tool = "clau
   cfg.hooks ||= {};
   const command = `node ${JSON.stringify(HOOK_FILE().split(path.sep).join("/"))} ${tool}`;
   for (const [event, matcher] of Object.entries(events)) {
-    const ours = { ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command, timeout: timeouts[event] || 10 }] };
+    // PreToolUse may wait up to 60 s for a held file (hook.js waitMs).
+    const ours = { ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command, timeout: timeouts[event] || (event === "PreToolUse" ? 90 : 10) }] };
     cfg.hooks[event] = [...(cfg.hooks[event] || []).filter((g) => !isOurs(g)), ours];
   }
   writeJSON(target, cfg);

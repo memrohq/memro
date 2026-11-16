@@ -36,6 +36,12 @@ import { pathToFileURL } from "node:url";
 const CLAUDE_EDITS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const TIMEOUT_MS = 3000;
 const STATUS_TTL = 7200; // the server's maximum; SessionEnd clears it sooner
+// A held file is usually freed within a minute (files are held for one turn),
+// so wait for it before refusing: an agent running on its own would otherwise
+// give up on its task. MEMRO_HOOK_WAIT_SECONDS changes it; keep it below the
+// PreToolUse hook timeout in clients.js (90 s).
+const waitMs = () => Number(process.env.MEMRO_HOOK_WAIT_SECONDS ?? 60) * 1000;
+const POLL_MS = 3000;
 const STATES = { UserPromptSubmit: "working", Notification: "waiting for you", Stop: "idle" };
 
 /** The files an apply_patch edit touches, from its "*** Add/Update/Delete File:" and "*** Move to:" lines. */
@@ -194,7 +200,7 @@ export async function handle(input, cfg, tool = "claude-code") {
 /** Claim one file: null when it's ours, { warn } when another checkout has it, { deny } when this one does. */
 async function claimFile(cfg, file, cwd, session, tool) {
   const { resource, checkout } = locate(file, cwd);
-  const r = await call(cfg, "/coordination/claim", {
+  const claim = () => call(cfg, "/coordination/claim", {
     resource,
     session_id: session,
     intent: tagged(`${TOOLS[tool].name} editing ${path.basename(file)}`, checkout),
@@ -202,7 +208,15 @@ async function claimFile(cfg, file, cwd, session, tool) {
   // shortcut: a claim made through the MCP tools can't be told apart from this
   // window's own, so it never blocks; drop this once the MCP URL carries a
   // per-window session.
-  if (r.granted || r.holder_session === tool) return null;
+  const ours = (r) => r.granted || r.holder_session === tool;
+  let r = await claim();
+  // Same checkout: wait in line for the holder's turn to end.
+  const waited = !ours(r) && whereOf(r.intent) === checkout ? waitMs() : 0;
+  for (const until = Date.now() + waited; !ours(r) && Date.now() < until;) {
+    await new Promise((done) => setTimeout(done, POLL_MS));
+    r = await claim();
+  }
+  if (ours(r)) return null;
 
   const what = r.holder_resource && r.holder_resource !== resource ? `${resource} (inside ${r.holder_resource})` : resource;
   const holder = r.holder_session || r.holder || "another agent";
@@ -215,7 +229,7 @@ async function claimFile(cfg, file, cwd, session, tool) {
     };
   }
   return {
-    deny: `Memro: ${what} is being changed by ${holder}${doing}. It is released when that agent finishes its turn. ` +
+    deny: `Memro: ${what} is being changed by ${holder}${doing}${waited ? `, and was still held after waiting ${Math.round(waited / 1000)}s` : ""}. It is released when that agent finishes its turn. ` +
     `Meanwhile work on something else, message it (npx memro-cli send ${holder} "<message>" --from ${session}), ` +
     "or tell the user who holds it and ask how to proceed.",
   };
