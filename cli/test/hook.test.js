@@ -11,7 +11,7 @@ const HOME = path.join(TEST_DIR, "home");
 process.env.HOME = HOME;
 process.env.USERPROFILE = HOME;
 
-const { handle, resourceFor, sessionOf } = await import("../src/hook.js");
+const { handle, resourceFor, sessionOf, whereOf } = await import("../src/hook.js");
 const { HOOK_FILE, hookSettingsFile, installHooks, removeHooks } = await import("../src/clients.js");
 
 const cfg = { api: "https://api.test", apiKey: "memro_sk_test" };
@@ -58,10 +58,18 @@ test("an edit claims the file for this window and passes when granted", async ()
 });
 
 test("an edit to a file another session holds is denied, naming the holder", async () => {
-  serve(() => ({ granted: false, holder_session: "codex", holder_resource: "/x", intent: "refactor x" }));
+  const here = `/@${os.hostname()}`; // /x does not exist, so its checkout is the nearest existing folder
+  serve(() => ({ granted: false, holder_session: "codex", holder_resource: "/x", intent: `refactor x [${here}]` }));
   const out = await handle(edit("/x/a.js"), cfg);
   assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
-  assert.match(out.hookSpecificOutput.permissionDecisionReason, /\/x\/a\.js \(inside \/x\) is claimed by codex \(refactor x\)/);
+  assert.match(out.hookSpecificOutput.permissionDecisionReason, /\/x\/a\.js \(inside \/x\) is being changed by codex \(refactor x\)\. It is released/);
+});
+
+test("a holder in another worktree only warns about a merge conflict", async () => {
+  serve(() => ({ granted: false, holder_session: "codex", intent: "Codex editing a.js [/other/worktree@laptop]" }));
+  const out = await handle(edit("/x/a.js"), cfg);
+  assert.equal(out.hookSpecificOutput.permissionDecision, undefined);
+  assert.match(out.hookSpecificOutput.additionalContext, /also changing \/x\/a\.js \(Codex editing a\.js\) in another checkout \(\/other\/worktree@laptop\)/);
 });
 
 test("a claim from the shared Claude Code MCP session doesn't block", async () => {
@@ -85,6 +93,27 @@ test("prompt, notification and stop set this window's status", async () => {
     await handle(ev(event), cfg);
     const claim = calls.find((c) => c.route === "/coordination/claim").body;
     assert.deepEqual([claim.resource, claim.intent], ["agents/claude-code:feedbeef", `${state} · memro`]);
+    if (event === "Stop") assert.ok(calls.some((c) => c.route === "/coordination/active"), "stop also frees files");
+  }
+});
+
+test("a stop with no messages releases this window's files but keeps its status", async () => {
+  serve((route) => (route === "/coordination/active"
+    ? { claims: [{ resource: "memro/a.js", session_id: "claude-code:feedbeef" }, { resource: "agents/claude-code:feedbeef", session_id: "claude-code:feedbeef" }, { resource: "memro/b.js", session_id: "codex" }] }
+    : route.startsWith("/coordination/active") ? { intents: [] } : { granted: true }));
+  await handle(ev("Stop"), cfg);
+  assert.deepEqual(calls.filter((c) => c.route === "/coordination/release").map((c) => c.body.resource), ["memro/a.js"]);
+});
+
+test("inside herdr the status records the pane", async () => {
+  Object.assign(process.env, { HERDR_ENV: "1", HERDR_SESSION: "s1", HERDR_PANE_ID: "w1:p2" });
+  try {
+    serve(inbox([]));
+    await handle(ev("UserPromptSubmit"), cfg);
+    const intent = calls.find((c) => c.route === "/coordination/claim").body.intent;
+    assert.equal(whereOf(intent), `herdr s1 w1:p2@${os.hostname()}`);
+  } finally {
+    for (const k of ["HERDR_ENV", "HERDR_SESSION", "HERDR_PANE_ID"]) delete process.env[k];
   }
 });
 

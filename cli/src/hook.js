@@ -5,7 +5,9 @@
 //
 // PreToolUse (Edit, Write, MultiEdit, NotebookEdit): claim the file for this
 // Claude Code session. Re-claiming extends the lease, so editing is the
-// heartbeat. A file another session holds is denied with who holds it.
+// heartbeat. A file another session holds in the same checkout is denied with
+// who holds it; in another worktree or clone the edit goes ahead with a
+// warning, because separate branches only meet at merge time.
 // Status, as herdr shows it: UserPromptSubmit → working, Notification →
 // waiting for the user, Stop → idle. The status is a lease on
 // agents/<session> whose intent is "<state> · <folder>", so `memro agents`
@@ -13,6 +15,10 @@
 // Messages: `memro send <session> "…"` leaves an intent on inbox/<session>.
 // This window reads its inbox when a prompt is submitted (the message is
 // added to the prompt) and when it stops (the message wakes it to act on it).
+// Files are held for one turn: a Stop with no new messages releases them, so
+// an idle agent never blocks anyone and nobody has to ask it to let go.
+// Inside herdr the status also records the pane, so `memro send` can prompt an
+// idle agent on this machine through herdr (it runs no hooks while idle).
 // SessionEnd: release every lease this session holds.
 //
 // Any failure (no key, offline, slow server) lets the edit through: a memory
@@ -46,19 +52,32 @@ const git = (cwd, ...args) => {
 /** The lease name for a file: <repo>/<path in repo>, where <repo> is the name
  * of the origin remote, so every clone and worktree of a repo names a file the
  * same way. Outside git, the absolute path. */
-export function resourceFor(file, cwd = process.cwd()) {
+export const resourceFor = (file, cwd) => locate(file, cwd).resource;
+
+/** The lease name for a file and the checkout it is in (<folder>@<host>). */
+export function locate(file, cwd = process.cwd()) {
   const abs = path.resolve(cwd, file);
   let dir = path.dirname(abs);
   while (!fs.existsSync(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir); // Write may create folders
   const top = git(dir, "rev-parse", "--show-toplevel");
-  if (!top) return abs;
+  const checkout = `${top || dir}@${os.hostname()}`;
+  if (!top) return { resource: abs, checkout };
   const remote = git(top, "remote", "get-url", "origin");
   const repo = (remote ? remote.replace(/\.git$/, "").split(/[/:]/).pop() : "") || path.basename(top);
   // Compare real paths: git reports /private/var/… where the hook may say /var/….
   const real = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
   const rel = path.relative(real(top), path.join(real(dir), path.relative(dir, abs)));
-  return [repo, ...rel.split(path.sep)].join("/");
+  return { resource: [repo, ...rel.split(path.sep)].join("/"), checkout };
 }
+
+// shortcut: where a holder works travels at the end of its free-text intent as
+// "[…]" until leases get a metadata field.
+const tagged = (text, where) => `${text} [${where}]`;
+export const whereOf = (intent = "") => intent.match(/\[([^\]]+)\]$/)?.[1] || "";
+
+/** This pane inside herdr, as "herdr <session> <pane>@<host>", or "". */
+export const herdrPane = (env = process.env) =>
+  (env.HERDR_ENV === "1" && env.HERDR_PANE_ID ? `herdr ${env.HERDR_SESSION || "default"} ${env.HERDR_PANE_ID}@${os.hostname()}` : "");
 
 /** The saved key and API: $MEMRO_API_KEY / $MEMRO_API_URL, else memro connect's credentials. */
 export function loadConfig(env = process.env) {
@@ -106,6 +125,13 @@ const deny = (reason) => ({
   hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason },
 });
 
+/** Release this session's file leases, and its status too when `all`. */
+async function releaseFiles(cfg, session, { all = false } = {}) {
+  const { claims = [] } = await call(cfg, "/coordination/active");
+  await Promise.all(claims.filter((c) => c.session_id === session && (all || !c.resource.startsWith("agents/"))).map((c) =>
+    call(cfg, "/coordination/release", { resource: c.resource, session_id: session, status: "completed" }).catch(() => {})));
+}
+
 /** What to print for one hook event: a Claude Code hook response, or null to stay silent. */
 export async function handle(input, cfg) {
   if (!cfg) return null;
@@ -114,25 +140,27 @@ export async function handle(input, cfg) {
   const event = input.hook_event_name;
 
   if (event === "SessionEnd") {
-    const { claims = [] } = await call(cfg, "/coordination/active");
-    await Promise.all(claims.filter((c) => c.session_id === session).map((c) =>
-      call(cfg, "/coordination/release", { resource: c.resource, session_id: session, status: "completed" }).catch(() => {})));
+    await releaseFiles(cfg, session, { all: true });
     fs.rmSync(seenFile(session), { force: true });
     return null;
   }
 
   if (STATES[event]) {
+    const label = `${STATES[event]} · ${path.basename(input.cwd || "")}`;
     const status = call(cfg, "/coordination/claim", {
       resource: `agents/${session}`,
       session_id: session,
-      intent: `${STATES[event]} · ${path.basename(input.cwd || "")}`,
+      intent: herdrPane() ? tagged(label, herdrPane()) : label,
       ttl_seconds: STATUS_TTL,
     });
     // A stop that a message already restarted doesn't check again, so two
     // agents can't keep waking each other forever.
     const quiet = event === "Notification" || (event === "Stop" && input.stop_hook_active);
     const [, inbox] = await Promise.all([status, quiet ? [] : unread(cfg, session)]);
-    if (!inbox.length) return null;
+    if (!inbox.length) {
+      if (event === "Stop") await releaseFiles(cfg, session);
+      return null;
+    }
     if (event === "Stop") return { decision: "block", reason: formatMessages(inbox, session) };
     return { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: formatMessages(inbox, session) } };
   }
@@ -140,11 +168,11 @@ export async function handle(input, cfg) {
   if (event !== "PreToolUse" || !EDIT_TOOLS.has(input.tool_name)) return null;
   const file = input.tool_input?.file_path || input.tool_input?.notebook_path;
   if (!file) return null;
-  const resource = resourceFor(file, input.cwd);
+  const { resource, checkout } = locate(file, input.cwd);
   const r = await call(cfg, "/coordination/claim", {
     resource,
     session_id: session,
-    intent: `Claude Code editing ${path.basename(file)} (${path.basename(input.cwd || "")})`,
+    intent: tagged(`Claude Code editing ${path.basename(file)}`, checkout),
   });
   // shortcut: a claim made through the MCP tools can't be told apart from this
   // window's own, so it never blocks; drop this once the MCP URL carries a
@@ -152,10 +180,21 @@ export async function handle(input, cfg) {
   if (r.granted || r.holder_session === SHARED_MCP_SESSION) return null;
 
   const what = r.holder_resource && r.holder_resource !== resource ? `${resource} (inside ${r.holder_resource})` : resource;
-  const until = r.expires_at ? ` until ${new Date(r.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "";
+  const holder = r.holder_session || r.holder || "another agent";
+  const theirs = whereOf(r.intent);
+  const doing = r.intent ? ` (${r.intent.replace(/ \[[^\]]+\]$/, "")})` : "";
+  if (theirs && theirs !== checkout) {
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        additionalContext: `Memro: ${holder} is also changing ${what}${doing} in another checkout (${theirs}). ` +
+          "Your edit goes ahead, but expect a merge conflict; tell the user if your changes overlap.",
+      },
+    };
+  }
   return deny(
-    `Memro: ${what} is claimed by ${r.holder_session || r.holder || "another agent"}${r.intent ? ` (${r.intent})` : ""}${until}. ` +
-    `Don't edit it now: work on something else, ask the holder to release it (npx memro-cli send ${r.holder_session || "<holder>"} "<request>" --from ${session}), ` +
+    `Memro: ${what} is being changed by ${holder}${doing}. It is released when that agent finishes its turn. ` +
+    `Meanwhile work on something else, message it (npx memro-cli send ${holder} "<message>" --from ${session}), ` +
     "or tell the user who holds it and ask how to proceed.",
   );
 }

@@ -52,10 +52,12 @@ npx memro-cli connect --project
 4. **Claude Code: claims each file before it is edited.** A hook in
    `~/.claude/settings.json` (or `./.claude/settings.local.json` for a project)
    claims the file in Memro before every Edit or Write, so two agents never edit
-   one file at once: an edit to a file another session holds is refused, naming
-   who holds it. Each Claude Code window is its own holder, a file is named
-   `<repo>/<path>` so every worktree of a repo agrees, and the window's claims
-   are released when it closes. If Memro can't be reached the edit goes ahead.
+   one file at once: an edit to a file another session is changing in the same
+   folder is refused, naming who holds it. In another worktree or clone the edit
+   goes ahead with a warning to expect a merge conflict. Each Claude Code window
+   is its own holder, a file is named `<repo>/<path>` so every worktree of a repo
+   agrees, and files are held only while the agent works: they are released when
+   its turn ends. If Memro can't be reached the edit goes ahead.
    The same hooks report each window's status (working, waiting for you,
    idle) and deliver messages, so agents can see and talk to each other:
 
@@ -65,7 +67,8 @@ npx memro-cli connect --project
    ```
 
    A message is added to the agent's next prompt, or wakes it when it stops,
-   within two hours. An agent told a file is taken gets the command to ask the
+   within two hours. An idle agent running in a [herdr](https://herdr.dev) pane
+   on the same machine is prompted right away through herdr. An agent told a file is taken gets the command to ask the
    holder. Pass `--no-hooks` to skip all of this; `disconnect` removes it.
 
 Existing settings and other servers are kept; the original file is saved
