@@ -12,7 +12,7 @@ process.env.HOME = HOME;
 process.env.USERPROFILE = HOME;
 
 process.env.MEMRO_HOOK_WAIT_SECONDS = "0"; // the wait is tested on its own below
-const { handle, patchFiles, resourceFor, sessionOf, whereOf } = await import("../src/hook.js");
+const { handle, herdrOf, patchFiles, resourceFor, sessionOf, shellFiles, whereOf } = await import("../src/hook.js");
 const { HOOK_FILE, hookSettingsFile, installHooks, removeHooks } = await import("../src/clients.js");
 
 const cfg = { api: "https://api.test", apiKey: "memro_sk_test" };
@@ -111,7 +111,9 @@ test("prompt, notification and stop set this window's status", async () => {
     serve(inbox([]));
     await handle(ev(event), cfg);
     const claim = calls.find((c) => c.route === "/coordination/claim").body;
-    assert.deepEqual([claim.resource, claim.intent], ["agents/claude-code:feedbeef", `${state} · memro`]);
+    assert.equal(claim.resource, "agents/claude-code:feedbeef");
+    assert.ok(claim.intent.startsWith(`${state} · memro [`), claim.intent);
+    assert.equal(whereOf(claim.intent), rootOf("/w/memro"), "the status says which checkout it works in");
     if (event === "Stop") assert.ok(calls.some((c) => c.route === "/coordination/active"), "stop also frees files");
   }
 });
@@ -130,7 +132,8 @@ test("inside herdr the status records the pane", async () => {
     serve(inbox([]));
     await handle(ev("UserPromptSubmit"), cfg);
     const intent = calls.find((c) => c.route === "/coordination/claim").body.intent;
-    assert.equal(whereOf(intent), `herdr s1 w1:p2@${os.hostname()}`);
+    assert.equal(herdrOf(intent), `herdr s1 w1:p2@${os.hostname()}`);
+    assert.equal(whereOf(intent), rootOf("/w/memro"));
   } finally {
     for (const k of ["HERDR_ENV", "HERDR_SESSION", "HERDR_PANE_ID"]) delete process.env[k];
   }
@@ -215,9 +218,63 @@ test("Codex hooks go to hooks.json with a 3-second SessionEnd and no Notificatio
   assert.equal(file, path.join(HOME, ".codex", "hooks.json"));
   const { hooks } = JSON.parse(fs.readFileSync(file, "utf8"));
   assert.deepEqual(Object.keys(hooks), ["PreToolUse", "UserPromptSubmit", "Stop", "SessionEnd"]);
-  assert.equal(hooks.PreToolUse[0].matcher, "^apply_patch$");
+  assert.equal(hooks.PreToolUse[0].matcher, "^apply_patch$|^Bash$");
   assert.match(hooks.Stop[0].hooks[0].command, /memro-hook\.mjs" codex$/);
   assert.equal(hooks.SessionEnd[0].hooks[0].timeout, 3);
   assert.equal(removeHooks({ tool: "codex" }), true);
   assert.equal(fs.existsSync(file), true);
+});
+
+test("shellFiles finds what a command writes or deletes", () => {
+  assert.deepEqual(shellFiles("echo hi > a.txt && cat b >> 'c d.txt' 2>/dev/null"), ["a.txt", "c d.txt"]);
+  assert.deepEqual(shellFiles("npm test | tee out.log"), ["out.log"]);
+  assert.deepEqual(shellFiles("sed -i '' 's/a/b/' src/x.js src/y.js"), ["src/x.js", "src/y.js"]);
+  assert.deepEqual(shellFiles("sed -i.bak -e s/a/b/ f.txt"), ["f.txt"]);
+  assert.deepEqual(shellFiles("rm -rf build/out.js; ls > /dev/null"), ["build/out.js"]);
+  assert.deepEqual(shellFiles("ls -la && node --test 2>&1 && echo $HOME > *.txt"), []);
+});
+
+const bash = (command, extra = {}) => ({ hook_event_name: "PreToolUse", session_id: "abcdef123456", cwd: "/w/memro", tool_name: "Bash", tool_input: { command }, ...extra });
+
+test("a shell write claims the file like an edit; plain commands make no call", async () => {
+  serve(() => ({ granted: true }));
+  assert.equal(await handle(bash("node --test && git status"), cfg), null);
+  assert.equal(calls.length, 0);
+  await handle(bash("echo x > notes.txt"), cfg);
+  assert.deepEqual(calls.map((c) => c.body.resource), [P("notes.txt", "/w/memro")]);
+});
+
+test("destructive git is refused while another agent works in this checkout", async () => {
+  const here = rootOf("/w/memro");
+  const others = [
+    { resource: "agents/codex:1", session_id: "codex:1", reason: `idle · memro [${here}]` },
+    { resource: "memro/src/a.js", session_id: "claude-code:2", reason: `Claude Code editing a.js [${here}]` },
+    { resource: "memro/src/b.js", session_id: "claude-code:3", reason: "Claude Code editing b.js [/elsewhere@laptop]" },
+  ];
+  serve(() => ({ claims: others }));
+  for (const cmd of ["git stash", "git stash push -u", "git checkout main", "git checkout -- src/a.js", "git checkout .", "git reset --hard HEAD", "git clean -fd", "git restore src", "git switch dev", "cd x && git -C . stash && ls"]) {
+    const out = await handle(bash(cmd), cfg);
+    assert.equal(out?.hookSpecificOutput.permissionDecision, "deny", cmd);
+  }
+  const reason = (await handle(bash("git stash"), cfg)).hookSpecificOutput.permissionDecisionReason;
+  assert.ok(reason.includes("codex:1 (idle · memro)") && reason.includes("claude-code:2 (editing memro/src/a.js)"), reason);
+  assert.ok(!reason.includes("claude-code:3"), "another checkout is not at risk");
+
+  serve(() => assert.fail("no call expected"));
+  for (const cmd of ["git stash list", "git checkout -b feature", "git status", "git commit -am x", "git reset HEAD~1"]) {
+    assert.equal(await handle(bash(cmd), cfg), null, cmd);
+  }
+});
+
+test("destructive git is allowed when nobody else works in this checkout", async () => {
+  serve(() => ({ claims: [{ resource: "agents/claude-code:abcdef12", session_id: "claude-code:abcdef12", reason: `working · memro [${rootOf("/w/memro")}]` }] }));
+  assert.equal(await handle(bash("git stash"), cfg), null);
+});
+
+test("waits, refusals and warnings are logged for the benchmark", async () => {
+  const logFile = path.join(HOME, ".memro", "hooks", "log.jsonl");
+  serve(() => ({ granted: false, holder_session: "codex", intent: "x [/other@laptop]" }));
+  await handle(edit("/x/a.js"), cfg);
+  const last = JSON.parse(fs.readFileSync(logFile, "utf8").trim().split("\n").pop());
+  assert.deepEqual([last.outcome, last.holder, last.resource], ["warn", "codex", A]);
 });

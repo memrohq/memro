@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { CLIENTS, HOOK_TARGETS, KEY_ENV, findClient, installHooks, onPath, removeHooks, withSession } from "./clients.js";
-import { whereOf } from "./hook.js";
+import { herdrOf } from "./hook.js";
 import { pick, pickOne, promptText } from "./picker.js";
 import { codexTrusts, diagnose } from "./doctor.js";
 import { installInstructions, uninstallInstructions } from "./instructions.js";
@@ -593,7 +593,7 @@ async function send(opts) {
 export async function wakeInHerdr(api, key, to, run = execFileSync) {
   const res = await request(api, `/coordination/active?resource=${encodeURIComponent(`agents/${to}`)}`, { key });
   const status = res.data?.claims?.find((c) => c.resource === `agents/${to}`);
-  const m = whereOf(status?.reason).match(/^herdr (\S+) (\S+)@(.+)$/);
+  const m = herdrOf(status?.reason).match(/^herdr (\S+) (\S+)@(.+)$/);
   if (!m || m[3] !== os.hostname() || !status.reason.startsWith("idle") || !onPath("herdr")) return false;
   try {
     run("herdr", ["--session", m[1], "agent", "prompt", m[2],

@@ -96,9 +96,13 @@ export function locate(file, cwd = process.cwd()) {
 const posix = (p) => p.split(path.sep).join("/");
 
 // shortcut: where a holder works travels at the end of its free-text intent as
-// "[…]" until leases get a metadata field.
-const tagged = (text, where) => `${text} [${where}]`;
-export const whereOf = (intent = "") => intent.match(/\[([^\]]+)\]$/)?.[1] || "";
+// "[<checkout>]", and its herdr pane as "[herdr …]", until leases get a
+// metadata field.
+const tagged = (text, ...tags) => text + tags.filter(Boolean).map((t) => ` [${t}]`).join("");
+const tagsOf = (intent = "") => [...(intent.match(/( \[[^\]]+\])+$/)?.[0] || "").matchAll(/\[([^\]]+)\]/g)].map((m) => m[1]);
+export const whereOf = (intent) => tagsOf(intent).find((t) => !t.startsWith("herdr ")) || "";
+export const herdrOf = (intent) => tagsOf(intent).find((t) => t.startsWith("herdr ")) || "";
+const untagged = (intent = "") => intent.replace(/( \[[^\]]+\])+$/, "");
 
 /** This pane inside herdr, as "herdr <session> <pane>@<host>", or "". */
 export const herdrPane = (env = process.env) =>
@@ -175,7 +179,8 @@ export async function handle(input, cfg, tool = "claude-code") {
     const status = call(cfg, "/coordination/claim", {
       resource: `agents/${session}`,
       session_id: session,
-      intent: herdrPane() ? tagged(label, herdrPane()) : label,
+      // The checkout lets the git guard see agents with uncommitted work here.
+      intent: tagged(label, checkoutOf(input.cwd), herdrPane()),
       ttl_seconds: STATUS_TTL,
     });
     // A stop that a message already restarted doesn't check again, so two
@@ -191,13 +196,69 @@ export async function handle(input, cfg, tool = "claude-code") {
   }
 
   if (event !== "PreToolUse") return null;
+  const command = input.tool_name === "Bash" ? String(input.tool_input?.command || "") : "";
+  if (command && GIT_WIPES.test(command)) {
+    const why = await othersHere(cfg, input.cwd, session);
+    if (why.length) {
+      log({ tool, session, outcome: "git-deny", command: command.slice(0, 200) });
+      return deny(
+        `Memro: \`${command.match(GIT_WIPES)[0]}\` would throw away uncommitted changes in this checkout, and other agents work here: ${why.join("; ")}. ` +
+        "Commit or revert only your own files by path instead (git add <your files> && git commit), or ask the user.",
+      );
+    }
+  }
   const warnings = [];
-  for (const file of TOOLS[tool].files(input)) {
+  for (const file of command ? shellFiles(command) : TOOLS[tool].files(input)) {
     const verdict = await claimFile(cfg, file, input.cwd, session, tool);
     if (verdict?.deny) return deny(verdict.deny);
     if (verdict?.warn) warnings.push(verdict.warn);
   }
   return warnings.length ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: warnings.join("\n") } } : null;
+}
+
+// Git commands that throw away uncommitted work in the working tree, which in a
+// shared checkout is every agent's work, not only the caller's.
+const GIT_WIPES = /\bgit\s+(?:-C\s+\S+\s+)?(?:stash(?!\s+(?:list|show)\b)|reset\s+--hard|clean\s+-\w*f|restore\b|switch\b|checkout\s+(?:-f\b|--(?:\s|$)|\.(?=\s|$|[;&|])|[^-\s;&|]\S*(?=\s*(?:$|[;&|]))))/;
+
+/** Files a shell command writes or deletes: redirects, tee, sed -i and rm.
+ * shortcut: a heuristic, not a shell parser; paths with globs or variables and
+ * writes by other programs (cp, mv, scripts) go unclaimed. */
+export function shellFiles(command = "") {
+  const files = [];
+  for (const seg of command.split(/&&|\|\||[;|\n]/)) {
+    for (const m of seg.matchAll(/(?:^|[^<>&\d])>>?\s*("[^"]*"|'[^']*'|[^\s<>&]+)/g)) files.push(m[1]);
+    const words = (seg.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((w) => w.replace(/^(["'])(.*)\1$/, "$2"));
+    const args = words.slice(1).filter((w) => !w.startsWith("-"));
+    if (words[0] === "tee" || words[0] === "rm") files.push(...args);
+    // sed -i [''] 'script' file…: the files are what follows the script.
+    if (words[0] === "sed" && words.some((w) => /^-[a-zA-Z]*i/.test(w))) files.push(...args.filter((w) => w !== "").slice(1));
+  }
+  return files.map((f) => f.replace(/^(["'])(.*)\1$/, "$2")).filter((f) => f && !f.startsWith("/dev/") && !/[*?$`]/.test(f));
+}
+
+/** Other agents with work in the checkout at `cwd`: who holds files there, or
+ * has its status there (an idle agent's uncommitted edits are still on disk). */
+async function othersHere(cfg, cwd, session) {
+  const here = checkoutOf(cwd);
+  const { claims = [] } = await call(cfg, "/coordination/active");
+  const others = claims.filter((c) => c.session_id !== session && whereOf(c.reason) === here);
+  const who = new Map();
+  for (const c of others) {
+    const s = who.get(c.session_id) || who.set(c.session_id, []).get(c.session_id);
+    s.push(c.resource.startsWith("agents/") ? untagged(c.reason) : `editing ${c.resource}`);
+  }
+  return [...who].map(([s, what]) => `${s} (${what.join(", ")})`);
+}
+
+const checkoutOf = (cwd = process.cwd()) => locate(path.join(cwd, "_"), cwd).checkout;
+
+/** Append one coordination event to ~/.memro/hooks/log.jsonl, for `memro`
+ * and the benchmark to count waits and refusals. Never fails the hook. */
+function log(event) {
+  try {
+    fs.mkdirSync(path.join(os.homedir(), ".memro", "hooks"), { recursive: true });
+    fs.appendFileSync(path.join(os.homedir(), ".memro", "hooks", "log.jsonl"), JSON.stringify({ t: new Date().toISOString(), ...event }) + "\n");
+  } catch { /* logging is best effort */ }
 }
 
 /** Claim one file: null when it's ours, { warn } when another checkout has it, { deny } when this one does. */
@@ -219,18 +280,23 @@ async function claimFile(cfg, file, cwd, session, tool) {
     await new Promise((done) => setTimeout(done, POLL_MS));
     r = await claim();
   }
-  if (ours(r)) return null;
+  if (ours(r)) {
+    if (waited) log({ tool, session, resource, outcome: "waited" });
+    return null;
+  }
 
   const what = r.holder_resource && r.holder_resource !== resource ? `${resource} (inside ${r.holder_resource})` : resource;
   const holder = r.holder_session || r.holder || "another agent";
   const theirs = whereOf(r.intent);
-  const doing = r.intent ? ` (${r.intent.replace(/ \[[^\]]+\]$/, "")})` : "";
+  const doing = r.intent ? ` (${untagged(r.intent)})` : "";
   if (theirs && theirs !== checkout) {
+    log({ tool, session, resource, outcome: "warn", holder });
     return {
       warn: `Memro: ${holder} is also changing ${what}${doing} in another checkout (${theirs}). ` +
         "Your edit goes ahead, but expect a merge conflict; tell the user if your changes overlap.",
     };
   }
+  log({ tool, session, resource, outcome: "deny", holder });
   return {
     deny: `Memro: ${what} is being changed by ${holder}${doing}${waited ? `, and was still held after waiting ${Math.round(waited / 1000)}s` : ""}. It is released when that agent finishes its turn. ` +
     `Meanwhile work on something else, message it (npx memro-cli send ${holder} "<message>" --from ${session}), ` +
