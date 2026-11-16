@@ -90,6 +90,8 @@ Refinements from a live test with three Claude Code agents in [herdr](https://he
 - **herdr wake.** Inside herdr (`HERDR_ENV=1`) the status intent ends with `[herdr <session> <pane>@<host>]`. `memro send` to an idle agent on the same machine runs `herdr agent prompt <pane>` with a short nudge, which fires the agent's `UserPromptSubmit` hook and shows it the message. Across machines it waits for the next prompt.
 - The location tags live in free-text intents until leases get a metadata field.
 
+**Codex** uses the same script (`~/.memro/hooks/memro-hook.mjs codex`) from `~/.codex/hooks.json`, since Codex hooks take the same input and output as Claude Code's. Differences: every file edit is `apply_patch`, so the hook claims each path in the patch's `*** Add/Update/Delete File:` and `*** Move to:` lines; there is no Notification event; SessionEnd may run for at most 3 seconds; and Codex skips a new or changed hook until the user trusts it in `/hooks`. Holders are `codex:<session>`.
+
 A lease held by the shared MCP session `claude-code` doesn't block the hook, because it may be the same window. The reverse remains: a window's MCP `claim_task` on a folder is refused if the same window's hook already holds a file inside it. Both go away once the MCP connection carries a per-window session.
 
 ## Consequences

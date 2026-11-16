@@ -70,7 +70,8 @@ npx memro-cli connect --project
    A message is added to the agent's next prompt, or wakes it when it stops,
    within two hours. An idle agent running in a [herdr](https://herdr.dev) pane
    on the same machine is prompted right away through herdr. An agent told a file is taken gets the command to ask the
-   holder. Pass `--no-hooks` to skip all of this; `disconnect` removes it.
+   holder. Codex runs a new hook only after you trust it once: open Codex and
+   run `/hooks`. Pass `--no-hooks` to skip all of this; `disconnect` removes it.
 
 Existing settings and other servers are kept; the original file is saved
 once as `<file>.memro-backup`. Restart the tool afterwards.
@@ -170,7 +171,7 @@ project whose `.mcp.json` overrides it; Claude Code itself uses the project's.
 * `--env-key`: Claude Code and Codex read the key from `$MEMRO_API_KEY` instead of storing it (see above).
 * `-y, --yes`: Configure every detected tool without prompting.
 * `--no-instructions`: Do not add Memro guidance to instruction files (`CLAUDE.md`, `AGENTS.md`, etc.).
-* `--no-hooks`: Do not add the Claude Code hooks that claim each file before it is edited.
+* `--no-hooks`: Do not add the Claude Code and Codex hooks that claim each file before it is edited.
 * `--staging`, `--local` or `--api <url>`: Target another Memro server (e.g. self-hosted: `--api https://memro.example.com`).
 
 ---

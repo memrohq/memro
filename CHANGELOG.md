@@ -8,7 +8,7 @@ and every release and package raises only the last number of its version (see RE
 ## [Unreleased]
 
 ### Added
-- **`memro connect` makes Claude Code claim each file before editing it** (ADR 0019 §7): a hook claims the file in Memro before every Edit or Write and refuses the edit when another agent or window holds it, so coordination no longer depends on the model remembering to call `claim_task`. Each Claude Code window is its own holder, files are named `<repo>/<path>` so every worktree agrees, and a window's claims are released when it closes. `--no-hooks` skips it.
+- **`memro connect` makes Claude Code and Codex claim each file before editing it** (ADR 0019 §7): a hook claims the file in Memro before every Edit or Write and refuses the edit when another agent or window holds it, so coordination no longer depends on the model remembering to call `claim_task`. Each Claude Code window is its own holder, files are named `<repo>/<path>` so every worktree agrees, and a window's claims are released when it closes. `--no-hooks` skips it. Codex gets the same hooks in `hooks.json` (every file in an `apply_patch` is claimed); trust them once with `/hooks` in Codex.
 - **`memro agents` and `memro send`**: the same hooks report each Claude Code window's status (working, waiting for you, idle), and `agents` lists every agent with its status and the files it holds. `send <agent> <message>` messages an agent; Claude Code reads it at its next prompt, or is woken by it when it stops. An idle agent in a herdr pane on the same machine is prompted through herdr straight away. Files are held for one turn (released when the agent stops), and an agent in another worktree gets a merge-conflict warning instead of a refusal.
 
 ### Fixed
