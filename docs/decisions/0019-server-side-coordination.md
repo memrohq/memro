@@ -97,6 +97,8 @@ Refinements from a live test with three Claude Code agents in [herdr](https://he
 
 A lease held by the shared MCP session `claude-code` doesn't block the hook, because it may be the same window.
 
+**Tasks and briefings** (2026-11-16): conflicts used to surface at the first edit. Now `UserPromptSubmit` records the prompt's first line (up to 80 characters) as the task in the status lease (`<state> · <repo> — <task> [<checkout>]`, kept for later states in `~/.memro/hooks/task-<session>.txt`), and returns a briefing as `additionalContext` when other sessions work in the same repo: their status and the files they hold, with a ⚠ for each held file the prompt names. The briefing and the inbox share one `/coordination/active` call. In a live test, an agent given a task touching a held file did the free file first. Refusals and briefings explain that lease names are `<repo>/<path>`, after an agent took one for a different file than its own.
+
 **Per-window MCP holder** (2026-11-16): the hosted MCP server is stateless and every window of a tool connects with the same URL, so MCP claims could only name the tool. The coordination tools (`claim_task`, `heartbeat_task`, `release_task`, `handoff_task`, `log_intent`, `pre_action_check`) now take an optional `holder_session`, and the hook's PreToolUse on `mcp__memro__*` fills it with the window's session through `updatedInput` (with `permissionDecision: "allow"`, which the rewrite requires; these tools only touch the user's own leases). A window's MCP and hook claims are then one holder, so overlapping claims by the same window pass, and two windows block each other. Clients without the hooks keep the connection's session.
 
 ## Consequences

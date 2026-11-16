@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { CLIENTS, HOOK_TARGETS, KEY_ENV, findClient, installHooks, onPath, removeHooks, withSession } from "./clients.js";
-import { herdrOf } from "./hook.js";
+import { herdrOf, untagged } from "./hook.js";
 import { pick, pickOne, promptText } from "./picker.js";
 import { codexTrusts, diagnose } from "./doctor.js";
 import { installInstructions, uninstallInstructions } from "./instructions.js";
@@ -567,7 +567,7 @@ async function agents(opts) {
   if (!bySession.size) return console.log("No agents are active right now.");
   const width = Math.max(...[...bySession.keys()].map((s) => s.length)) + 2;
   for (const [session, { status: st, files }] of bySession) {
-    console.log(`${session.padEnd(width)}${st ? `${st.reason}  ${ui.c.dim(ago(st.heartbeat_at))}` : ui.c.dim("no status (MCP tools only)")}`);
+    console.log(`${session.padEnd(width)}${st ? `${untagged(st.reason)}  ${ui.c.dim(ago(st.heartbeat_at))}` : ui.c.dim("no status (MCP tools only)")}`);
     for (const f of files) console.log(ui.c.dim(`${"".padEnd(width)}holds ${f}`));
   }
 }

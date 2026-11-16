@@ -102,7 +102,7 @@ const tagged = (text, ...tags) => text + tags.filter(Boolean).map((t) => ` [${t}
 const tagsOf = (intent = "") => [...(intent.match(/( \[[^\]]+\])+$/)?.[0] || "").matchAll(/\[([^\]]+)\]/g)].map((m) => m[1]);
 export const whereOf = (intent) => tagsOf(intent).find((t) => !t.startsWith("herdr ")) || "";
 export const herdrOf = (intent) => tagsOf(intent).find((t) => t.startsWith("herdr ")) || "";
-const untagged = (intent = "") => intent.replace(/( \[[^\]]+\])+$/, "");
+export const untagged = (intent = "") => intent.replace(/( \[[^\]]+\])+$/, "");
 
 /** This pane inside herdr, as "herdr <session> <pane>@<host>", or "". */
 export const herdrPane = (env = process.env) =>
@@ -132,11 +132,66 @@ async function call(cfg, route, json) {
 const seenFile = (session) => path.join(os.homedir(), ".memro", "hooks", `seen-${session.replace(/[^\w-]/g, "_")}.json`);
 const readSeen = (session) => { try { return JSON.parse(fs.readFileSync(seenFile(session), "utf8")); } catch { return []; } };
 
+// The window's current task, kept beside the hook so Stop and Notification
+// statuses still say what the agent was doing.
+const taskFile = (session) => path.join(os.homedir(), ".memro", "hooks", `task-${session.replace(/[^\w-]/g, "_")}.txt`);
+const readTask = (session) => { try { return fs.readFileSync(taskFile(session), "utf8"); } catch { return ""; } };
+function writeTask(session, task) {
+  try {
+    fs.mkdirSync(path.dirname(taskFile(session)), { recursive: true });
+    fs.writeFileSync(taskFile(session), task);
+  } catch { /* the status just won't name the task */ }
+}
+
+// Agents took "shop/src/cart.js" for a different file than their src/cart.js.
+const NAMES = "(Memro names files <repo>/<path in repo>, the same in every clone and worktree: it is the file in your checkout too.)";
+
+/** A task label from a prompt: its first line, at most 80 characters. */
+export const taskOf = (prompt = "") => {
+  const line = String(prompt).split("\n").find((l) => l.trim()) || "";
+  const t = line.replace(/\s+/g, " ").trim();
+  return t.length > 80 ? `${t.slice(0, 79)}…` : t;
+};
+
+/** The repo a folder belongs to, as lease names start with it ("memro"), or
+ * the folder itself outside git. */
+const repoOf = (cwd = process.cwd()) => {
+  const { resource } = locate(path.join(cwd, "_"), cwd);
+  const folder = posix(path.resolve(cwd));
+  return resource.startsWith(folder) ? folder : resource.split("/")[0];
+};
+
+/** Who else works in this repo right now, for the agent to plan around before
+ * it starts; null when nobody does. */
+export function briefing(claims, session, repo, prompt = "") {
+  const who = new Map();
+  const entry = (s) => who.get(s) || who.set(s, { status: "", files: [] }).get(s);
+  for (const c of claims) {
+    if (c.session_id === session) continue;
+    if (c.resource.startsWith("agents/")) {
+      if (untagged(c.reason).split(" · ")[1]?.split(" — ")[0] === repo) entry(c.session_id).status = untagged(c.reason);
+    } else if (c.resource.startsWith(`${repo}/`)) {
+      entry(c.session_id).files.push(c.resource);
+    }
+  }
+  if (!who.size) return null;
+  const lines = [...who].map(([s, { status, files }]) =>
+    `- ${s}: ${status || "editing"}${files.length ? `; holds ${files.join(", ")}` : ""}`);
+  // A file the task names (by path or file name) that someone holds.
+  const text = String(prompt);
+  const clashes = [...who].flatMap(([s, { files }]) => files
+    .filter((f) => text.includes(f.slice(repo.length + 1)) || text.includes(path.posix.basename(f)))
+    .map((f) => `⚠ Your task mentions ${f}, which ${s} holds: plan to do other parts first, or message it.`));
+  return [
+    `Memro: other agents are working in ${repo} right now. Plan around them: a file another agent holds is refused until its turn ends. ${NAMES}`,
+    ...lines, ...clashes,
+  ].join("\n");
+}
+
 /** Messages for this window that it hasn't seen yet, marked as seen. */
-async function unread(cfg, session) {
-  const { intents = [] } = await call(cfg, `/coordination/active?resource=${encodeURIComponent(`inbox/${session}`)}`);
+function unread(intents, session) {
   const seen = readSeen(session);
-  const fresh = intents.filter((m) => !seen.includes(m.id));
+  const fresh = intents.filter((m) => m.resource === `inbox/${session}` && !seen.includes(m.id));
   if (fresh.length) {
     fs.mkdirSync(path.dirname(seenFile(session)), { recursive: true });
     // Messages expire within two hours, so the newest 200 ids are plenty.
@@ -171,11 +226,16 @@ export async function handle(input, cfg, tool = "claude-code") {
   if (event === "SessionEnd") {
     await releaseFiles(cfg, session, { all: true });
     fs.rmSync(seenFile(session), { force: true });
+    fs.rmSync(taskFile(session), { force: true });
     return null;
   }
 
   if (STATES[event]) {
-    const label = `${STATES[event]} · ${path.basename(input.cwd || "")}`;
+    const repo = repoOf(input.cwd);
+    // The task is the prompt's first line; later states keep showing it.
+    if (event === "UserPromptSubmit") writeTask(session, taskOf(input.prompt));
+    const task = readTask(session);
+    const label = `${STATES[event]} · ${repo}${task ? ` — ${task}` : ""}`;
     const status = call(cfg, "/coordination/claim", {
       resource: `agents/${session}`,
       session_id: session,
@@ -186,13 +246,18 @@ export async function handle(input, cfg, tool = "claude-code") {
     // A stop that a message already restarted doesn't check again, so two
     // agents can't keep waking each other forever.
     const quiet = event === "Notification" || (event === "Stop" && input.stop_hook_active);
-    const [, inbox] = await Promise.all([status, quiet ? [] : unread(cfg, session)]);
-    if (!inbox.length) {
-      if (event === "Stop") await releaseFiles(cfg, session);
+    const [, active] = await Promise.all([status, quiet ? { claims: [], intents: [] } : call(cfg, "/coordination/active")]);
+    const inbox = unread(active.intents || [], session);
+    if (event === "Stop") {
+      if (inbox.length) return { decision: "block", reason: formatMessages(inbox, session) };
+      await releaseFiles(cfg, session);
       return null;
     }
-    if (event === "Stop") return { decision: "block", reason: formatMessages(inbox, session) };
-    return { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: formatMessages(inbox, session) } };
+    const notes = [
+      event === "UserPromptSubmit" && briefing(active.claims || [], session, repo, input.prompt),
+      inbox.length && formatMessages(inbox, session),
+    ].filter(Boolean);
+    return notes.length ? { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: notes.join("\n\n") } } : null;
   }
 
   if (event !== "PreToolUse") return null;
@@ -308,7 +373,7 @@ async function claimFile(cfg, file, cwd, session, tool) {
   return {
     deny: `Memro: ${what} is being changed by ${holder}${doing}${waited ? `, and was still held after waiting ${Math.round(waited / 1000)}s` : ""}. It is released when that agent finishes its turn. ` +
     `Meanwhile work on something else, message it (npx memro-cli send ${holder} "<message>" --from ${session}), ` +
-    "or tell the user who holds it and ask how to proceed.",
+    `or tell the user who holds it and ask how to proceed. ${NAMES}`,
   };
 }
 

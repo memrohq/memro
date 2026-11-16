@@ -12,7 +12,7 @@ process.env.HOME = HOME;
 process.env.USERPROFILE = HOME;
 
 process.env.MEMRO_HOOK_WAIT_SECONDS = "0"; // the wait is tested on its own below
-const { handle, herdrOf, patchFiles, resourceFor, sessionOf, shellFiles, whereOf } = await import("../src/hook.js");
+const { briefing, handle, herdrOf, taskOf, patchFiles, resourceFor, sessionOf, shellFiles, whereOf } = await import("../src/hook.js");
 const { HOOK_FILE, hookSettingsFile, installHooks, removeHooks } = await import("../src/clients.js");
 
 const cfg = { api: "https://api.test", apiKey: "memro_sk_test" };
@@ -103,7 +103,9 @@ test("other tools, missing keys and other events do nothing", async () => {
   assert.equal(await handle(edit("/x/a.js", { hook_event_name: "PostToolUse" }), cfg), null);
 });
 
-const inbox = (msgs) => (route) => (route.startsWith("/coordination/active") ? { intents: msgs } : { granted: true });
+const inbox = (msgs) => (route) => (route.startsWith("/coordination/active")
+  ? { intents: msgs.map((m) => ({ resource: "inbox/claude-code:feedbeef", ...m })) }
+  : { granted: true });
 const ev = (hook_event_name, extra = {}) => ({ hook_event_name, session_id: "feedbeef99", cwd: "/w/memro", ...extra });
 
 test("prompt, notification and stop set this window's status", async () => {
@@ -112,7 +114,8 @@ test("prompt, notification and stop set this window's status", async () => {
     await handle(ev(event), cfg);
     const claim = calls.find((c) => c.route === "/coordination/claim").body;
     assert.equal(claim.resource, "agents/claude-code:feedbeef");
-    assert.ok(claim.intent.startsWith(`${state} · memro [`), claim.intent);
+    // Outside git the repo is the folder itself.
+    assert.ok(claim.intent.startsWith(`${state} · ${P("/w/memro", "/w/memro")}`), claim.intent);
     assert.equal(whereOf(claim.intent), rootOf("/w/memro"), "the status says which checkout it works in");
     if (event === "Stop") assert.ok(calls.some((c) => c.route === "/coordination/active"), "stop also frees files");
   }
@@ -288,4 +291,30 @@ test("Memro's MCP coordination calls get this window as their holder; other MCP 
   assert.equal((await handle(mcp("mcp__memro__release_task", { resource: "r" }), cfg, "codex")).hookSpecificOutput.updatedInput.holder_session, "codex:abcdef12");
   assert.equal(await handle(mcp("mcp__memro__recall", { query: "q" }), cfg), null);
   assert.equal(await handle(mcp("mcp__other__claim_task", {}), cfg), null);
+});
+
+test("the status names the task from the prompt, and keeps it after the turn", async () => {
+  serve(inbox([]));
+  await handle(ev("UserPromptSubmit", { prompt: "\n  Add   discount support to total()\nmore detail" }), cfg);
+  assert.match(calls.find((c) => c.route === "/coordination/claim").body.intent, / — Add discount support to total\(\) \[/);
+  serve(inbox([]));
+  await handle(ev("Stop"), cfg);
+  assert.match(calls.find((c) => c.route === "/coordination/claim").body.intent, /^idle · .* — Add discount support/);
+  assert.equal(taskOf("x".repeat(100)).length, 80);
+});
+
+test("a prompt is briefed on other agents in the same repo, with clashes flagged", () => {
+  const claims = [
+    { resource: "agents/codex:1", session_id: "codex:1", reason: "working · shop — refactor cart [/a@h]" },
+    { resource: "shop/src/cart.js", session_id: "codex:1", reason: "Codex editing cart.js [/a@h]" },
+    { resource: "agents/claude-code:2", session_id: "claude-code:2", reason: "idle · other-repo — x [/b@h]" },
+    { resource: "other-repo/a.js", session_id: "claude-code:2", reason: "x [/b@h]" },
+    { resource: "agents/claude-code:me", session_id: "claude-code:me", reason: "working · shop — mine [/a@h]" },
+  ];
+  const note = briefing(claims, "claude-code:me", "shop", "Add a discount to src/cart.js");
+  assert.match(note, /other agents are working in shop/);
+  assert.match(note, /- codex:1: working · shop — refactor cart; holds shop\/src\/cart\.js/);
+  assert.match(note, /⚠ Your task mentions shop\/src\/cart\.js, which codex:1 holds/);
+  assert.ok(!note.includes("claude-code:2") && !note.includes("claude-code:me"));
+  assert.equal(briefing(claims.slice(2), "claude-code:me", "shop", ""), null);
 });
