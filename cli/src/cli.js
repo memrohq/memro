@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { CLIENTS, KEY_ENV, findClient, installHooks, onPath, removeHooks, withSession } from "./clients.js";
+import { CLIENTS, HOOK_TARGETS, KEY_ENV, findClient, installHooks, onPath, removeHooks, withSession } from "./clients.js";
 import { whereOf } from "./hook.js";
 import { pick, pickOne, promptText } from "./picker.js";
 import { codexTrusts, diagnose } from "./doctor.js";
@@ -43,7 +43,7 @@ Options
   --yes, -y                  Don't ask: use every detected tool
   --no-instructions          Don't add the "use Memro automatically" note to
                              the tools' instructions (CLAUDE.md, AGENTS.md…)
-  --no-hooks                 Don't add the Claude Code hooks that claim each file
+  --no-hooks                 Don't add the Claude Code and Codex hooks that claim each file
                              before it is edited, so two agents never edit one file
   --staging | --local        Use staging or a local server instead of Memro Cloud
   --api <url>                Use a specific Memro API (self-hosted)
@@ -469,10 +469,14 @@ async function connect(opts) {
       if (c.id === "codex" && scope === "project" && !codexTrusts(c.file("user", cwd), cwd)) {
         ui.line(ui.c.dim(`${"".padEnd(width + 3)}Codex reads it once you open Codex in this folder and trust it`));
       }
-      if (c.id === "claude-code" && opts.hooks) {
+      if (HOOK_TARGETS[c.id] && opts.hooks) {
         // The hook reads $MEMRO_API_KEY or the saved key, never a --key passed here.
         if (opts.key && !envKey) ui.line(ui.c.dim(`${"".padEnd(width + 3)}no edit hooks: they can't read a --key; add --env-key`));
-        else ui.ok("".padEnd(width), `${formatPath(installHooks({ scope, cwd }), scope, cwd)}  claims each file before editing`);
+        else {
+          const file = installHooks({ scope, cwd, tool: c.id });
+          // Codex skips a new hook until the user trusts it.
+          ui.ok("".padEnd(width), `${formatPath(file, scope, cwd)}  claims each file before editing${c.id === "codex" ? " · trust it once in Codex: /hooks" : ""}`);
+        }
       }
       if (opts.instructions && c.rules) {
         const rulesFile = c.rules(scope, cwd);
@@ -653,7 +657,7 @@ async function disconnect(opts) {
   for (const c of targets) {
     try {
       if (c.remove({ scope, cwd })) console.log(`  ✔ Removed from ${c.name} (${scope})`);
-      if (c.id === "claude-code" && removeHooks({ scope, cwd })) console.log(`  ✔ Removed the Claude Code edit hooks (${scope})`);
+      if (HOOK_TARGETS[c.id] && removeHooks({ scope, cwd, tool: c.id })) console.log(`  ✔ Removed the ${c.name} edit hooks (${scope})`);
       if (c.rules) {
         const rulesFile = c.rules(scope, cwd);
         if (rulesFile && uninstallInstructions(rulesFile, { frontmatter: c.rulesFrontmatter })) {
@@ -687,7 +691,6 @@ export async function main(argv) {
     case "status": return status(opts);
     case "doctor": return doctor(opts);
     case "disconnect": return disconnect(opts);
-    case "hook": return (await import("./hook.js")).main();
     case "agents": return agents(opts);
     case "send": return send(opts);
     case null:

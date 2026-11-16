@@ -1,10 +1,13 @@
-// Claude Code hook that claims every file before the agent edits it, so
-// coordination no longer depends on the model remembering to call claim_task
-// (memro ADR 0019). `memro connect` copies this file to ~/.memro/hooks/ and
-// runs it with plain `node`, so it must import nothing but Node built-ins.
+// Claude Code and Codex hook that claims every file before the agent edits it,
+// so coordination no longer depends on the model remembering to call
+// claim_task (memro ADR 0019). `memro connect` copies this file to
+// ~/.memro/hooks/ and runs it as `node memro-hook.mjs <claude-code|codex>`, so
+// it must import nothing but Node built-ins. The two tools share a hook format;
+// they differ in how an edit names its files (below) and in events (Codex has
+// no Notification).
 //
-// PreToolUse (Edit, Write, MultiEdit, NotebookEdit): claim the file for this
-// Claude Code session. Re-claiming extends the lease, so editing is the
+// PreToolUse (Claude Code's Edit, Write, MultiEdit, NotebookEdit; Codex's
+// apply_patch): claim each file for this session. Re-claiming extends the lease, so editing is the
 // heartbeat. A file another session holds in the same checkout is denied with
 // who holds it; in another worktree or clone the edit goes ahead with a
 // warning, because separate branches only meet at merge time.
@@ -30,16 +33,29 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+const CLAUDE_EDITS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const TIMEOUT_MS = 3000;
-// The MCP tools of every Claude Code window share this holder (the MCP URL's
-// ?session_id=claude-code), so the hook can't tell whose claim it is.
-const SHARED_MCP_SESSION = "claude-code";
 const STATUS_TTL = 7200; // the server's maximum; SessionEnd clears it sooner
 const STATES = { UserPromptSubmit: "working", Notification: "waiting for you", Stop: "idle" };
 
-/** This Claude Code window as a lease holder: two windows are two holders. */
-export const sessionOf = (input) => `claude-code:${String(input.session_id || "unknown").slice(0, 8)}`;
+/** The files an apply_patch edit touches, from its "*** Add/Update/Delete File:" and "*** Move to:" lines. */
+export const patchFiles = (patch = "") => [...patch.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm)].map((m) => m[1].trim());
+
+export const TOOLS = {
+  "claude-code": {
+    name: "Claude Code",
+    files: (i) => (CLAUDE_EDITS.has(i.tool_name) ? [i.tool_input?.file_path || i.tool_input?.notebook_path].filter(Boolean) : []),
+  },
+  codex: {
+    name: "Codex",
+    // Codex reports every file edit as apply_patch, with the patch in `command`.
+    files: (i) => (["apply_patch", "Edit", "Write"].includes(i.tool_name) ? patchFiles(i.tool_input?.command) : []),
+  },
+};
+
+/** This window as a lease holder: two windows are two holders. Every window's
+ * MCP tools share the bare tool id (the MCP URL's ?session_id=<tool>). */
+export const sessionOf = (input, tool = "claude-code") => `${tool}:${String(input.session_id || "unknown").slice(0, 8)}`;
 
 const git = (cwd, ...args) => {
   try {
@@ -132,10 +148,10 @@ async function releaseFiles(cfg, session, { all = false } = {}) {
     call(cfg, "/coordination/release", { resource: c.resource, session_id: session, status: "completed" }).catch(() => {})));
 }
 
-/** What to print for one hook event: a Claude Code hook response, or null to stay silent. */
-export async function handle(input, cfg) {
-  if (!cfg) return null;
-  const session = sessionOf(input);
+/** What to print for one hook event: a hook response, or null to stay silent. */
+export async function handle(input, cfg, tool = "claude-code") {
+  if (!cfg || !TOOLS[tool]) return null;
+  const session = sessionOf(input, tool);
 
   const event = input.hook_event_name;
 
@@ -165,19 +181,28 @@ export async function handle(input, cfg) {
     return { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: formatMessages(inbox, session) } };
   }
 
-  if (event !== "PreToolUse" || !EDIT_TOOLS.has(input.tool_name)) return null;
-  const file = input.tool_input?.file_path || input.tool_input?.notebook_path;
-  if (!file) return null;
-  const { resource, checkout } = locate(file, input.cwd);
+  if (event !== "PreToolUse") return null;
+  const warnings = [];
+  for (const file of TOOLS[tool].files(input)) {
+    const verdict = await claimFile(cfg, file, input.cwd, session, tool);
+    if (verdict?.deny) return deny(verdict.deny);
+    if (verdict?.warn) warnings.push(verdict.warn);
+  }
+  return warnings.length ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: warnings.join("\n") } } : null;
+}
+
+/** Claim one file: null when it's ours, { warn } when another checkout has it, { deny } when this one does. */
+async function claimFile(cfg, file, cwd, session, tool) {
+  const { resource, checkout } = locate(file, cwd);
   const r = await call(cfg, "/coordination/claim", {
     resource,
     session_id: session,
-    intent: tagged(`Claude Code editing ${path.basename(file)}`, checkout),
+    intent: tagged(`${TOOLS[tool].name} editing ${path.basename(file)}`, checkout),
   });
   // shortcut: a claim made through the MCP tools can't be told apart from this
   // window's own, so it never blocks; drop this once the MCP URL carries a
   // per-window session.
-  if (r.granted || r.holder_session === SHARED_MCP_SESSION) return null;
+  if (r.granted || r.holder_session === tool) return null;
 
   const what = r.holder_resource && r.holder_resource !== resource ? `${resource} (inside ${r.holder_resource})` : resource;
   const holder = r.holder_session || r.holder || "another agent";
@@ -185,25 +210,22 @@ export async function handle(input, cfg) {
   const doing = r.intent ? ` (${r.intent.replace(/ \[[^\]]+\]$/, "")})` : "";
   if (theirs && theirs !== checkout) {
     return {
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        additionalContext: `Memro: ${holder} is also changing ${what}${doing} in another checkout (${theirs}). ` +
-          "Your edit goes ahead, but expect a merge conflict; tell the user if your changes overlap.",
-      },
+      warn: `Memro: ${holder} is also changing ${what}${doing} in another checkout (${theirs}). ` +
+        "Your edit goes ahead, but expect a merge conflict; tell the user if your changes overlap.",
     };
   }
-  return deny(
-    `Memro: ${what} is being changed by ${holder}${doing}. It is released when that agent finishes its turn. ` +
+  return {
+    deny: `Memro: ${what} is being changed by ${holder}${doing}. It is released when that agent finishes its turn. ` +
     `Meanwhile work on something else, message it (npx memro-cli send ${holder} "<message>" --from ${session}), ` +
     "or tell the user who holds it and ask how to proceed.",
-  );
+  };
 }
 
 export async function main(stdin = process.stdin, stdout = process.stdout) {
   let text = "";
   for await (const chunk of stdin) text += chunk;
   try {
-    const out = await handle(JSON.parse(text), loadConfig());
+    const out = await handle(JSON.parse(text), loadConfig(), process.argv[2] || "claude-code");
     if (out) stdout.write(JSON.stringify(out) + "\n");
   } catch {
     // fail open: see the top of this file

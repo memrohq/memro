@@ -11,7 +11,7 @@ const HOME = path.join(TEST_DIR, "home");
 process.env.HOME = HOME;
 process.env.USERPROFILE = HOME;
 
-const { handle, resourceFor, sessionOf, whereOf } = await import("../src/hook.js");
+const { handle, patchFiles, resourceFor, sessionOf, whereOf } = await import("../src/hook.js");
 const { HOOK_FILE, hookSettingsFile, installHooks, removeHooks } = await import("../src/clients.js");
 
 const cfg = { api: "https://api.test", apiKey: "memro_sk_test" };
@@ -155,4 +155,50 @@ test("installHooks is idempotent, keeps the user's own hooks, and removeHooks un
   assert.equal(removeHooks(), true);
   assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { model: "opus", hooks: { PreToolUse: [mine] } });
   assert.equal(removeHooks(), false);
+});
+
+const PATCH = `*** Begin Patch
+*** Update File: src/a.js
+@@
+-x
++y
+*** Add File: docs/new.md
++hi
+*** Update File: old/name.js
+*** Move to: new/name.js
+*** End Patch`;
+
+test("patchFiles reads every file a Codex apply_patch touches", () => {
+  assert.deepEqual(patchFiles(PATCH), ["src/a.js", "docs/new.md", "old/name.js", "new/name.js"]);
+  assert.deepEqual(patchFiles(""), []);
+});
+
+test("Codex: apply_patch claims each file as codex:<session> and is denied if one is held", async () => {
+  const input = { hook_event_name: "PreToolUse", session_id: "c0dex123456", cwd: "/w", tool_name: "apply_patch", tool_input: { command: PATCH } };
+  serve(() => ({ granted: true }));
+  assert.equal(await handle(input, cfg, "codex"), null);
+  assert.deepEqual(calls.map((c) => c.body.resource), ["/w/src/a.js", "/w/docs/new.md", "/w/old/name.js", "/w/new/name.js"]);
+  assert.equal(calls[0].body.session_id, "codex:c0dex123");
+  assert.match(calls[0].body.intent, /^Codex editing a\.js/);
+
+  serve((route, body) => (body.resource === "/w/docs/new.md" ? { granted: false, holder_session: "claude-code:aaaa1111", intent: `x [/@${os.hostname()}]` } : { granted: true }));
+  const out = await handle(input, cfg, "codex");
+  assert.match(out.hookSpecificOutput.permissionDecisionReason, /\/w\/docs\/new\.md is being changed by claude-code:aaaa1111/);
+  // Claude Code's tools mean nothing to Codex, and vice versa.
+  serve(() => assert.fail("no call expected"));
+  assert.equal(await handle({ ...input, tool_name: "Bash" }, cfg, "codex"), null);
+  assert.equal(await handle({ ...input, tool_name: "apply_patch" }, cfg, "nope"), null);
+});
+
+test("Codex hooks go to hooks.json with a 3-second SessionEnd and no Notification", () => {
+  process.env.CODEX_HOME = path.join(HOME, ".codex");
+  const file = installHooks({ tool: "codex" });
+  assert.equal(file, path.join(HOME, ".codex", "hooks.json"));
+  const { hooks } = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.deepEqual(Object.keys(hooks), ["PreToolUse", "UserPromptSubmit", "Stop", "SessionEnd"]);
+  assert.equal(hooks.PreToolUse[0].matcher, "^apply_patch$");
+  assert.match(hooks.Stop[0].hooks[0].command, /memro-hook\.mjs" codex$/);
+  assert.equal(hooks.SessionEnd[0].hooks[0].timeout, 3);
+  assert.equal(removeHooks({ tool: "codex" }), true);
+  assert.equal(fs.existsSync(file), true);
 });
