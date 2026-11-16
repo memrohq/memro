@@ -70,7 +70,10 @@ npx memro-cli connect --project
    A message is added to the agent's next prompt, or wakes it when it stops,
    within two hours. An idle agent running in a [herdr](https://herdr.dev) pane
    on the same machine is prompted right away through herdr. An agent told a file is taken gets the command to ask the
-   holder. Codex runs a new hook only after you trust it once: open Codex and
+   holder. Shell commands are covered too: a command that writes a file (`>`,
+   `tee`, `sed -i`, `rm`) claims it, and `git stash`, `reset --hard`,
+   `checkout` and similar are refused while another agent has uncommitted work
+   in the folder. Codex runs a new hook only after you trust it once: open Codex and
    run `/hooks`. Pass `--no-hooks` to skip all of this; `disconnect` removes it.
 
 Existing settings and other servers are kept; the original file is saved
