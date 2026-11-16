@@ -293,12 +293,12 @@ const isOurs = (group) => group?.hooks?.some((h) => h.command?.includes(".memro/
 export const HOOK_TARGETS = {
   "claude-code": {
     file: (scope, cwd) => (scope === "project" ? path.join(cwd, ".claude", "settings.local.json") : path.join(home(), ".claude", "settings.json")),
-    events: { PreToolUse: "Edit|Write|MultiEdit|NotebookEdit|Bash", UserPromptSubmit: null, Notification: null, Stop: null, SessionEnd: null },
+    events: { PreToolUse: "Edit|Write|MultiEdit|NotebookEdit|Bash|mcp__memro__.*", UserPromptSubmit: null, Notification: null, Stop: null, SessionEnd: null },
   },
   codex: {
     file: (scope, cwd) => path.join(scope === "project" ? path.join(cwd, ".codex") : codexHome(), "hooks.json"),
     // Codex has no Notification event, and gives SessionEnd at most 3 seconds.
-    events: { PreToolUse: "^apply_patch$|^Bash$", UserPromptSubmit: null, Stop: null, SessionEnd: null },
+    events: { PreToolUse: "^apply_patch$|^Bash$|^mcp__memro__", UserPromptSubmit: null, Stop: null, SessionEnd: null },
     timeouts: { SessionEnd: 3 },
   },
 };

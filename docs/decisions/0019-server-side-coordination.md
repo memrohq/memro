@@ -95,7 +95,9 @@ Refinements from a live test with three Claude Code agents in [herdr](https://he
 
 **Shell and git** (2026-11-16): the hook also runs on `Bash` (both tools). Files a command writes or deletes (redirects, `tee`, `sed -i`, `rm`; a heuristic, not a shell parser) are claimed like edits; other commands make no call. Git commands that throw away uncommitted work (`stash` except `list`/`show`, `reset --hard`, `clean -f`, `checkout` of a branch, `--`, `.` or `-f`, `restore`, `switch`) are refused while another session has a file lease or its status in the same checkout: an idle agent no longer holds files, but its uncommitted edits are still on disk, so status leases now carry the checkout tag too (`<state> · <folder> [<checkout>] [herdr …]`). Waits, refusals and warnings are appended to `~/.memro/hooks/log.jsonl`.
 
-A lease held by the shared MCP session `claude-code` doesn't block the hook, because it may be the same window. The reverse remains: a window's MCP `claim_task` on a folder is refused if the same window's hook already holds a file inside it. Both go away once the MCP connection carries a per-window session.
+A lease held by the shared MCP session `claude-code` doesn't block the hook, because it may be the same window.
+
+**Per-window MCP holder** (2026-11-16): the hosted MCP server is stateless and every window of a tool connects with the same URL, so MCP claims could only name the tool. The coordination tools (`claim_task`, `heartbeat_task`, `release_task`, `handoff_task`, `log_intent`, `pre_action_check`) now take an optional `holder_session`, and the hook's PreToolUse on `mcp__memro__*` fills it with the window's session through `updatedInput` (with `permissionDecision: "allow"`, which the rewrite requires; these tools only touch the user's own leases). A window's MCP and hook claims are then one holder, so overlapping claims by the same window pass, and two windows block each other. Clients without the hooks keep the connection's session.
 
 ## Consequences
 - Multi-agent teams sharing a tenant space or user account work safely without collision or race conditions.

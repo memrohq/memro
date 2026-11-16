@@ -196,6 +196,11 @@ export async function handle(input, cfg, tool = "claude-code") {
   }
 
   if (event !== "PreToolUse") return null;
+  if (MEMRO_COORDINATION.test(input.tool_name || "")) {
+    // Make the window, not the tool, the holder of what it claims through
+    // MCP, so those claims and the hook's are one holder.
+    return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input.tool_input, holder_session: session } } };
+  }
   const command = input.tool_name === "Bash" ? String(input.tool_input?.command || "") : "";
   if (command && GIT_WIPES.test(command)) {
     const why = await othersHere(cfg, input.cwd, session);
@@ -215,6 +220,9 @@ export async function handle(input, cfg, tool = "claude-code") {
   }
   return warnings.length ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: warnings.join("\n") } } : null;
 }
+
+/** Memro's MCP coordination tools, as Claude Code and Codex name them. */
+export const MEMRO_COORDINATION = /^mcp__memro__(claim_task|heartbeat_task|release_task|handoff_task|log_intent|pre_action_check)$/;
 
 // Git commands that throw away uncommitted work in the working tree, which in a
 // shared checkout is every agent's work, not only the caller's.

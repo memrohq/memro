@@ -218,7 +218,7 @@ test("Codex hooks go to hooks.json with a 3-second SessionEnd and no Notificatio
   assert.equal(file, path.join(HOME, ".codex", "hooks.json"));
   const { hooks } = JSON.parse(fs.readFileSync(file, "utf8"));
   assert.deepEqual(Object.keys(hooks), ["PreToolUse", "UserPromptSubmit", "Stop", "SessionEnd"]);
-  assert.equal(hooks.PreToolUse[0].matcher, "^apply_patch$|^Bash$");
+  assert.equal(hooks.PreToolUse[0].matcher, "^apply_patch$|^Bash$|^mcp__memro__");
   assert.match(hooks.Stop[0].hooks[0].command, /memro-hook\.mjs" codex$/);
   assert.equal(hooks.SessionEnd[0].hooks[0].timeout, 3);
   assert.equal(removeHooks({ tool: "codex" }), true);
@@ -277,4 +277,15 @@ test("waits, refusals and warnings are logged for the benchmark", async () => {
   await handle(edit("/x/a.js"), cfg);
   const last = JSON.parse(fs.readFileSync(logFile, "utf8").trim().split("\n").pop());
   assert.deepEqual([last.outcome, last.holder, last.resource], ["warn", "codex", A]);
+});
+
+test("Memro's MCP coordination calls get this window as their holder; other MCP calls are left alone", async () => {
+  serve(() => assert.fail("no call expected"));
+  const mcp = (tool_name, tool_input) => ({ hook_event_name: "PreToolUse", session_id: "abcdef123456", cwd: "/w", tool_name, tool_input });
+  const out = await handle(mcp("mcp__memro__claim_task", { resource: "memro/cli", intent: "x" }), cfg);
+  assert.deepEqual(out.hookSpecificOutput.updatedInput, { resource: "memro/cli", intent: "x", holder_session: "claude-code:abcdef12" });
+  assert.equal(out.hookSpecificOutput.permissionDecision, "allow");
+  assert.equal((await handle(mcp("mcp__memro__release_task", { resource: "r" }), cfg, "codex")).hookSpecificOutput.updatedInput.holder_session, "codex:abcdef12");
+  assert.equal(await handle(mcp("mcp__memro__recall", { query: "q" }), cfg), null);
+  assert.equal(await handle(mcp("mcp__other__claim_task", {}), cfg), null);
 });

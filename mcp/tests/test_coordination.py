@@ -331,3 +331,19 @@ def test_session_from_user_agent():
     assert srv._session_from_user_agent("Antigravity/1.11 Electron") == "ua:antigravity"
     for generic in ("node", "python-httpx/0.27", "Mozilla/5.0 (Macintosh)", "", "  "):
         assert srv._session_from_user_agent(generic) is None
+
+
+def test_hooks_set_the_window_as_holder():
+    """The Memro hooks pass holder_session so a window's MCP claims and its
+    hook claims are one holder; without it the connection's session is used."""
+    seen = []
+    agent = SimpleNamespace(
+        claim=lambda **kw: seen.append(kw["session_id"]) or {"granted": True},
+        release=lambda **kw: seen.append(kw["session_id"]),
+    )
+    srv._run_tool(agent, "claude-code", "claim_task", {"resource": "r", "intent": "i", "holder_session": "claude-code:abcd1234"})
+    srv._run_tool(agent, "claude-code", "release_task", {"resource": "r", "holder_session": "claude-code:abcd1234"})
+    srv._run_tool(agent, "claude-code", "claim_task", {"resource": "r", "intent": "i"})
+    assert seen == ["claude-code:abcd1234", "claude-code:abcd1234", "claude-code"]
+    for tool in srv.COORDINATION_TOOLS:
+        assert any(t.name == tool and "holder_session" in t.inputSchema["properties"] for t in srv._all_tools()), tool
