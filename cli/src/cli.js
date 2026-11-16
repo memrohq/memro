@@ -475,6 +475,7 @@ async function connect(opts) {
   ui.outro(
     ok ? `Done. Restart ${ok === 1 ? "the tool" : "your tools"} to load Memro.` : "Nothing was configured.",
     "Manage or revoke the key in the dashboard → API keys.",
+    ...(ok ? ["★ Find Memro useful? A star helps others find it: https://github.com/memrohq/memro"] : []),
   );
 }
 
