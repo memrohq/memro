@@ -12,7 +12,7 @@ process.env.HOME = HOME;
 process.env.USERPROFILE = HOME;
 
 process.env.MEMRO_HOOK_WAIT_SECONDS = "0"; // the wait is tested on its own below
-const { briefing, handle, herdrOf, taskOf, patchFiles, resourceFor, sessionOf, shellFiles, whereOf } = await import("../src/hook.js");
+const { briefing, handle, handoffNote, herdrOf, lastAssistantText, taskOf, patchFiles, resourceFor, sessionOf, shellFiles, whereOf } = await import("../src/hook.js");
 const { HOOK_FILE, hookSettingsFile, installHooks, removeHooks } = await import("../src/clients.js");
 
 const cfg = { api: "https://api.test", apiKey: "memro_sk_test" };
@@ -317,4 +317,40 @@ test("a prompt is briefed on other agents in the same repo, with clashes flagged
   assert.match(note, /⚠ Your task mentions shop\/src\/cart\.js, which codex:1 holds/);
   assert.ok(!note.includes("claude-code:2") && !note.includes("claude-code:me"));
   assert.equal(briefing(claims.slice(2), "claude-code:me", "shop", ""), null);
+});
+
+test("a turn hands its files off with a note: who, the task and what it said", async () => {
+  serve((route) => (route === "/coordination/active"
+    ? { claims: [{ resource: "shop/a.js", session_id: "claude-code:feedbeef" }, { resource: "agents/claude-code:feedbeef", session_id: "claude-code:feedbeef" }], intents: [] }
+    : { granted: true }));
+  await handle(ev("UserPromptSubmit", { prompt: "Add coupons" }), cfg);
+  serve((route) => (route === "/coordination/active"
+    ? { claims: [{ resource: "shop/a.js", session_id: "claude-code:feedbeef" }, { resource: "agents/claude-code:feedbeef", session_id: "claude-code:feedbeef" }], intents: [] }
+    : { granted: true }));
+  await handle(ev("Stop", { last_assistant_message: "Added  applyCoupon() to a.js;\nkept total() unchanged." }), cfg);
+  const handoffs = calls.filter((c) => c.route === "/coordination/handoff").map((c) => [c.body.resource, c.body.summary]);
+  assert.deepEqual(handoffs, [["shop/a.js", "claude-code:feedbeef (task: Add coupons): Added applyCoupon() to a.js; kept total() unchanged."]]);
+  assert.equal(handoffNote("s", "", ""), "");
+});
+
+test("the next agent to claim a handed-off file sees the note once; its own notes are skipped", async () => {
+  const note = "codex:11112222 (task: Add coupons): Added applyCoupon()";
+  serve(() => ({ granted: true, handoff_summary: note }));
+  const first = await handle(edit("/x/n.js"), cfg);
+  assert.ok(first.hookSpecificOutput.additionalContext.startsWith(`Memro: the last change to ${P("/x/n.js")} was by ${note} (Memro names files`));
+  assert.equal(await handle(edit("/x/n.js"), cfg), null, "shown once");
+  serve(() => ({ granted: true, handoff_summary: "claude-code:abcdef12 (task: mine): did it" }));
+  assert.equal(await handle(edit("/x/m.js"), cfg), null, "own note");
+});
+
+test("lastAssistantText reads the final assistant message from a transcript", () => {
+  const f = path.join(TEST_DIR, "t.jsonl");
+  fs.writeFileSync(f, [
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "first" }] } }),
+    JSON.stringify({ type: "user", message: { content: "ok" } }),
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit" }, { type: "text", text: "Done: renamed x." }] } }),
+    "",
+  ].join("\n"));
+  assert.equal(lastAssistantText(f), "Done: renamed x.");
+  assert.equal(lastAssistantText(path.join(TEST_DIR, "missing.jsonl")), "");
 });

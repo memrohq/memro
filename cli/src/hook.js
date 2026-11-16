@@ -210,10 +210,56 @@ const deny = (reason) => ({
 });
 
 /** Release this session's file leases, and its status too when `all`. */
-async function releaseFiles(cfg, session, { all = false } = {}) {
+async function releaseFiles(cfg, session, { all = false, note = "" } = {}) {
   const { claims = [] } = await call(cfg, "/coordination/active");
   await Promise.all(claims.filter((c) => c.session_id === session && (all || !c.resource.startsWith("agents/"))).map((c) =>
-    call(cfg, "/coordination/release", { resource: c.resource, session_id: session, status: "completed" }).catch(() => {})));
+    // A file handed off with a note shows the note to the next agent that claims it.
+    (note && !c.resource.startsWith("agents/")
+      ? call(cfg, "/coordination/handoff", { resource: c.resource, session_id: session, summary: note })
+      : Promise.reject()).catch(() =>
+      call(cfg, "/coordination/release", { resource: c.resource, session_id: session, status: "completed" })).catch(() => {})));
+}
+
+/** The note a turn leaves on the files it changed: who, the task, and the
+ * start of the agent's last message, which usually says what it did. It
+ * starts with the session, so an agent can skip its own notes. */
+export function handoffNote(session, task, lastMessage = "") {
+  const said = String(lastMessage).replace(/\s+/g, " ").trim();
+  if (!task && !said) return "";
+  return `${session}${task ? ` (task: ${task})` : ""}: ${said.length > 400 ? `${said.slice(0, 399)}…` : said || "no summary"}`;
+}
+
+/** The last assistant text in a Claude Code transcript (JSONL), read from its end. */
+export function lastAssistantText(file) {
+  try {
+    const size = fs.statSync(file).size;
+    const fd = fs.openSync(file, "r");
+    const buf = Buffer.alloc(Math.min(size, 256 * 1024));
+    fs.readSync(fd, buf, 0, buf.length, size - buf.length);
+    fs.closeSync(fd);
+    for (const line of buf.toString("utf8").split("\n").reverse()) {
+      if (!line.includes('"assistant"')) continue;
+      try {
+        const content = JSON.parse(line).message?.content;
+        const text = Array.isArray(content) ? content.filter((c) => c.type === "text").map((c) => c.text).join(" ") : "";
+        if (text.trim()) return text;
+      } catch { /* a line cut at the start of the buffer */ }
+    }
+  } catch { /* no transcript */ }
+  return "";
+}
+
+// Handoff notes this window has already been shown, as "<resource> <note>".
+const notesFile = (session) => path.join(os.homedir(), ".memro", "hooks", `notes-${session.replace(/[^\w-]/g, "_")}.json`);
+function firstSighting(session, key) {
+  let seen = [];
+  try { seen = JSON.parse(fs.readFileSync(notesFile(session), "utf8")); } catch { /* none yet */ }
+  if (seen.includes(key)) return false;
+  try {
+    fs.mkdirSync(path.dirname(notesFile(session)), { recursive: true });
+    fs.writeFileSync(notesFile(session), JSON.stringify([...seen, key].slice(-200)));
+  } catch { /* shown again next time */ }
+  return true;
 }
 
 /** What to print for one hook event: a hook response, or null to stay silent. */
@@ -227,6 +273,7 @@ export async function handle(input, cfg, tool = "claude-code") {
     await releaseFiles(cfg, session, { all: true });
     fs.rmSync(seenFile(session), { force: true });
     fs.rmSync(taskFile(session), { force: true });
+    fs.rmSync(notesFile(session), { force: true });
     return null;
   }
 
@@ -250,7 +297,7 @@ export async function handle(input, cfg, tool = "claude-code") {
     const inbox = unread(active.intents || [], session);
     if (event === "Stop") {
       if (inbox.length) return { decision: "block", reason: formatMessages(inbox, session) };
-      await releaseFiles(cfg, session);
+      await releaseFiles(cfg, session, { note: handoffNote(session, task, input.last_assistant_message || lastAssistantText(input.transcript_path)) });
       return null;
     }
     const notes = [
@@ -282,6 +329,7 @@ export async function handle(input, cfg, tool = "claude-code") {
     const verdict = await claimFile(cfg, file, input.cwd, session, tool);
     if (verdict?.deny) return deny(verdict.deny);
     if (verdict?.warn) warnings.push(verdict.warn);
+    if (verdict?.note) warnings.push(verdict.note);
   }
   return warnings.length ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: warnings.join("\n") } } : null;
 }
@@ -355,6 +403,10 @@ async function claimFile(cfg, file, cwd, session, tool) {
   }
   if (ours(r)) {
     if (waited) log({ tool, session, resource, outcome: "waited" });
+    const note = r.handoff_summary;
+    if (note && !note.startsWith(`${session} `) && !note.startsWith(`${session}:`) && firstSighting(session, `${resource} ${note}`)) {
+      return { note: `Memro: the last change to ${resource} was by ${note} ${NAMES}` };
+    }
     return null;
   }
 
