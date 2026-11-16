@@ -73,7 +73,7 @@ instructions (`CLAUDE.md`, `AGENTS.md`, …):
 |---|---|---|
 | `remember` | `content`, `type?`, `visibility?`, `event_date?`, `session_id?`, `is_atomic?` | Store a memory |
 | `remember_with_context` | `content`, `context_metadata?`, `type?`, `event_date?`, `session_id?` | Store with metadata (file, branch, function) and when it happened |
-| `recall` | `query`, `limit?` (5), `type?` | Hybrid search; a memory contradicted by a newer one ranks lower and carries `superseded_by` |
+| `recall` | `query`, `limit?` (5), `type?`, `token_budget?` | Hybrid search; a memory contradicted by a newer one ranks lower and carries `superseded_by`. With `token_budget`, returns the best-ranked memories that fit in about that many tokens, without superseded or duplicate ones |
 | `recall_multi_session` | `query`, `limit?` (15) | Search across all sessions, same ranking |
 | `search_temporal` | `query`, `after_date?`, `before_date?`, `after_event_date?`, `before_event_date?`, `temporal_weight?`, `atomic_only?`, `limit?` | Search by time |
 | `get_recent_memories` | `limit?`, `type?` | Newest first |
