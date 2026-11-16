@@ -41,6 +41,11 @@ const STATUS_TTL = 7200; // the server's maximum; SessionEnd clears it sooner
 // give up on its task. MEMRO_HOOK_WAIT_SECONDS changes it; keep it below the
 // PreToolUse hook timeout in clients.js (90 s).
 const waitMs = () => Number(process.env.MEMRO_HOOK_WAIT_SECONDS ?? 60) * 1000;
+// Each edit holds its file this long, and the next edit renews it, so a file
+// the agent is done with frees up soon instead of at the end of its turn (the
+// benchmark spent half its time waiting on turn-long holds). Uncommitted work
+// stays protected from git by the agent's status, not by its file holds.
+const holdSeconds = () => Number(process.env.MEMRO_HOOK_HOLD_SECONDS ?? 45);
 const POLL_MS = 3000;
 const STATES = { UserPromptSubmit: "working", Notification: "waiting for you", Stop: "idle" };
 
@@ -244,9 +249,9 @@ export function briefing(claims, session, repo, prompt = "") {
   const text = String(prompt);
   const clashes = [...who].flatMap(([s, { files }]) => files
     .filter((f) => text.includes(f.slice(repo.length + 1)) || text.includes(path.posix.basename(f)))
-    .map((f) => `⚠ Your task mentions ${f}, which ${s} holds: plan to do other parts first, or message it.`));
+    .map((f) => `⚠ Your task mentions ${f}, which ${s} holds right now: do other parts first and come back to it; an edit to it waits for it to free up.`));
   return [
-    `Memro: other agents are working in ${repo} right now. Plan around them: a file another agent holds is refused until its turn ends. ${NAMES}`,
+    `Memro: other agents are working in ${repo} right now. Go ahead with your task: files nobody holds are free, and an edit to a held file waits for it. ${NAMES}`,
     ...lines, ...clashes,
   ].join("\n");
 }
@@ -275,12 +280,27 @@ const deny = (reason) => ({
 /** Release this session's file leases, and its status too when `all`. */
 async function releaseFiles(cfg, session, { all = false, note = "" } = {}) {
   const { claims = [] } = await call(cfg, "/coordination/active");
-  await Promise.all(claims.filter((c) => c.session_id === session && (all || !c.resource.startsWith("agents/"))).map((c) =>
+  const held = claims.filter((c) => c.session_id === session && (all || !c.resource.startsWith("agents/"))).map((c) => c.resource);
+  // Files this turn edited whose short holds already ran out still get the note
+  // (the server records a handoff without an active lease).
+  const resources = [...new Set([...held, ...(note ? readTouched(session) : [])])];
+  writeTouched(session, []);
+  await Promise.all(resources.map((resource) =>
     // A file handed off with a note shows the note to the next agent that claims it.
-    (note && !c.resource.startsWith("agents/")
-      ? call(cfg, "/coordination/handoff", { resource: c.resource, session_id: session, summary: note })
+    (note && !resource.startsWith("agents/")
+      ? call(cfg, "/coordination/handoff", { resource, session_id: session, summary: note })
       : Promise.reject()).catch(() =>
-      call(cfg, "/coordination/release", { resource: c.resource, session_id: session, status: "completed" })).catch(() => {})));
+      call(cfg, "/coordination/release", { resource, session_id: session, status: "completed" })).catch(() => {})));
+}
+
+// The files this turn edited, for the handoff note at its end.
+const touchedFile = (session) => path.join(os.homedir(), ".memro", "hooks", `touched-${session.replace(/[^\w-]/g, "_")}.json`);
+const readTouched = (session) => { try { return JSON.parse(fs.readFileSync(touchedFile(session), "utf8")); } catch { return []; } };
+function writeTouched(session, list) {
+  try {
+    fs.mkdirSync(path.dirname(touchedFile(session)), { recursive: true });
+    fs.writeFileSync(touchedFile(session), JSON.stringify(list));
+  } catch { /* the note then covers only files still held */ }
 }
 
 /** The note a turn leaves on the files it changed: who, the task, and the
@@ -337,6 +357,7 @@ export async function handle(input, cfg, tool = "claude-code") {
     fs.rmSync(seenFile(session), { force: true });
     fs.rmSync(taskFile(session), { force: true });
     fs.rmSync(notesFile(session), { force: true });
+    fs.rmSync(touchedFile(session), { force: true });
     return null;
   }
 
@@ -452,6 +473,7 @@ async function claimFile(cfg, file, cwd, session, tool) {
     resource,
     session_id: session,
     intent: tagged(`${TOOLS[tool].name} editing ${path.basename(file)}`, checkout),
+    ttl_seconds: holdSeconds(),
   });
   // shortcut: a claim made through the MCP tools can't be told apart from this
   // window's own, so it never blocks; drop this once the MCP URL carries a
@@ -466,6 +488,8 @@ async function claimFile(cfg, file, cwd, session, tool) {
   }
   if (ours(r)) {
     if (waited) log({ tool, session, resource, outcome: "waited" });
+    const touched = readTouched(session);
+    if (!touched.includes(resource)) writeTouched(session, [...touched, resource]);
     const note = r.handoff_summary;
     if (note && !note.startsWith(`${session} `) && !note.startsWith(`${session}:`) && firstSighting(session, `${resource} ${note}`)) {
       return { note: `Memro: the last change to ${resource} was by ${note} ${NAMES}` };
@@ -486,9 +510,12 @@ async function claimFile(cfg, file, cwd, session, tool) {
   }
   log({ tool, session, resource, outcome: "deny", holder });
   return {
-    deny: `Memro: ${what} is being changed by ${holder}${doing}${waited ? `, and was still held after waiting ${Math.round(waited / 1000)}s` : ""}. It is released when that agent finishes its turn. ` +
-    `Meanwhile work on something else, message it (npx memro-cli send ${holder} "<message>" --from ${session}), ` +
-    `or tell the user who holds it and ask how to proceed. ${NAMES}`,
+    // Benchmark agents told "ask the user" stopped and lost the task; the file
+    // is usually free again within a minute or two.
+    deny: `Memro: ${what} is being changed by ${holder}${doing}${waited ? `, and was still held after waiting ${Math.round(waited / 1000)}s` : ""}. ` +
+    "It frees up as soon as that agent stops editing it. Don't stop or ask the user yet: do the rest of your task first, " +
+    "then retry this same edit (re-read the file first, since it may have changed). " +
+    `Only if it is still refused after several retries, message the holder (npx memro-cli send ${holder} "<message>" --from ${session}) or tell the user. ${NAMES}`,
   };
 }
 

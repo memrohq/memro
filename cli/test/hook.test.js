@@ -69,7 +69,9 @@ test("an edit to a file another session holds is denied, naming the holder", asy
   serve(() => ({ granted: false, holder_session: "codex", holder_resource: "/x", intent: `refactor x [${ROOT_CHECKOUT}]` }));
   const out = await handle(edit("/x/a.js"), cfg);
   assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
-  assert.ok(out.hookSpecificOutput.permissionDecisionReason.includes(`${A} (inside /x) is being changed by codex (refactor x). It is released`));
+  const why = out.hookSpecificOutput.permissionDecisionReason;
+  assert.ok(why.includes(`${A} (inside /x) is being changed by codex (refactor x).`), why);
+  assert.match(why, /Don't stop or ask the user yet: do the rest of your task first, then retry this same edit/);
 });
 
 test("a held file in the same checkout is waited for, then claimed", async () => {
@@ -422,4 +424,21 @@ test("installers: Gemini nests with ms timeouts, Cursor is flat with a version, 
   assert.ok(fs.readFileSync(plugin, "utf8").includes("export const MemroPlugin"));
   assert.equal(removeHooks({ tool: "opencode" }), true);
   assert.equal(fs.existsSync(plugin), false);
+});
+
+test("each edit holds its file briefly, and the turn's handoff covers files whose hold ran out", async () => {
+  serve(() => ({ granted: true }));
+  const e = (file) => ({ hook_event_name: "PreToolUse", session_id: "touch123456", cwd: "/w", tool_name: "Edit", tool_input: { file_path: file } });
+  await handle(e("/w/a.js"), cfg);
+  await handle(e("/w/a.js"), cfg);
+  await handle(e("/w/b.js"), cfg);
+  assert.equal(calls[0].body.ttl_seconds, 45);
+  // At the end of the turn only b.js is still held; a.js's hold ran out.
+  serve((route) => (route === "/coordination/active"
+    ? { claims: [{ resource: P("/w/b.js", "/w"), session_id: "claude-code:touch123" }], intents: [] } : { granted: true }));
+  await handle({ hook_event_name: "Stop", session_id: "touch123456", cwd: "/w", last_assistant_message: "done" }, cfg);
+  assert.deepEqual(calls.filter((c) => c.route === "/coordination/handoff").map((c) => c.body.resource).sort(), [P("/w/a.js", "/w"), P("/w/b.js", "/w")].sort());
+  serve((route) => (route === "/coordination/active" ? { claims: [], intents: [] } : { granted: true }));
+  await handle({ hook_event_name: "Stop", session_id: "touch123456", cwd: "/w", last_assistant_message: "again" }, cfg);
+  assert.equal(calls.filter((c) => c.route === "/coordination/handoff").length, 0, "the list is cleared each turn");
 });
