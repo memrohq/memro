@@ -49,6 +49,14 @@ npx memro-cli connect --project
 
    Untick "Teach these tools…" in the list, or pass `--no-instructions`, to
    skip it. `disconnect` removes the note and leaves the rest of the file.
+4. **Claude Code: claims each file before it is edited.** A hook in
+   `~/.claude/settings.json` (or `./.claude/settings.local.json` for a project)
+   claims the file in Memro before every Edit or Write, so two agents never edit
+   one file at once: an edit to a file another session holds is refused, naming
+   who holds it. Each Claude Code window is its own holder, a file is named
+   `<repo>/<path>` so every worktree of a repo agrees, and the window's claims
+   are released when it closes. If Memro can't be reached the edit goes ahead.
+   Pass `--no-hooks` to skip it; `disconnect` removes it.
 
 Existing settings and other servers are kept; the original file is saved
 once as `<file>.memro-backup`. Restart the tool afterwards.
@@ -148,6 +156,7 @@ project whose `.mcp.json` overrides it; Claude Code itself uses the project's.
 * `--env-key`: Claude Code and Codex read the key from `$MEMRO_API_KEY` instead of storing it (see above).
 * `-y, --yes`: Configure every detected tool without prompting.
 * `--no-instructions`: Do not add Memro guidance to instruction files (`CLAUDE.md`, `AGENTS.md`, etc.).
+* `--no-hooks`: Do not add the Claude Code hooks that claim each file before it is edited.
 * `--staging`, `--local` or `--api <url>`: Target another Memro server (e.g. self-hosted: `--api https://memro.example.com`).
 
 ---

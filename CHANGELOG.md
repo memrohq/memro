@@ -7,6 +7,9 @@ and every release and package raises only the last number of its version (see RE
 
 ## [Unreleased]
 
+### Added
+- **`memro connect` makes Claude Code claim each file before editing it** (ADR 0019 §7): a hook claims the file in Memro before every Edit or Write and refuses the edit when another agent or window holds it, so coordination no longer depends on the model remembering to call `claim_task`. Each Claude Code window is its own holder, files are named `<repo>/<path>` so every worktree agrees, and a window's claims are released when it closes. `--no-hooks` skips it.
+
 ### Fixed
 - **MCP `recall` shows which memories are out of date**: it ranks a memory below a newer one that contradicts it and marks it with `superseded_by`. Before, the tool dropped the flag and did not ask for conflict resolution. The Python SDK's `SearchResult` now keeps `is_superseded` and `superseded_by`.
 - **`min_score` now filters irrelevant results** (ADR 0033): search results include `similarity`, the cosine similarity to the query, and the Python, JS and Go SDKs apply `min_score` to it. Before, `min_score` filtered the rank-based fused score, which is above 0.4 for any of the top 16 candidates however unrelated.

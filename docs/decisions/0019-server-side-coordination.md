@@ -73,6 +73,15 @@ Found in production on the first two-tool test (Claude Code and Antigravity on o
 - **A folder claim didn't cover its files.** Leases matched the exact resource string, so a claim on `memro/bench` didn't block `memro/bench/run.py`. Claims and checks now treat path resources as a tree: a lease on a folder blocks claims and checks on paths inside it, and a lease on a path blocks claiming a folder that contains it. URLs and plain names still match exactly. Claims within one scope take a transaction-level advisory lock, so two overlapping claims can't both pass. A denied claim returns `holder_resource` when the conflicting lease is on a different path.
 - **Messages name the tool.** Tools on one account share an agent ID, so MCP block messages name the holder's session (the tool) instead.
 
+### 7. Amendment (2026-11-16): claims made by hooks, not by the model
+Agents often skipped `pre_action_check` and `claim_task`, so a lease existed only when the model remembered it. And every Claude Code window shared the holder `claude-code` (the MCP URL's `?session_id=`), so two windows could edit one file. `memro connect` now installs a Claude Code hook (`cli/src/hook.js`, copied to `~/.memro/hooks/`) that:
+- claims the file before every Edit, Write, MultiEdit and NotebookEdit, as holder `claude-code:<first 8 characters of the Claude Code session id>`, and denies the edit when another holder has it. Re-claiming extends the lease, so editing is the heartbeat.
+- names the file `<origin repo name>/<path in repo>`, so every clone and worktree of a repo claims the same resource, matching the `memro/cli` style agents already use.
+- releases the window's leases on `SessionEnd`.
+- lets the edit through on any error (no key, offline, timeout of 3 s): Memro being down must not stop work.
+
+A lease held by the shared MCP session `claude-code` doesn't block the hook, because it may be the same window. The reverse remains: a window's MCP `claim_task` on a folder is refused if the same window's hook already holds a file inside it. Both go away once the MCP connection carries a per-window session.
+
 ## Consequences
 - Multi-agent teams sharing a tenant space or user account work safely without collision or race conditions.
 - Abandoned leases from crashed agents or sessions automatically expire after the TTL without blocking resources.

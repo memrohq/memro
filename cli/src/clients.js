@@ -279,6 +279,51 @@ const claudeCode = {
   },
 };
 
+// --- Claude Code coordination hooks (src/hook.js) ------------------------------------
+
+export const HOOK_FILE = () => path.join(home(), ".memro", "hooks", "claude-code.mjs");
+const HOOK_EVENTS = { PreToolUse: "Edit|Write|MultiEdit|NotebookEdit", SessionEnd: null };
+const isOurs = (group) => group?.hooks?.some((h) => h.command?.includes(".memro/hooks/claude-code.mjs"));
+
+/** Claude Code's settings file for hooks; the project one is the local,
+ * uncommitted file because the command names a path on this machine. */
+export const hookSettingsFile = (scope = "user", cwd = process.cwd()) =>
+  (scope === "project" ? path.join(cwd, ".claude", "settings.local.json") : path.join(home(), ".claude", "settings.json"));
+
+/** Copy the hook to ~/.memro/hooks/ and register it for the coordination events. */
+export function installHooks({ scope = "user", cwd = process.cwd() } = {}) {
+  fs.mkdirSync(path.dirname(HOOK_FILE()), { recursive: true });
+  fs.copyFileSync(new URL("./hook.js", import.meta.url), HOOK_FILE());
+  const target = hookSettingsFile(scope, cwd);
+  const cfg = readJSON(target);
+  cfg.hooks ||= {};
+  const command = `node ${JSON.stringify(HOOK_FILE().split(path.sep).join("/"))}`;
+  for (const [event, matcher] of Object.entries(HOOK_EVENTS)) {
+    const ours = { ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command, timeout: 10 }] };
+    cfg.hooks[event] = [...(cfg.hooks[event] || []).filter((g) => !isOurs(g)), ours];
+  }
+  writeJSON(target, cfg);
+  return target;
+}
+
+/** Unregister the hooks; true if any were there. The copied script stays for other scopes. */
+export function removeHooks({ scope = "user", cwd = process.cwd() } = {}) {
+  const target = hookSettingsFile(scope, cwd);
+  if (!fs.existsSync(target)) return false;
+  const cfg = readJSON(target);
+  let removed = false;
+  for (const event of Object.keys(HOOK_EVENTS)) {
+    const groups = cfg.hooks?.[event];
+    if (!groups?.some(isOurs)) continue;
+    removed = true;
+    cfg.hooks[event] = groups.filter((g) => !isOurs(g));
+    if (!cfg.hooks[event].length) delete cfg.hooks[event];
+  }
+  if (cfg.hooks && !Object.keys(cfg.hooks).length) delete cfg.hooks;
+  if (removed) writeJSON(target, cfg);
+  return removed;
+}
+
 export const CLIENTS = [
   claudeCode,
   codex,
