@@ -1,0 +1,11 @@
+{
+  "name": "ablation-arm-j",
+  "description": "Arm J: Arm I + Structured Timeline Synthesis (PR 96)",
+  "arm_id": "arm-j",
+  "graph": "selective",
+  "resolve_conflicts": true,
+  "adaptive_diversity": true,
+  "timeline_synthesis": true,
+  "commit": "726d2b6ecab5d28c417ee07726bc82f4f5188c83",
+  "created_at": "2026-10-24T12:48:50.930690+00:00"
+}

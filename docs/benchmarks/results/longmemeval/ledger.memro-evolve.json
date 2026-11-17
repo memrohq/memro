@@ -1,0 +1,11 @@
+{
+  "total_usd": 1.251203399999996,
+  "by_model": {
+    "gpt-4o-mini": {
+      "usd": 1.251203399999996,
+      "prompt_tokens": 8041740,
+      "completion_tokens": 74904,
+      "calls": 1442
+    }
+  }
+}

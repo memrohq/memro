@@ -1,0 +1,19 @@
+{
+  "name": "ablation-arm-h",
+  "description": "Arm H: Selective Graph + Adaptive Session Diversity (PR 22)",
+  "arm_id": "arm-h",
+  "graph": "selective",
+  "resolve_conflicts": false,
+  "adaptive_diversity": true,
+  "commit": "87950213da014e97424f3ec2cbf8e1876c9c7f5b",
+  "created_at": "2026-10-24T11:58:39.040358+00:00",
+  "cost_usd": 0.000419,
+  "token_usage": {
+    "gpt-4o-mini": {
+      "usd": 0.000419,
+      "prompt_tokens": 2741,
+      "completion_tokens": 16,
+      "calls": 16
+    }
+  }
+}

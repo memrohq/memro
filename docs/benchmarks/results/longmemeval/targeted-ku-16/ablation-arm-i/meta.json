@@ -1,0 +1,19 @@
+{
+  "name": "ablation-arm-i",
+  "description": "Arm I: Selective Graph + Adaptive Diversity + Intent-Aware Supersession (PR 32)",
+  "arm_id": "arm-i",
+  "graph": "selective",
+  "resolve_conflicts": true,
+  "adaptive_diversity": true,
+  "commit": "87950213da014e97424f3ec2cbf8e1876c9c7f5b",
+  "created_at": "2026-10-24T11:58:39.099060+00:00",
+  "cost_usd": 0.000422,
+  "token_usage": {
+    "gpt-4o-mini": {
+      "usd": 0.000422,
+      "prompt_tokens": 2748,
+      "completion_tokens": 16,
+      "calls": 16
+    }
+  }
+}

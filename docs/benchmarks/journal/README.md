@@ -17,6 +17,8 @@ Internal engineering journal tracking Memro's memory retrieval quality, benchmar
 
 When completing a benchmark run (pilot, subset, or full ablation), create a new markdown file named `YYYY-MM-DD-<topic>.md` in this directory and link it at the top of the index above.
 
+Copy the run's results (not server logs) into `docs/benchmarks/results/<benchmark>/<run-name>/`, replace local paths, and add a row to [its index](../results/README.md), so every number in a post can be checked.
+
 ### Post Template
 
 ```markdown
