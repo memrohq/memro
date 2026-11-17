@@ -223,7 +223,7 @@ export const taskOf = (prompt = "") => {
 
 /** The repo a folder belongs to, as lease names start with it ("memro"), or
  * the folder itself outside git. */
-const repoOf = (cwd = process.cwd()) => {
+export const repoOf = (cwd = process.cwd()) => {
   const { resource } = locate(path.join(cwd, "_"), cwd);
   const folder = posix(path.resolve(cwd));
   return resource.startsWith(folder) ? folder : resource.split("/")[0];

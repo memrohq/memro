@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { CLIENTS, HOOK_TARGETS, KEY_ENV, findClient, installHooks, onPath, removeHooks, withSession } from "./clients.js";
-import { herdrOf, untagged } from "./hook.js";
+import { herdrOf, repoOf, untagged } from "./hook.js";
 import { pick, pickOne, promptText } from "./picker.js";
 import { codexTrusts, diagnose } from "./doctor.js";
 import { installInstructions, uninstallInstructions } from "./instructions.js";
@@ -32,6 +32,9 @@ Usage
   npx memro-cli send <agent> <message>
                              Message an agent (a name from \`agents\`); Claude Code
                              reads it at its next prompt or when it stops
+  npx memro-cli land         From a git worktree: rebase this branch on the main
+                             checkout's branch and fast-forward it, one agent at
+                             a time, showing what landed before you
 
 Options
   --project                  Configure the current project instead of global tools
@@ -588,6 +591,63 @@ async function send(opts) {
   console.log(`Sent to ${to}. It reads it at its next prompt or when it stops (within 2 hours).`);
 }
 
+/** Land this worktree's branch on the branch the main checkout has out, one
+ * agent at a time: worktrees keep agents apart while they work, but every
+ * branch meets at merge time (the launch benchmark: 4 of 5 branches
+ * conflicted). Holding `land/<repo>` means each agent rebases onto what landed
+ * before it and sees those commits when it has to resolve a conflict. */
+async function land(opts) {
+  const { api, key } = account(opts);
+  const git = (...args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  const top = git("rev-parse", "--show-toplevel");
+  const mainDir = git("worktree", "list", "--porcelain").match(/^worktree (.+)$/m)[1];
+  if (path.resolve(mainDir) === path.resolve(top)) throw new Error("Run `land` from a worktree, not the main checkout.");
+  if (fs.existsSync(git("rev-parse", "--git-path", "rebase-merge"))) {
+    throw new Error("A rebase is still in progress: resolve the conflicts, `git add` the files, run `git -c core.editor=true rebase --continue`, then run `land` again.");
+  }
+  if (git("status", "--porcelain")) throw new Error("Commit your changes first (git add <files> && git commit -m \"...\"), then run `land` again.");
+  const branch = git("rev-parse", "--abbrev-ref", "HEAD");
+  const target = git("-C", mainDir, "rev-parse", "--abbrev-ref", "HEAD");
+  const resource = `land/${repoOf(mainDir)}`; // every worktree names it alike, origin or not
+  const session = opts.from || `land:${branch}`;
+
+  // Below the 2-minute limit agents' shell tools put on one command.
+  const until = Date.now() + Number(process.env.MEMRO_LAND_WAIT_SECONDS ?? 100) * 1000;
+  let r;
+  for (;;) {
+    const res = await request(api, "/coordination/claim", {
+      method: "POST", key, json: { resource, session_id: session, intent: `landing ${branch} on ${target}`, ttl_seconds: 600 },
+    });
+    if (!res.ok) throw new Error(`Memro API returned ${res.status}`);
+    r = res.data;
+    if (r.granted || Date.now() > until) break;
+    await new Promise((done) => setTimeout(done, 3000));
+  }
+  if (!r.granted) {
+    process.exitCode = 2;
+    return console.log(`${r.holder_session || "Another agent"} is still landing (${untagged(r.intent || "")}). Run \`land\` again in a minute; your branch is untouched.`);
+  }
+  if (r.handoff_summary) console.log(`Landed before you: ${r.handoff_summary}`);
+
+  const base = git("merge-base", branch, target);
+  try {
+    git("rebase", target);
+  } catch {
+    const files = git("diff", "--name-only", "--diff-filter=U").split("\n").filter(Boolean);
+    process.exitCode = 1;
+    // The lease stays ours (10 minutes, renewed when this runs again), so nobody lands under us while we resolve.
+    console.log(`Conflicts rebasing ${branch} onto ${target} in: ${files.join(", ")}`);
+    console.log(`What landed on ${target} since you branched, in those files:`);
+    console.log(git("log", "--format=  %h %s", `${base}..${target}`, "--", ...files) || "  (nothing listed)");
+    return console.log("Keep both their change and yours in each file, `git add` it, run `git -c core.editor=true rebase --continue`, " +
+      "run the tests, then run `land` again.");
+  }
+  git("-C", mainDir, "merge", "--ff-only", branch);
+  const summary = `${session} landed ${branch}: ${git("log", "-1", "--format=%s")}`;
+  await request(api, "/coordination/handoff", { method: "POST", key, json: { resource, session_id: session, summary } });
+  console.log(`Landed ${branch} on ${target}.`);
+}
+
 /** An idle agent runs no hooks, so it would only see the message at its next
  * prompt. If it sits in a herdr pane on this machine, prompt it there; its
  * prompt hook then shows it the message. */
@@ -694,6 +754,7 @@ export async function main(argv) {
     case "disconnect": return disconnect(opts);
     case "agents": return agents(opts);
     case "send": return send(opts);
+    case "land": return land(opts);
     case null:
     case "help": console.log(HELP); return;
     default: throw new Error(`Unknown command "${opts.command}". Try \`npx memro-cli --help\`.`);
