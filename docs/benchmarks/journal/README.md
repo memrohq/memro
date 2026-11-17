@@ -6,6 +6,8 @@ Internal engineering journal tracking Memro's memory retrieval quality, benchmar
 
 ## Entries (Newest First)
 
+- **[2026-11-17: Relay Benchmark — Does Memory Stop a Fresh Agent Repeating Mistakes?](2026-11-17-relay-benchmark.md)**: agent A learns a fact, a fresh agent B must respect it; arms none / notes file / Memro. Pilot v1 traps were too easy (every arm 6/6: A wrote the fact into code comments); v2 tells A the fact during unrelated work: none 5/15, notes 15/15, Memro 15/15 on R1–R3. Memory is the whole difference; in one checkout a notes file ties Memro.
+
 - **[2026-11-15: Baselines — No Memory, Plain RAG and Memro](2026-11-15-baselines-no-memory-and-plain-rag.md)**: on LongMemEval-100, no memory 6%, plain semantic top-15 81%, Memro 81% (p = 1.0 vs RAG); memory is the whole score, Memro's extras show no gain on this subset.
 
 - **[2026-11-15: Evolution Engine, Save-Time Graph Edges and False Contradictions](2026-11-15-evolution-engine-and-contradictions.md)**: Evolution benchmark 4/9 → 0/9 unresolved updates; five LongMemEval-100 arms (78–80%, none significant); repeat runs showing answer noise; the negation rule's false contradictions (15 → 1 of 153 pairs).
