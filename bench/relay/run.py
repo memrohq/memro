@@ -8,6 +8,13 @@ Arms differ only in how A's knowledge can reach B:
   notes  both are told to keep and read NOTES.md (the free baseline)
   memro  both have Memro's MCP tools, told to recall and remember
 
+Settings (--setting), where B works and what it has to search:
+  same   B in A's checkout (stage 1)
+  clone  B is a teammate in a fresh clone; A's work is committed first,
+         NOTES.md included, so the notes file follows (its strongest form)
+  big    as same, but NOTES.md and Memro already hold 300 earlier facts on
+         other topics, a dozen of them near the trap's subject
+
 Claude Code's own auto-memory is switched off in every arm, so it can't carry
 the fact on its own. The memro arm uses one throwaway Memro agent (not tied to
 any account), wiped before every relay and deleted at the end.
@@ -65,6 +72,45 @@ TRAPS = {
     ),
 }
 
+# Earlier project facts for the big setting. None mention the traps' subjects
+# (Intl/ICU, rounding direction, unitPrice), so "A recorded it" still only
+# matches what A added.
+NEAR = [
+    "Prices are stored as integer cents everywhere; never store floats.",
+    "Currency codes are uppercase ISO 4217 strings such as USD and EUR.",
+    "Shipping fees are added after discounts, not before.",
+    "Tax is calculated once per order, not per line item.",
+    "Receipts print dates as YYYY-MM-DD.",
+    "Gift cards can't be combined with coupons.",
+    "Refunds go back to the original payment method.",
+    "A cart holds at most 100 distinct items.",
+    "Product ids are lowercase slugs.",
+    "Prices shown to EU customers include VAT.",
+    "Negative quantities are rejected by the API, not in cart.js.",
+    "The free-shipping threshold is 5000 cents.",
+    "Coupons expire at midnight UTC.",
+    "Loyalty points are earned on the pre-tax total.",
+    "formatPrice keeps the dollar sign as the default symbol for old callers.",
+]
+AREAS = ["checkout API", "admin dashboard", "search service", "email worker", "CI pipeline", "staging deploy",
+         "database migrations", "feature flags", "image uploads", "auth tokens", "webhook handler", "inventory sync",
+         "order export", "analytics events", "mobile release", "support inbox tool", "CDN cache", "rate limiter",
+         "password reset flow", "nightly backups", "error reporting", "load tests", "translations pipeline",
+         "partner API", "warehouse integration"]
+RULES = ["{a}: logs at warn level in production; debug logging is for local runs only.",
+         "{a}: owned by the platform team; ask them before changing its config.",
+         "{a}: every change needs a feature flag so it can be switched off without a deploy.",
+         "{a}: retries three times with exponential backoff before giving up.",
+         "{a}: secrets come from the secret manager, never from .env files in the repo.",
+         "{a}: timeouts are 10 seconds; longer calls go through the job queue.",
+         "{a}: tests must not call the network; use the fakes in test/fakes.",
+         "{a}: breaking changes need a deprecation notice one release ahead.",
+         "{a}: errors are reported with the request id so support can find them.",
+         "{a}: dates are stored in UTC and converted only when displayed.",
+         "{a}: the old v1 endpoints stay until the March cleanup.",
+         "{a}: deploys are frozen on Fridays after 3pm."]
+EARLIER = NEAR + [r.format(a=a) for r in RULES for a in AREAS][:300 - len(NEAR)]
+
 TAIL = " Keep the existing behaviour and tests passing (run `node --test`). Do not edit or add test files. Do not commit."
 PROMPT_A = "You are working in a small JavaScript repo. Task: {task}{fact}" + TAIL
 PROMPT_B = "You are working in a small JavaScript repo. Task: {task}" + TAIL
@@ -81,8 +127,10 @@ def sh(*cmd, cwd, check=True):
     return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
 
 
-def make_repo(path, arm):
+def make_repo(path, arm, setting):
     shutil.copytree(FIXTURE, path)
+    if setting == "big" and arm == "notes":
+        (path / "NOTES.md").write_text("".join(f"- {f}\n" for f in EARLIER))
     # Claude Code's own memory would carry the fact between A and B in every arm.
     (path / ".claude").mkdir()
     (path / ".claude" / "settings.json").write_text(json.dumps({"autoMemoryEnabled": False}))
@@ -142,31 +190,36 @@ def retry(fn, tries=4):
 class BenchMemory:
     """One throwaway Memro agent for the memro arm, wiped before every relay."""
 
-    def __init__(self, workdir):
+    def __init__(self, workdir, setting):
         from memro import Agent, MemroClient
         self.agent = Agent.create(client=MemroClient(MEMRO_API))
+        # Earlier facts stay for the whole run; wipe() removes only what a relay added.
+        self.earlier = set(retry(lambda: self.agent.remember_batch([{"content": f} for f in EARLIER]))) if setting == "big" else set()
         creds = self.agent.to_dict()
         self.config = workdir / "mcp.json"
         self.config.write_text(json.dumps({"mcpServers": {"memro": {"command": str(MEMRO_MCP), "env": {
             "MEMRO_BASE_URL": MEMRO_API, "MEMRO_AGENT_ID": creds["agent_id"], "MEMRO_PRIVATE_KEY": creds["private_key"]}}}}))
 
+    def added(self):
+        return [m for m in retry(self.agent.export).memories if m.id not in self.earlier]
+
     def texts(self):
-        return [m.content for m in retry(self.agent.export).memories]
+        return [m.content for m in self.added()]
 
     def wipe(self):
-        for m in retry(self.agent.export).memories:
+        for m in self.added():
             retry(lambda: self.agent.delete_memory(m.id))
-        assert not retry(self.agent.export).memories, "bench memory not empty"
+        assert not self.added(), "bench memory not empty"
 
     def close(self):
         self.config.unlink(missing_ok=True)
         retry(self.agent.delete_agent)
 
 
-def one_relay(trap, arm, workdir, memory):
+def one_relay(trap, arm, workdir, memory, setting="same"):
     t = TRAPS[trap]
     repo = workdir / f"{trap}-{arm}-{uuid.uuid4().hex[:8]}"
-    make_repo(repo, arm)
+    make_repo(repo, arm, setting)
     mcp = None
     if arm == "memro":
         memory.wipe()
@@ -174,14 +227,21 @@ def one_relay(trap, arm, workdir, memory):
     a = run_agent(PROMPT_A.format(task=t["a"], fact=f" Note from the user: {t['fact']}" if t["fact"] else ""), repo, mcp)
     a_ok = accept(repo, trap).get("a", False)
     kept = (repo / "NOTES.md").read_text() if arm == "notes" and (repo / "NOTES.md").exists() else ""
+    kept = "\n".join(l for l in kept.splitlines() if l[2:] not in EARLIER) if setting == "big" else kept
     if arm == "memro":
         kept = "\n".join(memory.texts())
     recorded = bool(t["keyword"] and re.search(t["keyword"], kept, re.I))
+    if setting == "clone":
+        # A's work lands on main, notes file and all; B is a teammate who clones it.
+        sh("git", "add", "-A", cwd=repo)
+        sh("git", "-c", "user.name=bench", "-c", "user.email=bench@memro.co", "commit", "-qm", "A's work", "--allow-empty", cwd=repo)
+        sh("git", "clone", "-q", str(repo), f"{repo}-b", cwd=workdir)
+        repo = Path(f"{repo}-b")
     b = run_agent(PROMPT_B.format(task=t["b"]), repo, mcp)
     passed = accept(repo, trap)
     looked = any(x["name"] == "mcp__memro__recall" or "NOTES.md" in x["input"] for x in b["tools"])
     return {
-        "trap": trap, "arm": arm, "repo": str(repo), "a_ok": a_ok, "recorded": recorded, "kept": kept[-600:],
+        "trap": trap, "arm": arm, "setting": setting, "repo": str(repo), "a_ok": a_ok, "recorded": recorded, "kept": kept[-600:],
         "b_looked": looked, "b_func": passed.get("func", False),
         # The control has no trap: its "avoided" is just the task.
         "trap_avoided": passed.get("trap", passed.get("func", False)),
@@ -212,6 +272,7 @@ def main():
     ap.add_argument("--arms", default="none,notes,memro")
     ap.add_argument("--traps", default=",".join(TRAPS))
     ap.add_argument("--runs", type=int, default=5)
+    ap.add_argument("--setting", choices=["same", "clone", "big"], default="same")
     ap.add_argument("--out", default=str(ROOT / "bench" / "runs" / "relay" / time.strftime("%Y%m%d-%H%M%S")))
     ap.add_argument("--report", metavar="RESULTS_JSONL")
     args = ap.parse_args()
@@ -222,7 +283,7 @@ def main():
     # Outside any project: Claude Code reads CLAUDE.md files from parent folders.
     workdir = Path(tempfile.mkdtemp(prefix="memro-relay-")).resolve()
     arms = args.arms.split(",")
-    memory = BenchMemory(workdir) if "memro" in arms else None
+    memory = BenchMemory(workdir, args.setting) if "memro" in arms else None
     # A stopped run still deletes its throwaway agent (the finally below).
     signal.signal(signal.SIGTERM, lambda *_: exit(143))
     try:
@@ -230,7 +291,7 @@ def main():
             for i in range(args.runs):
                 for trap in args.traps.split(","):
                     for arm in arms:  # interleaved, so a slow model hour doesn't land on one arm
-                        r = one_relay(trap, arm, workdir, memory)
+                        r = one_relay(trap, arm, workdir, memory, args.setting)
                         f.write(json.dumps(r) + "\n")
                         f.flush()
                         print(f"run {i + 1} {trap} {arm:6} A {'ok' if r['a_ok'] else 'FAIL'}  recorded {r['recorded']}  "
