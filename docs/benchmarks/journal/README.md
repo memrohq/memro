@@ -6,6 +6,8 @@ Internal engineering journal tracking Memro's memory retrieval quality, benchmar
 
 ## Entries (Newest First)
 
+- **[2026-11-18: Landing Worktrees One at a Time, and Shorter Holds](2026-11-18-coordination-land-and-holds.md)**: agents landing their own branches fix worktrees (20/100 → 100/100) with or without Memro; `memro land` is 38% cheaper and 21% faster than plain git, not more successful. In one folder Memro lands 100/100 with no give-ups but at 2.0× the time.
+
 - **[2026-11-15: Baselines — No Memory, Plain RAG and Memro](2026-11-15-baselines-no-memory-and-plain-rag.md)**: on LongMemEval-100, no memory 6%, plain semantic top-15 81%, Memro 81% (p = 1.0 vs RAG); memory is the whole score, Memro's extras show no gain on this subset.
 
 - **[2026-11-15: Evolution Engine, Save-Time Graph Edges and False Contradictions](2026-11-15-evolution-engine-and-contradictions.md)**: Evolution benchmark 4/9 → 0/9 unresolved updates; five LongMemEval-100 arms (78–80%, none significant); repeat runs showing answer noise; the negation rule's false contradictions (15 → 1 of 153 pairs).
