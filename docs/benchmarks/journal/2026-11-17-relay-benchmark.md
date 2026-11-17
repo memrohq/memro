@@ -114,14 +114,46 @@ $0.13–0.14 for R1–R3.
 - **none still avoids the traps**: agents guess right without memory; the
   traps need to be harder, and B's work will show how.
 
-**Next (stage 2)**: put Memro where a notes file in the repo can't follow,
-each with the strongest fair file baseline:
-- **Another person's agent**: B is a teammate's agent in a fresh clone; the
-  notes arm commits `NOTES.md` with A's work, the memro arm shares a team space.
-- **A big memory**: 300 earlier, unrelated facts already in the notes file
-  and in Memro, so B has to find the one that matters.
-- **Another repo**: the rule is about the team's POS devices, and B works in a
-  second repo of the same team.
+**Stage 2** (§7) moves B to where a file in the repo might not follow.
+
+## 7. Stage 2: a teammate's clone and a big memory (2026-11-18)
+
+- **Run directories**: `docs/benchmarks/results/relay/stage2-clone-20261118`, `stage2-big-20261118`
+- **Traps**: R1, R2 and the R4 control (R3 dropped), 5 runs × 3 arms each, 90 relays, $0.83
+
+| Setting | none | notes | memro |
+|---|---|---|---|
+| **clone**: A's work is committed, `NOTES.md` included, and B works in a fresh clone | 0/10 | 10/10 | 10/10 |
+| **big**: `NOTES.md` and Memro already hold 300 earlier facts, 15 of them about money and formatting | 0/10 | **10/10** | **6/10** |
+
+- **A teammate's clone ties.** A committed notes file follows the code, so it
+  reaches the teammate as well as Memro does. (A notes file that isn't
+  committed wouldn't, but that's a weaker baseline than teams use.)
+- **With a big memory Memro loses.** Of its 4 misses:
+  - **2: A never saved the fact.** It called `recall`, got back a store full of
+    facts, and went on without calling `remember` (R1, the passing remark about
+    `Intl`).
+  - **2: A saved it and B didn't find it.** B searched for its task
+    ("formatMoney src/format.js money formatting"); the rule ("never use Intl
+    or toLocaleString…") shares no words with that, and nearby facts about
+    currency codes and `formatPrice` ranked above it.
+- **The notes file won by being read whole.** 300 one-line facts fit in the
+  agent's context, and it read them all before starting, so nothing depended
+  on a search matching.
+
+**What this means.** At a few hundred facts, reading everything beats
+retrieval, and Memro is only as good as the model's decision to call
+`remember` and the words it searches with. Memro's case has to rest on not
+depending on either:
+1. **Save stated rules automatically**: the prompt hook saves a user's
+   "never / always / must" statements, instead of waiting for `remember`.
+2. **Show project rules every session**: rules and decisions are given at the
+   start, like a notes file, not only when a search matches.
+3. **Show what's known about a file when it's first touched**: the edit hook
+   recalls by file and shows it, as §5 proposed.
+
+With those, rerun `big`, and add a setting where a file can't keep up: a
+memory too big to read whole (thousands of facts), or shared across repos.
 
 ## 6. Caveats
 
