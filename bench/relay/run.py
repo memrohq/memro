@@ -7,6 +7,9 @@ Arms differ only in how A's knowledge can reach B:
   none   nothing: B starts fresh
   notes  both are told to keep and read NOTES.md (the free baseline)
   memro  both have Memro's MCP tools, told to recall and remember
+  memro-hooks  the same plus Memro's hooks (memro connect's default): they
+         save rules the user states, show the repo's rules at every prompt,
+         and show a file's memories when it's first edited
 
 Settings (--setting), where B works and what it has to search:
   same   B in A's checkout (stage 1)
@@ -27,6 +30,7 @@ Run with the MCP server's Python, which has the Memro SDK:
 
 import argparse
 import json
+import os
 import re
 import shutil
 import signal
@@ -41,6 +45,8 @@ ROOT = HERE.parent.parent
 FIXTURE = HERE.parent / "coordination" / "fixture"
 MEMRO_MCP = ROOT / "mcp" / ".venv" / "bin" / "memro-mcp"
 MEMRO_API = "https://api.memro.co"
+# The CLI whose hooks the memro-hooks arm installs (MEMRO_CLI: another checkout's cli/).
+MEMRO_CLI = Path(os.environ.get("MEMRO_CLI", ROOT / "cli")).resolve()
 
 # A's own task never touches what the fact is about, so the fact leaves no
 # trace in the code (pilot v1: A wrote it into comments and B copied them).
@@ -119,12 +125,13 @@ PROMPT_B = "You are working in a small JavaScript repo. Task: {task}" + TAIL
 RECORD = "When you learn something a future agent working here would need (a decision and why, a constraint, something that failed), "
 CLAUDE_MD = {
     "notes": "## Project notes\n\nBefore you start, read NOTES.md if it exists. " + RECORD + "add one short line to NOTES.md.\n",
+    "memro-hooks": "## Memro (long-term memory)\n\nBefore you start, call the memro `recall` tool with a short query about your task. " + RECORD + "save one short sentence with the memro `remember` tool.\n",
     "memro": "## Memro (long-term memory)\n\nBefore you start, call the memro `recall` tool with a short query about your task. " + RECORD + "save one short sentence with the memro `remember` tool.\n",
 }
 
 
-def sh(*cmd, cwd, check=True):
-    return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
+def sh(*cmd, cwd, check=True, env=None):
+    return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True, env=env)
 
 
 def make_repo(path, arm, setting):
@@ -136,12 +143,17 @@ def make_repo(path, arm, setting):
     (path / ".claude" / "settings.json").write_text(json.dumps({"autoMemoryEnabled": False}))
     if arm in CLAUDE_MD:
         (path / "CLAUDE.md").write_text(CLAUDE_MD[arm])
+    if arm == "memro-hooks":
+        # Installed under a throwaway HOME: ~/.memro/hooks/ is the user's own hook.
+        home = path.parent / "hook-home"
+        sh("node", "-e", f'import("{MEMRO_CLI}/src/clients.js").then(m => m.installHooks({{scope: "project", cwd: "{path}"}}))',
+           cwd=MEMRO_CLI, env={**os.environ, "HOME": str(home)})
     sh("git", "init", "-q", "-b", "main", cwd=path)
     sh("git", "add", "-A", cwd=path)
     sh("git", "-c", "user.name=bench", "-c", "user.email=bench@memro.co", "commit", "-qm", "fixture", cwd=path)
 
 
-def run_agent(prompt, cwd, mcp_config=None):
+def run_agent(prompt, cwd, mcp_config=None, env=None):
     """One headless Claude Code turn: cost, time, the tools it called, its last message."""
     cmd = ["claude", "-p", prompt, "--model", "haiku", "--output-format", "stream-json", "--verbose",
            "--permission-mode", "acceptEdits", "--setting-sources", "project,local", "--strict-mcp-config",
@@ -149,7 +161,7 @@ def run_agent(prompt, cwd, mcp_config=None):
     if mcp_config:
         cmd += ["mcp__memro__recall", "mcp__memro__remember", "--mcp-config", str(mcp_config)]
     t0 = time.time()
-    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=900)
+    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=900, env=env)
     out = {"seconds": round(time.time() - t0, 1), "exit": p.returncode, "tools": [], "cost_usd": None, "result": ""}
     for line in p.stdout.splitlines():
         try:
@@ -196,6 +208,10 @@ class BenchMemory:
         # Earlier facts stay for the whole run; wipe() removes only what a relay added.
         self.earlier = set(retry(lambda: self.agent.remember_batch([{"content": f} for f in EARLIER]))) if setting == "big" else set()
         creds = self.agent.to_dict()
+        # The hooks sign in with an API key, which a signed agent can make for itself.
+        self.api_key = self.agent.client.request("POST", "/api-keys", json_body={"name": "relay bench"},
+                                                 agent_id=creds["agent_id"], private_key=creds["private_key"]).json()["key"]
+        self.env = {**os.environ, "MEMRO_API_KEY": self.api_key, "MEMRO_API_URL": MEMRO_API}
         self.config = workdir / "mcp.json"
         self.config.write_text(json.dumps({"mcpServers": {"memro": {"command": str(MEMRO_MCP), "env": {
             "MEMRO_BASE_URL": MEMRO_API, "MEMRO_AGENT_ID": creds["agent_id"], "MEMRO_PRIVATE_KEY": creds["private_key"]}}}}))
@@ -221,14 +237,16 @@ def one_relay(trap, arm, workdir, memory, setting="same"):
     repo = workdir / f"{trap}-{arm}-{uuid.uuid4().hex[:8]}"
     make_repo(repo, arm, setting)
     mcp = None
-    if arm == "memro":
+    env = None
+    if arm.startswith("memro"):
         memory.wipe()
         mcp = memory.config
-    a = run_agent(PROMPT_A.format(task=t["a"], fact=f" Note from the user: {t['fact']}" if t["fact"] else ""), repo, mcp)
+        env = memory.env if arm == "memro-hooks" else None
+    a = run_agent(PROMPT_A.format(task=t["a"], fact=f" Note from the user: {t['fact']}" if t["fact"] else ""), repo, mcp, env)
     a_ok = accept(repo, trap).get("a", False)
     kept = (repo / "NOTES.md").read_text() if arm == "notes" and (repo / "NOTES.md").exists() else ""
     kept = "\n".join(l for l in kept.splitlines() if l[2:] not in EARLIER) if setting == "big" else kept
-    if arm == "memro":
+    if arm.startswith("memro"):
         kept = "\n".join(memory.texts())
     recorded = bool(t["keyword"] and re.search(t["keyword"], kept, re.I))
     if setting == "clone":
@@ -237,7 +255,7 @@ def one_relay(trap, arm, workdir, memory, setting="same"):
         sh("git", "-c", "user.name=bench", "-c", "user.email=bench@memro.co", "commit", "-qm", "A's work", "--allow-empty", cwd=repo)
         sh("git", "clone", "-q", str(repo), f"{repo}-b", cwd=workdir)
         repo = Path(f"{repo}-b")
-    b = run_agent(PROMPT_B.format(task=t["b"]), repo, mcp)
+    b = run_agent(PROMPT_B.format(task=t["b"]), repo, mcp, env)
     passed = accept(repo, trap)
     looked = any(x["name"] == "mcp__memro__recall" or "NOTES.md" in x["input"] for x in b["tools"])
     return {
@@ -254,17 +272,17 @@ def report(path):
     pct = lambda xs: f"{sum(xs)}/{len(xs)}"
     print(f"{'trap':5} {'arm':6} {'trap avoided':>13} {'B task':>7} {'A recorded':>11} {'B looked':>9} {'B secs':>7}")
     for trap in TRAPS:
-        for arm in ("none", "notes", "memro"):
+        for arm in ("none", "notes", "memro", "memro-hooks"):
             rs = [r for r in rows if r["trap"] == trap and r["arm"] == arm]
             if not rs:
                 continue
             secs = sorted(r["b"]["seconds"] for r in rs)[len(rs) // 2]
-            print(f"{trap:5} {arm:6} {pct([r['trap_avoided'] for r in rs]):>13} {pct([r['b_func'] for r in rs]):>7} "
+            print(f"{trap:5} {arm:11} {pct([r['trap_avoided'] for r in rs]):>13} {pct([r['b_func'] for r in rs]):>7} "
                   f"{pct([r['recorded'] for r in rs]) if TRAPS[trap]['keyword'] else '-':>11} {pct([r['b_looked'] for r in rs]):>9} {secs:>7}")
-    for arm in ("none", "notes", "memro"):
+    for arm in ("none", "notes", "memro", "memro-hooks"):
         rs = [r for r in rows if r["arm"] == arm and TRAPS[r["trap"]]["keyword"]]
         if rs:
-            print(f"R1-R3 {arm:6} trap avoided {pct([r['trap_avoided'] for r in rs])}  cost ${sum(r['cost_usd'] for r in rs):.2f}")
+            print(f"R1-R3 {arm:11} trap avoided {pct([r['trap_avoided'] for r in rs])}  cost ${sum(r['cost_usd'] for r in rs):.2f}")
 
 
 def main():
@@ -283,7 +301,7 @@ def main():
     # Outside any project: Claude Code reads CLAUDE.md files from parent folders.
     workdir = Path(tempfile.mkdtemp(prefix="memro-relay-")).resolve()
     arms = args.arms.split(",")
-    memory = BenchMemory(workdir, args.setting) if "memro" in arms else None
+    memory = BenchMemory(workdir, args.setting) if any(a.startswith("memro") for a in arms) else None
     # A stopped run still deletes its throwaway agent (the finally below).
     signal.signal(signal.SIGTERM, lambda *_: exit(143))
     try:
@@ -294,7 +312,7 @@ def main():
                         r = one_relay(trap, arm, workdir, memory, args.setting)
                         f.write(json.dumps(r) + "\n")
                         f.flush()
-                        print(f"run {i + 1} {trap} {arm:6} A {'ok' if r['a_ok'] else 'FAIL'}  recorded {r['recorded']}  "
+                        print(f"run {i + 1} {trap} {arm:11} A {'ok' if r['a_ok'] else 'FAIL'}  recorded {r['recorded']}  "
                               f"B looked {r['b_looked']}  B task {r['b_func']}  trap avoided {r['trap_avoided']}  ${r['cost_usd']}", flush=True)
     finally:
         if memory:
