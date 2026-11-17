@@ -76,3 +76,30 @@ to merge time.
   done, not at the end of its turn, or let a waiting agent queue.
 - **Coordinate merges, not just warn**: for worktrees, a merge order and
   rebasing later branches on earlier ones.
+
+## 6. Rerun with the retry fix (v2)
+
+- **Run directory**: `bench/runs/coordination/launch-20261117-v2/results.jsonl` (local, not committed)
+- **Code**: `fff51a8` (each edit holds its file for 45 s instead of the whole turn; refusals tell the agent to finish other work and retry)
+- **Arms**: shared and memro only, 10 runs each
+
+| Arm | Tasks landed | Runs with lost work | Work stranded in `git stash` | Median wall time | Hook events |
+|---|---|---|---|---|---|
+| shared | 98/100 | 2/10 | 0 runs | 52 s | – |
+| memro | 98/100 | 1/10 | 0 runs | 120 s | 80 waits, 13 refusals, 5 git refusals |
+
+**It ties.** The shared folder did better than in the first run (no stash
+losses this time), and memro gained 2 tasks. Both memro losses were in one
+run, and both agents still stopped and asked the user ("Should I keep waiting
+for the hold to clear…?") instead of retrying, so the retry wording isn't
+enough on its own.
+
+**Waiting didn't drop.** Holding a file for 45 s instead of a whole turn left
+the median at 120 s. Haiku agents edit the same file again within 45 s, so
+holds keep renewing.
+
+**Next**: retry inside the hook (keep waiting while the holder is still
+working) instead of asking the agent to; release a file when its holder's
+edit lands rather than after a fixed hold; and measure where same-tool
+stale-write refusals don't save the shared folder: mixed tools (Codex),
+longer tasks, other machines.
