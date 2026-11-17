@@ -12,7 +12,7 @@ process.env.HOME = HOME;
 process.env.USERPROFILE = HOME;
 
 process.env.MEMRO_HOOK_WAIT_SECONDS = "0"; // the wait is tested on its own below
-const { handle, patchFiles, resourceFor, sessionOf, whereOf } = await import("../src/hook.js");
+const { briefing, handle, handoffNote, herdrOf, lastAssistantText, taskOf, patchFiles, resourceFor, sessionOf, shellFiles, whereOf } = await import("../src/hook.js");
 const { HOOK_FILE, hookSettingsFile, installHooks, removeHooks } = await import("../src/clients.js");
 
 const cfg = { api: "https://api.test", apiKey: "memro_sk_test" };
@@ -69,7 +69,9 @@ test("an edit to a file another session holds is denied, naming the holder", asy
   serve(() => ({ granted: false, holder_session: "codex", holder_resource: "/x", intent: `refactor x [${ROOT_CHECKOUT}]` }));
   const out = await handle(edit("/x/a.js"), cfg);
   assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
-  assert.ok(out.hookSpecificOutput.permissionDecisionReason.includes(`${A} (inside /x) is being changed by codex (refactor x). It is released`));
+  const why = out.hookSpecificOutput.permissionDecisionReason;
+  assert.ok(why.includes(`${A} (inside /x) is being changed by codex (refactor x).`), why);
+  assert.match(why, /Don't stop or ask the user yet: do the rest of your task first, then retry this same edit/);
 });
 
 test("a held file in the same checkout is waited for, then claimed", async () => {
@@ -103,7 +105,9 @@ test("other tools, missing keys and other events do nothing", async () => {
   assert.equal(await handle(edit("/x/a.js", { hook_event_name: "PostToolUse" }), cfg), null);
 });
 
-const inbox = (msgs) => (route) => (route.startsWith("/coordination/active") ? { intents: msgs } : { granted: true });
+const inbox = (msgs) => (route) => (route.startsWith("/coordination/active")
+  ? { intents: msgs.map((m) => ({ resource: "inbox/claude-code:feedbeef", ...m })) }
+  : { granted: true });
 const ev = (hook_event_name, extra = {}) => ({ hook_event_name, session_id: "feedbeef99", cwd: "/w/memro", ...extra });
 
 test("prompt, notification and stop set this window's status", async () => {
@@ -111,7 +115,10 @@ test("prompt, notification and stop set this window's status", async () => {
     serve(inbox([]));
     await handle(ev(event), cfg);
     const claim = calls.find((c) => c.route === "/coordination/claim").body;
-    assert.deepEqual([claim.resource, claim.intent], ["agents/claude-code:feedbeef", `${state} · memro`]);
+    assert.equal(claim.resource, "agents/claude-code:feedbeef");
+    // Outside git the repo is the folder itself.
+    assert.ok(claim.intent.startsWith(`${state} · ${P("/w/memro", "/w/memro")}`), claim.intent);
+    assert.equal(whereOf(claim.intent), rootOf("/w/memro"), "the status says which checkout it works in");
     if (event === "Stop") assert.ok(calls.some((c) => c.route === "/coordination/active"), "stop also frees files");
   }
 });
@@ -130,7 +137,8 @@ test("inside herdr the status records the pane", async () => {
     serve(inbox([]));
     await handle(ev("UserPromptSubmit"), cfg);
     const intent = calls.find((c) => c.route === "/coordination/claim").body.intent;
-    assert.equal(whereOf(intent), `herdr s1 w1:p2@${os.hostname()}`);
+    assert.equal(herdrOf(intent), `herdr s1 w1:p2@${os.hostname()}`);
+    assert.equal(whereOf(intent), rootOf("/w/memro"));
   } finally {
     for (const k of ["HERDR_ENV", "HERDR_SESSION", "HERDR_PANE_ID"]) delete process.env[k];
   }
@@ -215,9 +223,222 @@ test("Codex hooks go to hooks.json with a 3-second SessionEnd and no Notificatio
   assert.equal(file, path.join(HOME, ".codex", "hooks.json"));
   const { hooks } = JSON.parse(fs.readFileSync(file, "utf8"));
   assert.deepEqual(Object.keys(hooks), ["PreToolUse", "UserPromptSubmit", "Stop", "SessionEnd"]);
-  assert.equal(hooks.PreToolUse[0].matcher, "^apply_patch$");
+  assert.equal(hooks.PreToolUse[0].matcher, "^apply_patch$|^Bash$|^mcp__memro__");
   assert.match(hooks.Stop[0].hooks[0].command, /memro-hook\.mjs" codex$/);
   assert.equal(hooks.SessionEnd[0].hooks[0].timeout, 3);
   assert.equal(removeHooks({ tool: "codex" }), true);
   assert.equal(fs.existsSync(file), true);
+});
+
+test("shellFiles finds what a command writes or deletes", () => {
+  assert.deepEqual(shellFiles("echo hi > a.txt && cat b >> 'c d.txt' 2>/dev/null"), ["a.txt", "c d.txt"]);
+  assert.deepEqual(shellFiles("npm test | tee out.log"), ["out.log"]);
+  assert.deepEqual(shellFiles("sed -i '' 's/a/b/' src/x.js src/y.js"), ["src/x.js", "src/y.js"]);
+  assert.deepEqual(shellFiles("sed -i.bak -e s/a/b/ f.txt"), ["f.txt"]);
+  assert.deepEqual(shellFiles("rm -rf build/out.js; ls > /dev/null"), ["build/out.js"]);
+  assert.deepEqual(shellFiles("ls -la && node --test 2>&1 && echo $HOME > *.txt"), []);
+});
+
+const bash = (command, extra = {}) => ({ hook_event_name: "PreToolUse", session_id: "abcdef123456", cwd: "/w/memro", tool_name: "Bash", tool_input: { command }, ...extra });
+
+test("a shell write claims the file like an edit; plain commands make no call", async () => {
+  serve(() => ({ granted: true }));
+  assert.equal(await handle(bash("node --test && git status"), cfg), null);
+  assert.equal(calls.length, 0);
+  await handle(bash("echo x > notes.txt"), cfg);
+  assert.deepEqual(calls.map((c) => c.body.resource), [P("notes.txt", "/w/memro")]);
+});
+
+test("destructive git is refused while another agent works in this checkout", async () => {
+  const here = rootOf("/w/memro");
+  const others = [
+    { resource: "agents/codex:1", session_id: "codex:1", reason: `idle · memro [${here}]` },
+    { resource: "memro/src/a.js", session_id: "claude-code:2", reason: `Claude Code editing a.js [${here}]` },
+    { resource: "memro/src/b.js", session_id: "claude-code:3", reason: "Claude Code editing b.js [/elsewhere@laptop]" },
+  ];
+  serve(() => ({ claims: others }));
+  for (const cmd of ["git stash", "git stash push -u", "git checkout main", "git checkout -- src/a.js", "git checkout .", "git reset --hard HEAD", "git clean -fd", "git restore src", "git switch dev", "cd x && git -C . stash && ls"]) {
+    const out = await handle(bash(cmd), cfg);
+    assert.equal(out?.hookSpecificOutput.permissionDecision, "deny", cmd);
+  }
+  const reason = (await handle(bash("git stash"), cfg)).hookSpecificOutput.permissionDecisionReason;
+  assert.ok(reason.includes("codex:1 (idle · memro)") && reason.includes("claude-code:2 (editing memro/src/a.js)"), reason);
+  assert.ok(!reason.includes("claude-code:3"), "another checkout is not at risk");
+
+  serve(() => assert.fail("no call expected"));
+  for (const cmd of ["git stash list", "git checkout -b feature", "git status", "git commit -am x", "git reset HEAD~1"]) {
+    assert.equal(await handle(bash(cmd), cfg), null, cmd);
+  }
+});
+
+test("destructive git is allowed when nobody else works in this checkout", async () => {
+  serve(() => ({ claims: [{ resource: "agents/claude-code:abcdef12", session_id: "claude-code:abcdef12", reason: `working · memro [${rootOf("/w/memro")}]` }] }));
+  assert.equal(await handle(bash("git stash"), cfg), null);
+});
+
+test("waits, refusals and warnings are logged for the benchmark", async () => {
+  const logFile = path.join(HOME, ".memro", "hooks", "log.jsonl");
+  serve(() => ({ granted: false, holder_session: "codex", intent: "x [/other@laptop]" }));
+  await handle(edit("/x/a.js"), cfg);
+  const last = JSON.parse(fs.readFileSync(logFile, "utf8").trim().split("\n").pop());
+  assert.deepEqual([last.outcome, last.holder, last.resource], ["warn", "codex", A]);
+});
+
+test("Memro's MCP coordination calls get this window as their holder; other MCP calls are left alone", async () => {
+  serve(() => assert.fail("no call expected"));
+  const mcp = (tool_name, tool_input) => ({ hook_event_name: "PreToolUse", session_id: "abcdef123456", cwd: "/w", tool_name, tool_input });
+  const out = await handle(mcp("mcp__memro__claim_task", { resource: "memro/cli", intent: "x" }), cfg);
+  assert.deepEqual(out.hookSpecificOutput.updatedInput, { resource: "memro/cli", intent: "x", holder_session: "claude-code:abcdef12" });
+  assert.equal(out.hookSpecificOutput.permissionDecision, "allow");
+  assert.equal((await handle(mcp("mcp__memro__release_task", { resource: "r" }), cfg, "codex")).hookSpecificOutput.updatedInput.holder_session, "codex:abcdef12");
+  assert.equal(await handle(mcp("mcp__memro__recall", { query: "q" }), cfg), null);
+  assert.equal(await handle(mcp("mcp__other__claim_task", {}), cfg), null);
+});
+
+test("the status names the task from the prompt, and keeps it after the turn", async () => {
+  serve(inbox([]));
+  await handle(ev("UserPromptSubmit", { prompt: "\n  Add   discount support to total()\nmore detail" }), cfg);
+  assert.match(calls.find((c) => c.route === "/coordination/claim").body.intent, / — Add discount support to total\(\) \[/);
+  serve(inbox([]));
+  await handle(ev("Stop"), cfg);
+  assert.match(calls.find((c) => c.route === "/coordination/claim").body.intent, /^idle · .* — Add discount support/);
+  assert.equal(taskOf("x".repeat(100)).length, 80);
+});
+
+test("a prompt is briefed on other agents in the same repo, with clashes flagged", () => {
+  const claims = [
+    { resource: "agents/codex:1", session_id: "codex:1", reason: "working · shop — refactor cart [/a@h]" },
+    { resource: "shop/src/cart.js", session_id: "codex:1", reason: "Codex editing cart.js [/a@h]" },
+    { resource: "agents/claude-code:2", session_id: "claude-code:2", reason: "idle · other-repo — x [/b@h]" },
+    { resource: "other-repo/a.js", session_id: "claude-code:2", reason: "x [/b@h]" },
+    { resource: "agents/claude-code:me", session_id: "claude-code:me", reason: "working · shop — mine [/a@h]" },
+  ];
+  const note = briefing(claims, "claude-code:me", "shop", "Add a discount to src/cart.js");
+  assert.match(note, /other agents are working in shop/);
+  assert.match(note, /- codex:1: working · shop — refactor cart; holds shop\/src\/cart\.js/);
+  assert.match(note, /⚠ Your task mentions shop\/src\/cart\.js, which codex:1 holds/);
+  assert.ok(!note.includes("claude-code:2") && !note.includes("claude-code:me"));
+  assert.equal(briefing(claims.slice(2), "claude-code:me", "shop", ""), null);
+});
+
+test("a turn hands its files off with a note: who, the task and what it said", async () => {
+  serve((route) => (route === "/coordination/active"
+    ? { claims: [{ resource: "shop/a.js", session_id: "claude-code:feedbeef" }, { resource: "agents/claude-code:feedbeef", session_id: "claude-code:feedbeef" }], intents: [] }
+    : { granted: true }));
+  await handle(ev("UserPromptSubmit", { prompt: "Add coupons" }), cfg);
+  serve((route) => (route === "/coordination/active"
+    ? { claims: [{ resource: "shop/a.js", session_id: "claude-code:feedbeef" }, { resource: "agents/claude-code:feedbeef", session_id: "claude-code:feedbeef" }], intents: [] }
+    : { granted: true }));
+  await handle(ev("Stop", { last_assistant_message: "Added  applyCoupon() to a.js;\nkept total() unchanged." }), cfg);
+  const handoffs = calls.filter((c) => c.route === "/coordination/handoff").map((c) => [c.body.resource, c.body.summary]);
+  assert.deepEqual(handoffs, [["shop/a.js", "claude-code:feedbeef (task: Add coupons): Added applyCoupon() to a.js; kept total() unchanged."]]);
+  assert.equal(handoffNote("s", "", ""), "");
+});
+
+test("the next agent to claim a handed-off file sees the note once; its own notes are skipped", async () => {
+  const note = "codex:11112222 (task: Add coupons): Added applyCoupon()";
+  serve(() => ({ granted: true, handoff_summary: note }));
+  const first = await handle(edit("/x/n.js"), cfg);
+  assert.ok(first.hookSpecificOutput.additionalContext.startsWith(`Memro: the last change to ${P("/x/n.js")} was by ${note} (Memro names files`));
+  assert.equal(await handle(edit("/x/n.js"), cfg), null, "shown once");
+  serve(() => ({ granted: true, handoff_summary: "claude-code:abcdef12 (task: mine): did it" }));
+  assert.equal(await handle(edit("/x/m.js"), cfg), null, "own note");
+});
+
+test("lastAssistantText reads the final assistant message from a transcript", () => {
+  const f = path.join(TEST_DIR, "t.jsonl");
+  fs.writeFileSync(f, [
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "first" }] } }),
+    JSON.stringify({ type: "user", message: { content: "ok" } }),
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit" }, { type: "text", text: "Done: renamed x." }] } }),
+    "",
+  ].join("\n"));
+  assert.equal(lastAssistantText(f), "Done: renamed x.");
+  assert.equal(lastAssistantText(path.join(TEST_DIR, "missing.jsonl")), "");
+});
+
+const { run } = await import("../src/hook.js");
+const { toolEvent } = (await import("../src/opencode-plugin.js")).MemroPlugin;
+const pluginExports = Object.keys(await import("../src/opencode-plugin.js"));
+const heldHere = () => serve(() => ({ granted: false, holder_session: "codex:9", intent: `x [${rootOf("/w")}]` }));
+
+test("Gemini CLI: write_file and shell are claimed, a refusal is a deny decision, AfterAgent wakes with a new prompt", async () => {
+  heldHere();
+  const out = await run({ hook_event_name: "BeforeTool", session_id: "g1234567890", cwd: "/w", tool_name: "write_file", tool_input: { file_path: "/w/a.js", content: "x" } }, cfg, "gemini-cli");
+  assert.equal(out.decision, "deny");
+  assert.match(out.reason, /is being changed by codex:9/);
+  assert.equal(calls[0].body.session_id, "gemini-cli:g1234567");
+  serve(() => ({ granted: true }));
+  assert.equal(await run({ hook_event_name: "BeforeTool", session_id: "g1", cwd: "/w", tool_name: "run_shell_command", tool_input: { command: "echo x > b.txt" } }, cfg, "gemini-cli"), null);
+  assert.deepEqual(calls.map((c) => c.body.resource), [P("/w/b.txt", "/w")]);
+  serve(inbox([]));
+  assert.equal(await run({ hook_event_name: "BeforeTool", session_id: "g1", cwd: "/w", tool_name: "read_file", tool_input: {} }, cfg, "gemini-cli"), null);
+  serve((route) => (route.startsWith("/coordination/active")
+    ? { claims: [], intents: [{ id: "gm1", resource: "inbox/gemini-cli:g1", session_id: "codex:1", intent: "ping" }] } : { granted: true }));
+  const woke = await run({ hook_event_name: "AfterAgent", session_id: "g1", cwd: "/w", stop_hook_active: false }, cfg, "gemini-cli");
+  assert.equal(woke.decision, "deny");
+  assert.match(woke.reason, /from codex:1: ping/);
+});
+
+test("Cursor: file writes and shell commands are claimed, refusals use permission deny, stop wakes with a follow-up", async () => {
+  heldHere();
+  const out = await run({ hook_event_name: "preToolUse", conversation_id: "c1234567890", workspace_roots: ["/w"], tool_name: "Write", tool_input: { file_path: "/w/a.js" } }, cfg, "cursor");
+  assert.equal(out.permission, "deny");
+  assert.equal(calls[0].body.session_id, "cursor:c1234567");
+  serve(() => ({ granted: true }));
+  await run({ hook_event_name: "beforeShellExecution", conversation_id: "c1", command: "rm old.js", cwd: "/w" }, cfg, "cursor");
+  assert.deepEqual(calls.map((c) => c.body.resource), [P("/w/old.js", "/w")]);
+  serve(() => assert.fail("no call expected"));
+  assert.equal(await run({ hook_event_name: "preToolUse", conversation_id: "c1", workspace_roots: ["/w"], tool_name: "Shell", tool_input: {} }, cfg, "cursor"), null, "shell is handled by beforeShellExecution");
+  serve((route) => (route.startsWith("/coordination/active")
+    ? { claims: [], intents: [{ id: "cm1", resource: "inbox/cursor:c1", session_id: "codex:1", intent: "ping" }] } : { granted: true }));
+  const woke = await run({ hook_event_name: "stop", conversation_id: "c1", workspace_roots: ["/w"], loop_count: 0 }, cfg, "cursor");
+  assert.match(woke.followup_message, /from codex:1: ping/);
+});
+
+test("OpenCode plugin maps its tools onto the hook's, including patches", () => {
+  assert.deepEqual(toolEvent("bash", { command: "ls" }), { tool_name: "Bash", tool_input: { command: "ls" } });
+  assert.deepEqual(toolEvent("edit", { filePath: "/w/a.js" }), { tool_name: "Edit", tool_input: { file_path: "/w/a.js" } });
+  assert.deepEqual(toolEvent("patch", { patchText: "*** Update File: a.js" }).tool_name, "apply_patch");
+  assert.equal(toolEvent("read", {}), null);
+  assert.deepEqual(pluginExports, ["MemroPlugin"], "OpenCode loads every export as a plugin");
+});
+
+test("installers: Gemini nests with ms timeouts, Cursor is flat with a version, OpenCode gets a plugin file", () => {
+  process.env.XDG_CONFIG_HOME = path.join(HOME, ".config");
+  const g = JSON.parse(fs.readFileSync(installHooks({ tool: "gemini-cli" }), "utf8"));
+  assert.equal(g.hooks.BeforeTool[0].matcher, "write_file|replace|run_shell_command");
+  assert.equal(g.hooks.BeforeTool[0].hooks[0].timeout, 90000);
+  assert.match(g.hooks.AfterAgent[0].hooks[0].command, /memro-hook\.mjs" gemini-cli$/);
+  const cfile = installHooks({ tool: "cursor" });
+  const c = JSON.parse(fs.readFileSync(cfile, "utf8"));
+  assert.equal(c.version, 1);
+  assert.deepEqual(Object.keys(c.hooks), ["preToolUse", "beforeShellExecution", "beforeSubmitPrompt", "stop", "sessionEnd"]);
+  assert.match(c.hooks.stop[0].command, / cursor$/);
+  installHooks({ tool: "cursor" });
+  assert.equal(JSON.parse(fs.readFileSync(cfile, "utf8")).hooks.stop.length, 1, "idempotent");
+  assert.equal(removeHooks({ tool: "cursor" }), true);
+  assert.equal(JSON.parse(fs.readFileSync(cfile, "utf8")).hooks, undefined);
+  const plugin = installHooks({ tool: "opencode" });
+  assert.equal(plugin, path.join(HOME, ".config", "opencode", "plugins", "memro.js"));
+  assert.ok(fs.readFileSync(plugin, "utf8").includes("export const MemroPlugin"));
+  assert.equal(removeHooks({ tool: "opencode" }), true);
+  assert.equal(fs.existsSync(plugin), false);
+});
+
+test("each edit holds its file briefly, and the turn's handoff covers files whose hold ran out", async () => {
+  serve(() => ({ granted: true }));
+  const e = (file) => ({ hook_event_name: "PreToolUse", session_id: "touch123456", cwd: "/w", tool_name: "Edit", tool_input: { file_path: file } });
+  await handle(e("/w/a.js"), cfg);
+  await handle(e("/w/a.js"), cfg);
+  await handle(e("/w/b.js"), cfg);
+  assert.equal(calls[0].body.ttl_seconds, 45);
+  // At the end of the turn only b.js is still held; a.js's hold ran out.
+  serve((route) => (route === "/coordination/active"
+    ? { claims: [{ resource: P("/w/b.js", "/w"), session_id: "claude-code:touch123" }], intents: [] } : { granted: true }));
+  await handle({ hook_event_name: "Stop", session_id: "touch123456", cwd: "/w", last_assistant_message: "done" }, cfg);
+  assert.deepEqual(calls.filter((c) => c.route === "/coordination/handoff").map((c) => c.body.resource).sort(), [P("/w/a.js", "/w"), P("/w/b.js", "/w")].sort());
+  serve((route) => (route === "/coordination/active" ? { claims: [], intents: [] } : { granted: true }));
+  await handle({ hook_event_name: "Stop", session_id: "touch123456", cwd: "/w", last_assistant_message: "again" }, cfg);
+  assert.equal(calls.filter((c) => c.route === "/coordination/handoff").length, 0, "the list is cleared each turn");
 });

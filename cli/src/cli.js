@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { CLIENTS, HOOK_TARGETS, KEY_ENV, findClient, installHooks, onPath, removeHooks, withSession } from "./clients.js";
-import { whereOf } from "./hook.js";
+import { herdrOf, untagged } from "./hook.js";
 import { pick, pickOne, promptText } from "./picker.js";
 import { codexTrusts, diagnose } from "./doctor.js";
 import { installInstructions, uninstallInstructions } from "./instructions.js";
@@ -43,8 +43,9 @@ Options
   --yes, -y                  Don't ask: use every detected tool
   --no-instructions          Don't add the "use Memro automatically" note to
                              the tools' instructions (CLAUDE.md, AGENTS.md…)
-  --no-hooks                 Don't add the Claude Code and Codex hooks that claim each file
-                             before it is edited, so two agents never edit one file
+  --no-hooks                 Don't add the hooks that claim each file before it is
+                             edited, so two agents never edit one file (Claude Code,
+                             Codex, Cursor, Gemini CLI, OpenCode)
   --staging | --local        Use staging or a local server instead of Memro Cloud
   --api <url>                Use a specific Memro API (self-hosted)
   --from <agent>             With send: who the message is from (default: you)
@@ -567,7 +568,7 @@ async function agents(opts) {
   if (!bySession.size) return console.log("No agents are active right now.");
   const width = Math.max(...[...bySession.keys()].map((s) => s.length)) + 2;
   for (const [session, { status: st, files }] of bySession) {
-    console.log(`${session.padEnd(width)}${st ? `${st.reason}  ${ui.c.dim(ago(st.heartbeat_at))}` : ui.c.dim("no status (MCP tools only)")}`);
+    console.log(`${session.padEnd(width)}${st ? `${untagged(st.reason)}  ${ui.c.dim(ago(st.heartbeat_at))}` : ui.c.dim("no status (MCP tools only)")}`);
     for (const f of files) console.log(ui.c.dim(`${"".padEnd(width)}holds ${f}`));
   }
 }
@@ -593,7 +594,7 @@ async function send(opts) {
 export async function wakeInHerdr(api, key, to, run = execFileSync) {
   const res = await request(api, `/coordination/active?resource=${encodeURIComponent(`agents/${to}`)}`, { key });
   const status = res.data?.claims?.find((c) => c.resource === `agents/${to}`);
-  const m = whereOf(status?.reason).match(/^herdr (\S+) (\S+)@(.+)$/);
+  const m = herdrOf(status?.reason).match(/^herdr (\S+) (\S+)@(.+)$/);
   if (!m || m[3] !== os.hostname() || !status.reason.startsWith("idle") || !onPath("herdr")) return false;
   try {
     run("herdr", ["--session", m[1], "agent", "prompt", m[2],

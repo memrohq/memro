@@ -41,6 +41,11 @@ const STATUS_TTL = 7200; // the server's maximum; SessionEnd clears it sooner
 // give up on its task. MEMRO_HOOK_WAIT_SECONDS changes it; keep it below the
 // PreToolUse hook timeout in clients.js (90 s).
 const waitMs = () => Number(process.env.MEMRO_HOOK_WAIT_SECONDS ?? 60) * 1000;
+// Each edit holds its file this long, and the next edit renews it, so a file
+// the agent is done with frees up soon instead of at the end of its turn (the
+// benchmark spent half its time waiting on turn-long holds). Uncommitted work
+// stays protected from git by the agent's status, not by its file holds.
+const holdSeconds = () => Number(process.env.MEMRO_HOOK_HOLD_SECONDS ?? 45);
 const POLL_MS = 3000;
 const STATES = { UserPromptSubmit: "working", Notification: "waiting for you", Stop: "idle" };
 
@@ -58,10 +63,73 @@ export const TOOLS = {
     files: (i) => (["apply_patch", "Edit", "Write"].includes(i.tool_name) ? patchFiles(i.tool_input?.command) : []),
   },
 };
+// These tools' adapters (below) turn their events into Claude Code's shape.
+for (const [id, name] of [["gemini-cli", "Gemini CLI"], ["cursor", "Cursor"], ["opencode", "OpenCode"]]) {
+  // OpenCode's patch tool arrives as apply_patch, like Codex's.
+  TOOLS[id] = { name, files: (i) => (i.tool_name === "apply_patch" ? patchFiles(i.tool_input?.command) : TOOLS["claude-code"].files(i)) };
+}
+
+const first = (...v) => v.find((x) => typeof x === "string" && x) || "";
+const asObject = (v) => { if (typeof v !== "string") return v || {}; try { return JSON.parse(v); } catch { return {}; } };
+const editInput = (args) => ({ file_path: first(args.file_path, args.filePath, args.path, args.target_file) });
+
+/** Per tool: `in` turns its hook input into Claude Code's (null to ignore the
+ * event), `out` turns the reply back into its format (null when it has no way
+ * to say it, e.g. a note on a tool call in Gemini CLI). */
+export const ADAPTERS = {
+  "gemini-cli": {
+    in(raw) {
+      const event = { BeforeTool: "PreToolUse", BeforeAgent: "UserPromptSubmit", AfterAgent: "Stop", SessionEnd: "SessionEnd", Notification: "Notification" }[raw.hook_event_name];
+      if (!event) return null;
+      const args = asObject(raw.tool_input);
+      const tool = raw.tool_name === "run_shell_command" ? "Bash" : ["write_file", "replace"].includes(raw.tool_name) ? "Edit" : raw.tool_name;
+      return { ...raw, hook_event_name: event, tool_name: tool, tool_input: tool === "Bash" ? { command: args.command } : tool === "Edit" ? editInput(args) : args };
+    },
+    out(event, r) {
+      const h = r.hookSpecificOutput;
+      if (h?.permissionDecision === "deny") return { decision: "deny", reason: h.permissionDecisionReason };
+      // AfterAgent: a denied response goes back to the agent as a new prompt.
+      if (r.decision === "block") return { decision: "deny", reason: r.reason };
+      if (event === "UserPromptSubmit" && h?.additionalContext) return { hookSpecificOutput: { hookEventName: "BeforeAgent", additionalContext: h.additionalContext } };
+      return null;
+    },
+  },
+  cursor: {
+    in(raw) {
+      const base = { session_id: raw.conversation_id || raw.session_id, cwd: first(raw.cwd, raw.workspace_roots?.[0]) };
+      switch (raw.hook_event_name) {
+        case "beforeShellExecution": return { ...base, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: raw.command } };
+        // Shell runs through beforeShellExecution; preToolUse is used for file writes.
+        case "preToolUse": return ["Write", "Delete"].includes(raw.tool_name)
+          ? { ...base, hook_event_name: "PreToolUse", tool_name: "Edit", tool_input: editInput(asObject(raw.tool_input)) } : null;
+        case "beforeSubmitPrompt": return { ...base, hook_event_name: "UserPromptSubmit", prompt: raw.prompt };
+        case "stop": return { ...base, hook_event_name: "Stop", stop_hook_active: (raw.loop_count || 0) > 0, transcript_path: raw.transcript_path };
+        case "sessionEnd": return { ...base, hook_event_name: "SessionEnd" };
+        default: return null;
+      }
+    },
+    out(event, r) {
+      const h = r.hookSpecificOutput;
+      if (h?.permissionDecision === "deny") return { permission: "deny", agent_message: h.permissionDecisionReason, user_message: h.permissionDecisionReason };
+      // stop: a follow-up message is submitted as the next prompt.
+      if (r.decision === "block") return { followup_message: r.reason };
+      return null;
+    },
+  },
+};
+
+/** Run one hook event for `tool`: its native input in, its native reply out (or null). */
+export async function run(raw, cfg, tool) {
+  const adapter = ADAPTERS[tool];
+  const input = adapter ? adapter.in(raw) : raw;
+  if (!input) return null;
+  const out = await handle(input, cfg, tool);
+  return out && adapter ? adapter.out(input.hook_event_name, out) : out;
+}
 
 /** This window as a lease holder: two windows are two holders. Every window's
  * MCP tools share the bare tool id (the MCP URL's ?session_id=<tool>). */
-export const sessionOf = (input, tool = "claude-code") => `${tool}:${String(input.session_id || "unknown").slice(0, 8)}`;
+export const sessionOf = (input, tool = "claude-code") => `${tool}:${String(input.session_id || "unknown").replace(/^ses_/, "").slice(0, 8)}`;
 
 const git = (cwd, ...args) => {
   try {
@@ -96,9 +164,13 @@ export function locate(file, cwd = process.cwd()) {
 const posix = (p) => p.split(path.sep).join("/");
 
 // shortcut: where a holder works travels at the end of its free-text intent as
-// "[…]" until leases get a metadata field.
-const tagged = (text, where) => `${text} [${where}]`;
-export const whereOf = (intent = "") => intent.match(/\[([^\]]+)\]$/)?.[1] || "";
+// "[<checkout>]", and its herdr pane as "[herdr …]", until leases get a
+// metadata field.
+const tagged = (text, ...tags) => text + tags.filter(Boolean).map((t) => ` [${t}]`).join("");
+const tagsOf = (intent = "") => [...(intent.match(/( \[[^\]]+\])+$/)?.[0] || "").matchAll(/\[([^\]]+)\]/g)].map((m) => m[1]);
+export const whereOf = (intent) => tagsOf(intent).find((t) => !t.startsWith("herdr ")) || "";
+export const herdrOf = (intent) => tagsOf(intent).find((t) => t.startsWith("herdr ")) || "";
+export const untagged = (intent = "") => intent.replace(/( \[[^\]]+\])+$/, "");
 
 /** This pane inside herdr, as "herdr <session> <pane>@<host>", or "". */
 export const herdrPane = (env = process.env) =>
@@ -128,11 +200,66 @@ async function call(cfg, route, json) {
 const seenFile = (session) => path.join(os.homedir(), ".memro", "hooks", `seen-${session.replace(/[^\w-]/g, "_")}.json`);
 const readSeen = (session) => { try { return JSON.parse(fs.readFileSync(seenFile(session), "utf8")); } catch { return []; } };
 
+// The window's current task, kept beside the hook so Stop and Notification
+// statuses still say what the agent was doing.
+const taskFile = (session) => path.join(os.homedir(), ".memro", "hooks", `task-${session.replace(/[^\w-]/g, "_")}.txt`);
+const readTask = (session) => { try { return fs.readFileSync(taskFile(session), "utf8"); } catch { return ""; } };
+function writeTask(session, task) {
+  try {
+    fs.mkdirSync(path.dirname(taskFile(session)), { recursive: true });
+    fs.writeFileSync(taskFile(session), task);
+  } catch { /* the status just won't name the task */ }
+}
+
+// Agents took "shop/src/cart.js" for a different file than their src/cart.js.
+const NAMES = "(Memro names files <repo>/<path in repo>, the same in every clone and worktree: it is the file in your checkout too.)";
+
+/** A task label from a prompt: its first line, at most 80 characters. */
+export const taskOf = (prompt = "") => {
+  const line = String(prompt).split("\n").find((l) => l.trim()) || "";
+  const t = line.replace(/\s+/g, " ").trim();
+  return t.length > 80 ? `${t.slice(0, 79)}…` : t;
+};
+
+/** The repo a folder belongs to, as lease names start with it ("memro"), or
+ * the folder itself outside git. */
+const repoOf = (cwd = process.cwd()) => {
+  const { resource } = locate(path.join(cwd, "_"), cwd);
+  const folder = posix(path.resolve(cwd));
+  return resource.startsWith(folder) ? folder : resource.split("/")[0];
+};
+
+/** Who else works in this repo right now, for the agent to plan around before
+ * it starts; null when nobody does. */
+export function briefing(claims, session, repo, prompt = "") {
+  const who = new Map();
+  const entry = (s) => who.get(s) || who.set(s, { status: "", files: [] }).get(s);
+  for (const c of claims) {
+    if (c.session_id === session) continue;
+    if (c.resource.startsWith("agents/")) {
+      if (untagged(c.reason).split(" · ")[1]?.split(" — ")[0] === repo) entry(c.session_id).status = untagged(c.reason);
+    } else if (c.resource.startsWith(`${repo}/`)) {
+      entry(c.session_id).files.push(c.resource);
+    }
+  }
+  if (!who.size) return null;
+  const lines = [...who].map(([s, { status, files }]) =>
+    `- ${s}: ${status || "editing"}${files.length ? `; holds ${files.join(", ")}` : ""}`);
+  // A file the task names (by path or file name) that someone holds.
+  const text = String(prompt);
+  const clashes = [...who].flatMap(([s, { files }]) => files
+    .filter((f) => text.includes(f.slice(repo.length + 1)) || text.includes(path.posix.basename(f)))
+    .map((f) => `⚠ Your task mentions ${f}, which ${s} holds right now: do other parts first and come back to it; an edit to it waits for it to free up.`));
+  return [
+    `Memro: other agents are working in ${repo} right now. Go ahead with your task: files nobody holds are free, and an edit to a held file waits for it. ${NAMES}`,
+    ...lines, ...clashes,
+  ].join("\n");
+}
+
 /** Messages for this window that it hasn't seen yet, marked as seen. */
-async function unread(cfg, session) {
-  const { intents = [] } = await call(cfg, `/coordination/active?resource=${encodeURIComponent(`inbox/${session}`)}`);
+function unread(intents, session) {
   const seen = readSeen(session);
-  const fresh = intents.filter((m) => !seen.includes(m.id));
+  const fresh = intents.filter((m) => m.resource === `inbox/${session}` && !seen.includes(m.id));
   if (fresh.length) {
     fs.mkdirSync(path.dirname(seenFile(session)), { recursive: true });
     // Messages expire within two hours, so the newest 200 ids are plenty.
@@ -151,10 +278,71 @@ const deny = (reason) => ({
 });
 
 /** Release this session's file leases, and its status too when `all`. */
-async function releaseFiles(cfg, session, { all = false } = {}) {
+async function releaseFiles(cfg, session, { all = false, note = "" } = {}) {
   const { claims = [] } = await call(cfg, "/coordination/active");
-  await Promise.all(claims.filter((c) => c.session_id === session && (all || !c.resource.startsWith("agents/"))).map((c) =>
-    call(cfg, "/coordination/release", { resource: c.resource, session_id: session, status: "completed" }).catch(() => {})));
+  const held = claims.filter((c) => c.session_id === session && (all || !c.resource.startsWith("agents/"))).map((c) => c.resource);
+  // Files this turn edited whose short holds already ran out still get the note
+  // (the server records a handoff without an active lease).
+  const resources = [...new Set([...held, ...(note ? readTouched(session) : [])])];
+  writeTouched(session, []);
+  await Promise.all(resources.map((resource) =>
+    // A file handed off with a note shows the note to the next agent that claims it.
+    (note && !resource.startsWith("agents/")
+      ? call(cfg, "/coordination/handoff", { resource, session_id: session, summary: note })
+      : Promise.reject()).catch(() =>
+      call(cfg, "/coordination/release", { resource, session_id: session, status: "completed" })).catch(() => {})));
+}
+
+// The files this turn edited, for the handoff note at its end.
+const touchedFile = (session) => path.join(os.homedir(), ".memro", "hooks", `touched-${session.replace(/[^\w-]/g, "_")}.json`);
+const readTouched = (session) => { try { return JSON.parse(fs.readFileSync(touchedFile(session), "utf8")); } catch { return []; } };
+function writeTouched(session, list) {
+  try {
+    fs.mkdirSync(path.dirname(touchedFile(session)), { recursive: true });
+    fs.writeFileSync(touchedFile(session), JSON.stringify(list));
+  } catch { /* the note then covers only files still held */ }
+}
+
+/** The note a turn leaves on the files it changed: who, the task, and the
+ * start of the agent's last message, which usually says what it did. It
+ * starts with the session, so an agent can skip its own notes. */
+export function handoffNote(session, task, lastMessage = "") {
+  const said = String(lastMessage).replace(/\s+/g, " ").trim();
+  if (!task && !said) return "";
+  return `${session}${task ? ` (task: ${task})` : ""}: ${said.length > 400 ? `${said.slice(0, 399)}…` : said || "no summary"}`;
+}
+
+/** The last assistant text in a Claude Code transcript (JSONL), read from its end. */
+export function lastAssistantText(file) {
+  try {
+    const size = fs.statSync(file).size;
+    const fd = fs.openSync(file, "r");
+    const buf = Buffer.alloc(Math.min(size, 256 * 1024));
+    fs.readSync(fd, buf, 0, buf.length, size - buf.length);
+    fs.closeSync(fd);
+    for (const line of buf.toString("utf8").split("\n").reverse()) {
+      if (!line.includes('"assistant"')) continue;
+      try {
+        const content = JSON.parse(line).message?.content;
+        const text = Array.isArray(content) ? content.filter((c) => c.type === "text").map((c) => c.text).join(" ") : "";
+        if (text.trim()) return text;
+      } catch { /* a line cut at the start of the buffer */ }
+    }
+  } catch { /* no transcript */ }
+  return "";
+}
+
+// Handoff notes this window has already been shown, as "<resource> <note>".
+const notesFile = (session) => path.join(os.homedir(), ".memro", "hooks", `notes-${session.replace(/[^\w-]/g, "_")}.json`);
+function firstSighting(session, key) {
+  let seen = [];
+  try { seen = JSON.parse(fs.readFileSync(notesFile(session), "utf8")); } catch { /* none yet */ }
+  if (seen.includes(key)) return false;
+  try {
+    fs.mkdirSync(path.dirname(notesFile(session)), { recursive: true });
+    fs.writeFileSync(notesFile(session), JSON.stringify([...seen, key].slice(-200)));
+  } catch { /* shown again next time */ }
+  return true;
 }
 
 /** What to print for one hook event: a hook response, or null to stay silent. */
@@ -167,37 +355,115 @@ export async function handle(input, cfg, tool = "claude-code") {
   if (event === "SessionEnd") {
     await releaseFiles(cfg, session, { all: true });
     fs.rmSync(seenFile(session), { force: true });
+    fs.rmSync(taskFile(session), { force: true });
+    fs.rmSync(notesFile(session), { force: true });
+    fs.rmSync(touchedFile(session), { force: true });
     return null;
   }
 
   if (STATES[event]) {
-    const label = `${STATES[event]} · ${path.basename(input.cwd || "")}`;
+    const repo = repoOf(input.cwd);
+    // The task is the prompt's first line; later states keep showing it.
+    if (event === "UserPromptSubmit") writeTask(session, taskOf(input.prompt));
+    const task = readTask(session);
+    const label = `${STATES[event]} · ${repo}${task ? ` — ${task}` : ""}`;
     const status = call(cfg, "/coordination/claim", {
       resource: `agents/${session}`,
       session_id: session,
-      intent: herdrPane() ? tagged(label, herdrPane()) : label,
+      // The checkout lets the git guard see agents with uncommitted work here.
+      intent: tagged(label, checkoutOf(input.cwd), herdrPane()),
       ttl_seconds: STATUS_TTL,
     });
     // A stop that a message already restarted doesn't check again, so two
     // agents can't keep waking each other forever.
     const quiet = event === "Notification" || (event === "Stop" && input.stop_hook_active);
-    const [, inbox] = await Promise.all([status, quiet ? [] : unread(cfg, session)]);
-    if (!inbox.length) {
-      if (event === "Stop") await releaseFiles(cfg, session);
+    const [, active] = await Promise.all([status, quiet ? { claims: [], intents: [] } : call(cfg, "/coordination/active")]);
+    const inbox = unread(active.intents || [], session);
+    if (event === "Stop") {
+      if (inbox.length) return { decision: "block", reason: formatMessages(inbox, session) };
+      await releaseFiles(cfg, session, { note: handoffNote(session, task, input.last_assistant_message || lastAssistantText(input.transcript_path)) });
       return null;
     }
-    if (event === "Stop") return { decision: "block", reason: formatMessages(inbox, session) };
-    return { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: formatMessages(inbox, session) } };
+    const notes = [
+      event === "UserPromptSubmit" && briefing(active.claims || [], session, repo, input.prompt),
+      inbox.length && formatMessages(inbox, session),
+    ].filter(Boolean);
+    return notes.length ? { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: notes.join("\n\n") } } : null;
   }
 
   if (event !== "PreToolUse") return null;
+  if (MEMRO_COORDINATION.test(input.tool_name || "")) {
+    // Make the window, not the tool, the holder of what it claims through
+    // MCP, so those claims and the hook's are one holder.
+    return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { ...input.tool_input, holder_session: session } } };
+  }
+  const command = input.tool_name === "Bash" ? String(input.tool_input?.command || "") : "";
+  if (command && GIT_WIPES.test(command)) {
+    const why = await othersHere(cfg, input.cwd, session);
+    if (why.length) {
+      log({ tool, session, outcome: "git-deny", command: command.slice(0, 200) });
+      return deny(
+        `Memro: \`${command.match(GIT_WIPES)[0]}\` would throw away uncommitted changes in this checkout, and other agents work here: ${why.join("; ")}. ` +
+        "Commit or revert only your own files by path instead (git add <your files> && git commit), or ask the user.",
+      );
+    }
+  }
   const warnings = [];
-  for (const file of TOOLS[tool].files(input)) {
+  for (const file of command ? shellFiles(command) : TOOLS[tool].files(input)) {
     const verdict = await claimFile(cfg, file, input.cwd, session, tool);
     if (verdict?.deny) return deny(verdict.deny);
     if (verdict?.warn) warnings.push(verdict.warn);
+    if (verdict?.note) warnings.push(verdict.note);
   }
   return warnings.length ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: warnings.join("\n") } } : null;
+}
+
+/** Memro's MCP coordination tools, as Claude Code and Codex name them. */
+export const MEMRO_COORDINATION = /^mcp__memro__(claim_task|heartbeat_task|release_task|handoff_task|log_intent|pre_action_check)$/;
+
+// Git commands that throw away uncommitted work in the working tree, which in a
+// shared checkout is every agent's work, not only the caller's.
+const GIT_WIPES = /\bgit\s+(?:-C\s+\S+\s+)?(?:stash(?!\s+(?:list|show)\b)|reset\s+--hard|clean\s+-\w*f|restore\b|switch\b|checkout\s+(?:-f\b|--(?:\s|$)|\.(?=\s|$|[;&|])|[^-\s;&|]\S*(?=\s*(?:$|[;&|]))))/;
+
+/** Files a shell command writes or deletes: redirects, tee, sed -i and rm.
+ * shortcut: a heuristic, not a shell parser; paths with globs or variables and
+ * writes by other programs (cp, mv, scripts) go unclaimed. */
+export function shellFiles(command = "") {
+  const files = [];
+  for (const seg of command.split(/&&|\|\||[;|\n]/)) {
+    for (const m of seg.matchAll(/(?:^|[^<>&\d])>>?\s*("[^"]*"|'[^']*'|[^\s<>&]+)/g)) files.push(m[1]);
+    const words = (seg.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((w) => w.replace(/^(["'])(.*)\1$/, "$2"));
+    const args = words.slice(1).filter((w) => !w.startsWith("-"));
+    if (words[0] === "tee" || words[0] === "rm") files.push(...args);
+    // sed -i [''] 'script' file…: the files are what follows the script.
+    if (words[0] === "sed" && words.some((w) => /^-[a-zA-Z]*i/.test(w))) files.push(...args.filter((w) => w !== "").slice(1));
+  }
+  return files.map((f) => f.replace(/^(["'])(.*)\1$/, "$2")).filter((f) => f && !f.startsWith("/dev/") && !/[*?$`]/.test(f));
+}
+
+/** Other agents with work in the checkout at `cwd`: who holds files there, or
+ * has its status there (an idle agent's uncommitted edits are still on disk). */
+async function othersHere(cfg, cwd, session) {
+  const here = checkoutOf(cwd);
+  const { claims = [] } = await call(cfg, "/coordination/active");
+  const others = claims.filter((c) => c.session_id !== session && whereOf(c.reason) === here);
+  const who = new Map();
+  for (const c of others) {
+    const s = who.get(c.session_id) || who.set(c.session_id, []).get(c.session_id);
+    s.push(c.resource.startsWith("agents/") ? untagged(c.reason) : `editing ${c.resource}`);
+  }
+  return [...who].map(([s, what]) => `${s} (${what.join(", ")})`);
+}
+
+const checkoutOf = (cwd = process.cwd()) => locate(path.join(cwd, "_"), cwd).checkout;
+
+/** Append one coordination event to ~/.memro/hooks/log.jsonl, for `memro`
+ * and the benchmark to count waits and refusals. Never fails the hook. */
+function log(event) {
+  try {
+    fs.mkdirSync(path.join(os.homedir(), ".memro", "hooks"), { recursive: true });
+    fs.appendFileSync(path.join(os.homedir(), ".memro", "hooks", "log.jsonl"), JSON.stringify({ t: new Date().toISOString(), ...event }) + "\n");
+  } catch { /* logging is best effort */ }
 }
 
 /** Claim one file: null when it's ours, { warn } when another checkout has it, { deny } when this one does. */
@@ -207,6 +473,7 @@ async function claimFile(cfg, file, cwd, session, tool) {
     resource,
     session_id: session,
     intent: tagged(`${TOOLS[tool].name} editing ${path.basename(file)}`, checkout),
+    ttl_seconds: holdSeconds(),
   });
   // shortcut: a claim made through the MCP tools can't be told apart from this
   // window's own, so it never blocks; drop this once the MCP URL carries a
@@ -219,22 +486,36 @@ async function claimFile(cfg, file, cwd, session, tool) {
     await new Promise((done) => setTimeout(done, POLL_MS));
     r = await claim();
   }
-  if (ours(r)) return null;
+  if (ours(r)) {
+    if (waited) log({ tool, session, resource, outcome: "waited" });
+    const touched = readTouched(session);
+    if (!touched.includes(resource)) writeTouched(session, [...touched, resource]);
+    const note = r.handoff_summary;
+    if (note && !note.startsWith(`${session} `) && !note.startsWith(`${session}:`) && firstSighting(session, `${resource} ${note}`)) {
+      return { note: `Memro: the last change to ${resource} was by ${note} ${NAMES}` };
+    }
+    return null;
+  }
 
   const what = r.holder_resource && r.holder_resource !== resource ? `${resource} (inside ${r.holder_resource})` : resource;
   const holder = r.holder_session || r.holder || "another agent";
   const theirs = whereOf(r.intent);
-  const doing = r.intent ? ` (${r.intent.replace(/ \[[^\]]+\]$/, "")})` : "";
+  const doing = r.intent ? ` (${untagged(r.intent)})` : "";
   if (theirs && theirs !== checkout) {
+    log({ tool, session, resource, outcome: "warn", holder });
     return {
       warn: `Memro: ${holder} is also changing ${what}${doing} in another checkout (${theirs}). ` +
         "Your edit goes ahead, but expect a merge conflict; tell the user if your changes overlap.",
     };
   }
+  log({ tool, session, resource, outcome: "deny", holder });
   return {
-    deny: `Memro: ${what} is being changed by ${holder}${doing}${waited ? `, and was still held after waiting ${Math.round(waited / 1000)}s` : ""}. It is released when that agent finishes its turn. ` +
-    `Meanwhile work on something else, message it (npx memro-cli send ${holder} "<message>" --from ${session}), ` +
-    "or tell the user who holds it and ask how to proceed.",
+    // Benchmark agents told "ask the user" stopped and lost the task; the file
+    // is usually free again within a minute or two.
+    deny: `Memro: ${what} is being changed by ${holder}${doing}${waited ? `, and was still held after waiting ${Math.round(waited / 1000)}s` : ""}. ` +
+    "It frees up as soon as that agent stops editing it. Don't stop or ask the user yet: do the rest of your task first, " +
+    "then retry this same edit (re-read the file first, since it may have changed). " +
+    `Only if it is still refused after several retries, message the holder (npx memro-cli send ${holder} "<message>" --from ${session}) or tell the user. ${NAMES}`,
   };
 }
 
@@ -242,7 +523,7 @@ export async function main(stdin = process.stdin, stdout = process.stdout) {
   let text = "";
   for await (const chunk of stdin) text += chunk;
   try {
-    const out = await handle(JSON.parse(text), loadConfig(), process.argv[2] || "claude-code");
+    const out = await run(JSON.parse(text), loadConfig(), process.argv[2] || "claude-code");
     if (out) stdout.write(JSON.stringify(out) + "\n");
   } catch {
     // fail open: see the top of this file

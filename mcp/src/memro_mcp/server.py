@@ -78,6 +78,12 @@ sse = SseServerTransport("/messages/")
 
 # Context variables for request-scoped state
 current_session_id: ContextVar[str] = ContextVar("session_id", default="default")
+
+# Every window of a tool shares the connection's session (?session_id=claude-code),
+# so the Memro hooks fill in the window's own holder, the one they claim files
+# with (memro-cli src/hook.js); the model leaves it out.
+HOLDER_SESSION_PROP = {"type": "string", "description": "Filled in by the Memro hooks; leave it out."}
+COORDINATION_TOOLS = {"claim_task", "heartbeat_task", "release_task", "log_intent", "handoff_task", "pre_action_check"}
 current_auth_info: ContextVar[dict] = ContextVar("auth_info", default={})
 # The agent an SSE connection authenticated as; tool calls on that connection
 # run in its context.
@@ -277,6 +283,7 @@ def _all_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "holder_session": HOLDER_SESSION_PROP,
                     "resource": {"type": "string", "description": "File path or module"},
                     "intent": {"type": "string", "description": "What you plan to do"},
                     "ttl": {"type": "integer", "description": "Lease duration in seconds (default 900, max 7200)"},
@@ -290,6 +297,7 @@ def _all_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "holder_session": HOLDER_SESSION_PROP,
                     "resource": {"type": "string", "description": "Resource to heartbeat"},
                     "ttl": {"type": "integer", "description": "New TTL in seconds from now (default 900, max 7200)"},
                 },
@@ -302,6 +310,7 @@ def _all_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "holder_session": HOLDER_SESSION_PROP,
                     "resource": {"type": "string"},
                     "status": {"type": "string", "enum": ["completed", "abandoned", "cancelled", "handoff"], "default": "completed"},
                 },
@@ -314,6 +323,7 @@ def _all_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "holder_session": HOLDER_SESSION_PROP,
                     "resource": {"type": "string"},
                     "intent": {"type": "string"},
                     "ttl": {"type": "integer", "description": "Intent duration in seconds (default 900, max 7200)"},
@@ -327,6 +337,7 @@ def _all_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "holder_session": HOLDER_SESSION_PROP,
                     "resource": {"type": "string"},
                     "summary": {"type": "string"},
                     "next_agent_id": {"type": "string"},
@@ -340,6 +351,7 @@ def _all_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "holder_session": HOLDER_SESSION_PROP,
                     "resource": {"type": "string"},
                     "intent": {"type": "string"},
                 },
@@ -574,6 +586,9 @@ def _run_tool(agent: Agent, session_id: str, name: str, args: dict) -> CallToolR
 
     if name == "get_timeline":
         return _text(_dump(agent.timeline(args.get("memory_id"))))
+
+    if name in COORDINATION_TOOLS and args.get("holder_session"):
+        session_id = str(args["holder_session"])
 
     if name == "pre_action_check":
         return _text(agent.check(resource=args.get("resource"), intent=args.get("intent", ""), session_id=session_id))
