@@ -67,6 +67,7 @@ npx memro-cli connect --project
    ```bash
    npx memro-cli agents                      # who is doing what, and the files each holds
    npx memro-cli send claude-code:1a2b3c4d "please release memro/cli"
+   npx memro-cli land                        # in a worktree: land this branch on main, one agent at a time
    ```
 
    A message is added to the agent's next prompt, or wakes it when it stops,

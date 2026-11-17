@@ -10,6 +10,11 @@ the others are mid-edit. Arms:
   worktrees        one git worktree per agent, merged into main at the end
   memro            one folder, Memro hooks (claim files, wait for busy ones, git guard)
   memro-worktrees  one worktree per agent with Memro hooks (merge-conflict warnings)
+  worktrees-land   one worktree per agent; each agent commits and lands its own
+                   work on main with git (rebase, resolve, fast-forward)
+  memro-worktrees-land
+                   the same with Memro hooks, landing through `memro land`
+                   (one agent at a time, showing what landed before)
 
 Score: tasks whose hidden acceptance test passes in the final repo, wall time,
 cost, and for the memro arms the hooks' waits, refusals and warnings
@@ -69,6 +74,24 @@ def sh(*cmd, cwd, check=True):
     return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
 
 
+# In the land arms agents land their own work instead of the harness merging
+# it. The two instructions ask for the same steps; only the tool differs.
+LANDS = {
+    "worktrees-land": ("When the task is done, commit your work and land it on main yourself: run `git rebase main`, "
+                       "resolve any conflicts keeping both your change and theirs, run `node --test`, then run "
+                       "`git -C {main} merge --ff-only {branch}`. If that fails because main moved, rebase again and retry."),
+    "memro-worktrees-land": ("When the task is done, commit your work and land it on main with `memro land` (it rebases "
+                             "onto main and fast-forwards it, one agent at a time). If it reports conflicts, keep both your "
+                             "change and theirs, `git add` the files, run `git -c core.editor=true rebase --continue`, run "
+                             "`node --test`, and run `memro land` again. If it says another agent is landing, run it again."),
+}
+# `memro` on the agents' PATH is this checkout's CLI, not the npm release.
+BIN = Path(tempfile.mkdtemp(prefix="memro-cbench-bin-"))
+(BIN / "memro").write_text(f'#!/bin/sh\nexec node "{ROOT}/cli/bin/memro.js" "$@"\n')
+(BIN / "memro").chmod(0o755)
+AGENT_ENV = {**os.environ, "PATH": f"{BIN}:{os.environ['PATH']}"}
+
+
 def make_repo(path, run_id):
     shutil.copytree(HERE / "fixture", path)
     sh("git", "init", "-q", "-b", "main", cwd=path)
@@ -92,7 +115,10 @@ def run_agent(kind, prompt, cwd, arm):
         if not arm.startswith("memro"):
             cmd += ["-c", "features.hooks=false"]
         cmd.append(prompt)
-    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=900)
+    if arm in LANDS and kind == "claude":
+        i = cmd.index("Bash(git stash*)") + 1  # inside the --allowedTools list
+        cmd[i:i] = ["Bash(git *)", "Bash(memro land*)"]
+    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=900, env=AGENT_ENV)
     out = {"kind": kind, "seconds": round(time.time() - t0, 1), "exit": p.returncode}
     if kind == "claude":
         try:
@@ -146,7 +172,7 @@ def one_run(arm, workdir):
     repo = workdir / f"{arm}-{run_id}"
     make_repo(repo, run_id)
     cwds = {name: repo for name in AGENTS}
-    worktrees = arm in ("worktrees", "memro-worktrees")
+    worktrees = "worktrees" in arm
     if worktrees:
         for name in AGENTS:
             cwds[name] = workdir / f"{arm}-{run_id}-{name}"
@@ -158,7 +184,11 @@ def one_run(arm, workdir):
 
     def agent(name):
         kind, tasks = AGENTS[name]
-        return name, [dict(task=t, **run_agent(kind, PROMPT.format(task=TASKS[t]), cwds[name], arm)) for t in tasks]
+        prompt = lambda t: PROMPT.format(task=TASKS[t])
+        if arm in LANDS:
+            prompt = lambda t: (PROMPT.format(task=TASKS[t]).replace(" Do not commit.", " ") +
+                                LANDS[arm].format(main=repo, branch=name))
+        return name, [dict(task=t, **run_agent(kind, prompt(t), cwds[name], arm)) for t in tasks]
 
     iso = lambda: time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
     since, t0 = iso(), time.time()
@@ -168,7 +198,7 @@ def one_run(arm, workdir):
     until = iso() + "Z"
 
     merge = {}
-    if worktrees:
+    if worktrees and arm not in LANDS:
         git = ("git", "-c", "user.name=bench", "-c", "user.email=bench@memro.co")
         for name in AGENTS:
             sh("git", "add", "-A", cwd=cwds[name])

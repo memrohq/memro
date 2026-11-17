@@ -115,6 +115,19 @@ OpenCode loads every export of a plugin file as a plugin, so the plugin exports 
 
 **Per-window MCP holder** (2026-11-16): the hosted MCP server is stateless and every window of a tool connects with the same URL, so MCP claims could only name the tool. The coordination tools (`claim_task`, `heartbeat_task`, `release_task`, `handoff_task`, `log_intent`, `pre_action_check`) now take an optional `holder_session`, and the hook's PreToolUse on `mcp__memro__*` fills it with the window's session through `updatedInput` (with `permissionDecision: "allow"`, which the rewrite requires; these tools only touch the user's own leases). A window's MCP and hook claims are then one holder, so overlapping claims by the same window pass, and two windows block each other. Clients without the hooks keep the connection's session.
 
+### 8. Amendment (2026-11-18): landing worktree branches one at a time
+Worktrees (the model of Orca, T3 Code, Paradev, and our own rules) keep agents apart while they work and move every collision to merge time: in the launch benchmark 4 of 5 branches conflicted every run, and Memro's warnings didn't change that (20/100 tasks landed either way). Warning is not enough; the merges themselves need an order.
+
+`memro land`, run in a worktree, lands its branch on the branch the main checkout has out:
+- It claims `land/<repo>` (named after the main checkout's repo, so every worktree of a repo shares it), waiting up to 100 s (`MEMRO_LAND_WAIT_SECONDS`, below agents' 2-minute shell limit) and otherwise exiting 2 with who is landing. The branch is untouched until the claim is granted.
+- It rebases the branch on the target. On a conflict it stops (exit 1), keeps the lease (10 minutes, renewed by running `land` again), and lists the conflicted files with the commits that landed on them since the branch started, so the agent resolves knowing what the other change was for.
+- On a clean rebase it fast-forwards the target in the main checkout and hands the lease off with `<session> landed <branch>: <last commit subject>`, which the next lander sees.
+- It refuses to run with uncommitted changes, from the main checkout, or with a rebase still in progress.
+
+No server change: it is an ordinary lease. Still planned: claiming the files a plan will touch before work starts, so overlapping tasks are ordered before any code is written.
+
+Measured by two new arms in `bench/coordination/run.py`: `worktrees-land` (agents rebase and fast-forward with plain git, the fair baseline) and `memro-worktrees-land` (the same steps through `memro land`); the instructions ask for the same steps in both. Plan and pass bars: `docs/benchmarks/coordination-v3-plan.md`.
+
 ## Consequences
 - Multi-agent teams sharing a tenant space or user account work safely without collision or race conditions.
 - Abandoned leases from crashed agents or sessions automatically expire after the TTL without blocking resources.
