@@ -149,6 +149,22 @@ infrastructure: no Rust or C++ rewrite, and no model server yet
 (`memro-model-server` is a coding-chat model for Acode, not an embedding or
 reranking service).
 
+**Storage stays Postgres + pgvector.** The misses come from queries that
+don't mean what the rule means, and any vector database returns the same
+neighbours for the same embedding. Memro already moved off Qdrant in the Go
+rewrite (`87817ca`), and Postgres carries tenancy, audit, as-of reads, the
+`/rules` metadata listing and transactions in one place (ADR 0002). Cheaper
+levers, tried on the P1 replay before any stack change:
+- a larger embedding model (`text-embedding-3-large`, Voyage, Cohere; ADR
+  0024's evaluation), a config change plus a re-embed;
+- true BM25 inside Postgres (`pg_search`/ParadeDB) if the keyword side turns
+  out to matter; `ts_rank_cd` only approximates it;
+- HNSW and per-tenant filter tuning once an agent holds hundreds of thousands
+  of memories.
+
+Revisit the stack only at tens of millions of vectors per tenant, query rates
+replicas can't serve, or deep graph traversal ADR 0032's tables don't cover.
+
 **P4. Memory evolution: decide on ADR 0032 with evidence.** Use P1 to test
 three cases: a job change (the old fact becomes history), a contradicted
 preference (the newer one wins) and two people with similar names (kept
