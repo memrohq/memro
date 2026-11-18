@@ -43,6 +43,8 @@ What is solid already, and can be said publicly:
 
 ## Next, in order
 
+The steps for each, with commands, are in the [roadmap](../roadmap.md).
+
 1. **Speed in one folder (bar 2)**: plan claims, so overlapping tasks are split
    or ordered at the prompt instead of queued edit by edit.
 2. **Landing under load (bar 1)**: 10 agents, more overlap, a stronger model;

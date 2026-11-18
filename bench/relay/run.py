@@ -17,6 +17,8 @@ Settings (--setting), where B works and what it has to search:
          NOTES.md included, so the notes file follows (its strongest form)
   big    as same, but NOTES.md and Memro already hold 300 earlier facts on
          other topics, a dozen of them near the trap's subject
+  huge   as big with 3,000 earlier facts, 100 of them earlier rules for this
+         repo: more than an agent reads whole (Read shows 2,000 lines)
 
 Claude Code's own auto-memory is switched off in every arm, so it can't carry
 the fact on its own. The memro arm uses one throwaway Memro agent (not tied to
@@ -31,6 +33,7 @@ Run with the MCP server's Python, which has the Memro SDK:
 import argparse
 import json
 import os
+import random
 import re
 import shutil
 import signal
@@ -44,7 +47,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 FIXTURE = HERE.parent / "coordination" / "fixture"
 MEMRO_MCP = ROOT / "mcp" / ".venv" / "bin" / "memro-mcp"
-MEMRO_API = "https://api.memro.co"
+MEMRO_API = os.environ.get("MEMRO_API_URL", "https://api.memro.co")  # a local server for runs past the 1,000-memory cap
 # The CLI whose hooks the memro-hooks arm installs (MEMRO_CLI: another checkout's cli/).
 MEMRO_CLI = Path(os.environ.get("MEMRO_CLI", ROOT / "cli")).resolve()
 
@@ -117,6 +120,59 @@ RULES = ["{a}: logs at warn level in production; debug logging is for local runs
          "{a}: deploys are frozen on Fridays after 3pm."]
 EARLIER = NEAR + [r.format(a=a) for r in RULES for a in AREAS][:300 - len(NEAR)]
 
+# The huge setting: what a project gathers over a year. 100 earlier rules for
+# this repo (none about the traps) and 2,885 other facts, shuffled together.
+MORE_AREAS = AREAS + ["billing export", "tax reports", "gift cards", "returns portal", "shipping labels", "store locator",
+                      "push notifications", "SMS gateway", "admin audit log", "session store", "SSO login", "invoice PDFs",
+                      "price import", "catalog sync", "wishlist", "reviews moderation", "fraud checks", "loyalty program",
+                      "referral codes", "newsletter signup", "cookie banner", "status page", "on-call rota", "staging data",
+                      "seed scripts", "Docker images", "Terraform modules", "DNS records", "TLS certificates", "log retention",
+                      "metrics dashboards", "alert rules", "queue workers", "cron jobs", "search index"]
+MORE_FACTS = ["{a}: was rewritten in 2025 and the old version is archived.", "{a}: has its own README with setup steps.",
+              "{a}: is tested in CI on every pull request.", "{a}: sends its errors to the #alerts channel.",
+              "{a}: uses the shared HTTP client with tracing headers.", "{a}: keeps its config in config/{a}.yaml.",
+              "{a}: has a runbook in the ops wiki.", "{a}: is owned by the commerce team.",
+              "{a}: was load tested at 500 requests per second.", "{a}: depends on Postgres 16.",
+              "{a}: writes audit entries for every admin change.", "{a}: has a staging copy refreshed weekly.",
+              "{a}: uses UUIDs, not integer ids.", "{a}: paginates with cursors, not offsets.",
+              "{a}: caches lookups for five minutes.", "{a}: was migrated off the old queue in March.",
+              "{a}: has a kill switch in the admin panel.", "{a}: is documented in the API reference.",
+              "{a}: logs in JSON lines.", "{a}: runs in two regions.", "{a}: was last reviewed for security in October.",
+              "{a}: uses the design system's components.", "{a}: has end-to-end tests in the e2e folder.",
+              "{a}: reads feature flags at startup.", "{a}: is behind the API gateway.", "{a}: has a p95 latency budget of 300 ms.",
+              "{a}: exports metrics with the service name as a label.", "{a}: was built by a contractor and later taken over.",
+              "{a}: has a nightly consistency check.", "{a}: stores files in the shared bucket under its own prefix.",
+              "{a}: sends webhooks signed with HMAC.", "{a}: uses semantic versioning for its client.",
+              "{a}: has rate limits per account.", "{a}: retries webhooks for 24 hours.", "{a}: has dashboards in Grafana.",
+              "{a}: is part of the quarterly disaster recovery drill.", "{a}: uses the company's ESLint config.",
+              "{a}: has a changelog kept by hand.", "{a}: emits events to the analytics pipeline.",
+              "{a}: has a maintenance window on Sunday mornings.", "{a}: accepts only TLS 1.2 or newer.",
+              "{a}: has its API documented with OpenAPI.", "{a}: is monitored by synthetic checks every minute.",
+              "{a}: uses idempotency keys on writes.", "{a}: was split out of the monolith last year.",
+              "{a}: reads secrets at startup only.", "{a}: has a feature freeze before Black Friday.",
+              "{a}: has an on-call owner listed in the service catalog.", "{a}: publishes a weekly usage report."]
+RULE_FACTS = ["Never call the {a} directly from the browser; go through the gateway.",
+              "Always add a migration note when changing the {a}.",
+              "Never log personal data in the {a}.",
+              "Always ship changes to the {a} behind a feature flag first."]
+REPO_RULES = [r.format(a=a) for r in RULE_FACTS for a in AREAS]  # 100
+HUGE = NEAR + [f.format(a=a) for f in MORE_FACTS for a in MORE_AREAS][:2900 - len(NEAR)]
+BENCH_REPO = "shop"  # every relay repo's origin name, so earlier rules are this repo's rules
+
+
+def earlier_notes(setting):
+    """NOTES.md lines and Memro memories already there when A starts."""
+    if setting == "big":
+        return EARLIER, [{"content": f} for f in EARLIER]
+    if setting == "huge":
+        lines = HUGE + REPO_RULES
+        random.Random(0).shuffle(lines)
+        memories = [{"content": f} for f in HUGE] + [
+            {"content": f"Rule for {BENCH_REPO}: {r}", "type": "procedural", "metadata": {"source": "memro-hook", "repo": BENCH_REPO}}
+            for r in REPO_RULES]
+        return lines, memories
+    return [], []
+
 TAIL = " Keep the existing behaviour and tests passing (run `node --test`). Do not edit or add test files. Do not commit."
 PROMPT_A = "You are working in a small JavaScript repo. Task: {task}{fact}" + TAIL
 PROMPT_B = "You are working in a small JavaScript repo. Task: {task}" + TAIL
@@ -136,8 +192,8 @@ def sh(*cmd, cwd, check=True, env=None):
 
 def make_repo(path, arm, setting):
     shutil.copytree(FIXTURE, path)
-    if setting == "big" and arm == "notes":
-        (path / "NOTES.md").write_text("".join(f"- {f}\n" for f in EARLIER))
+    if setting in ("big", "huge") and arm == "notes":
+        (path / "NOTES.md").write_text("".join(f"- {f}\n" for f in earlier_notes(setting)[0]))
     # Claude Code's own memory would carry the fact between A and B in every arm.
     (path / ".claude").mkdir()
     (path / ".claude" / "settings.json").write_text(json.dumps({"autoMemoryEnabled": False}))
@@ -149,6 +205,8 @@ def make_repo(path, arm, setting):
         sh("node", "-e", f'import("{MEMRO_CLI}/src/clients.js").then(m => m.installHooks({{scope: "project", cwd: "{path}"}}))',
            cwd=MEMRO_CLI, env={**os.environ, "HOME": str(home)})
     sh("git", "init", "-q", "-b", "main", cwd=path)
+    # Memro names a repo by its origin, so every relay is the same repo to the hooks.
+    sh("git", "remote", "add", "origin", f"git@bench.memro.co:bench/{BENCH_REPO}.git", cwd=path)
     sh("git", "add", "-A", cwd=path)
     sh("git", "-c", "user.name=bench", "-c", "user.email=bench@memro.co", "commit", "-qm", "fixture", cwd=path)
 
@@ -206,7 +264,9 @@ class BenchMemory:
         from memro import Agent, MemroClient
         self.agent = Agent.create(client=MemroClient(MEMRO_API))
         # Earlier facts stay for the whole run; wipe() removes only what a relay added.
-        self.earlier = set(retry(lambda: self.agent.remember_batch([{"content": f} for f in EARLIER]))) if setting == "big" else set()
+        memories = earlier_notes(setting)[1]
+        # The batch endpoint takes up to 500 at a time.
+        self.earlier = {i for k in range(0, len(memories), 500) for i in retry(lambda: self.agent.remember_batch(memories[k:k + 500]))}
         creds = self.agent.to_dict()
         # The hooks sign in with an API key, which a signed agent can make for itself.
         self.api_key = self.agent.client.request("POST", "/api-keys", json_body={"name": "relay bench"},
@@ -245,7 +305,8 @@ def one_relay(trap, arm, workdir, memory, setting="same"):
     a = run_agent(PROMPT_A.format(task=t["a"], fact=f" Note from the user: {t['fact']}" if t["fact"] else ""), repo, mcp, env)
     a_ok = accept(repo, trap).get("a", False)
     kept = (repo / "NOTES.md").read_text() if arm == "notes" and (repo / "NOTES.md").exists() else ""
-    kept = "\n".join(l for l in kept.splitlines() if l[2:] not in EARLIER) if setting == "big" else kept
+    known = set(earlier_notes(setting)[0])
+    kept = "\n".join(l for l in kept.splitlines() if l[2:] not in known)
     if arm.startswith("memro"):
         kept = "\n".join(memory.texts())
     recorded = bool(t["keyword"] and re.search(t["keyword"], kept, re.I))
@@ -255,6 +316,7 @@ def one_relay(trap, arm, workdir, memory, setting="same"):
         sh("git", "-c", "user.name=bench", "-c", "user.email=bench@memro.co", "commit", "-qm", "A's work", "--allow-empty", cwd=repo)
         sh("git", "clone", "-q", str(repo), f"{repo}-b", cwd=workdir)
         repo = Path(f"{repo}-b")
+        sh("git", "remote", "set-url", "origin", f"git@bench.memro.co:bench/{BENCH_REPO}.git", cwd=repo)
     b = run_agent(PROMPT_B.format(task=t["b"]), repo, mcp, env)
     passed = accept(repo, trap)
     looked = any(x["name"] == "mcp__memro__recall" or "NOTES.md" in x["input"] for x in b["tools"])
@@ -290,7 +352,7 @@ def main():
     ap.add_argument("--arms", default="none,notes,memro")
     ap.add_argument("--traps", default=",".join(TRAPS))
     ap.add_argument("--runs", type=int, default=5)
-    ap.add_argument("--setting", choices=["same", "clone", "big"], default="same")
+    ap.add_argument("--setting", choices=["same", "clone", "big", "huge"], default="same")
     ap.add_argument("--out", default=str(ROOT / "bench" / "runs" / "relay" / time.strftime("%Y%m%d-%H%M%S")))
     ap.add_argument("--report", metavar="RESULTS_JSONL")
     args = ap.parse_args()
