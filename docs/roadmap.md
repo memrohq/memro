@@ -127,6 +127,34 @@ as today, old memories, knowledge updates, contradictions, ambiguous
 entities, exact rule retrieval. Reports Recall@5, MRR, age-adjusted recall,
 P95 latency and cost per successful recall.
 
+P1 also carries one controlled round of competitor experiments (design
+comparison: `comparisons/memro-vs-mem0-vs-zep.md`). Ideas are borrowed, not
+code, and each is measured before anything is built:
+1. **Fact extraction, evaluated offline first.** Run a model over the
+   LongMemEval sessions (Mem0's approach), store the extracted facts next to
+   the original memories, never replacing them, and replay the same
+   questions against current Memro and the extracted variant.
+2. **A five-arm LongMemEval comparison:** Memro today, Memro with extracted
+   facts, Mem0 open source, Graphiti and plain RAG.
+3. **Cost first.** Estimate the model calls (Mem0's and Graphiti's
+   extraction over every session) before the 500-question run.
+4. **Retrieval and answer accuracy reported apart.** Supermemory's 97% is
+   Recall@20, not answers; mixing the two is how leaderboard numbers mislead.
+
+Acceptance, replacing any fixed percentage target (a stronger reader alone
+moved Zep's own score about 19 points, so a number like "90%" would measure
+the reader, not Memro):
+- the same reader, answering prompt, judge and retrieval budget in every arm;
+- the 500-question set, with repeated runs where needed (identical runs of
+  the 100 set differed by about 3 points);
+- a statistically significant gain over plain RAG with that reader;
+- cost per ingested session and per query reported.
+
+Scope: one evaluation round, not an open-ended research track. LongMemEval
+is a credibility and regression benchmark for chat memory; P2 enforcement
+stays the main engineering priority after P1, and implementation doesn't
+change until the extraction experiment gives evidence.
+
 **P2. Pre-edit enforcement, warnings first.** Extends the ADR 0035 hook, which
 already shows a file's memories on its first edit, rather than starting over:
 - run on every edit and command, not only a file's first edit;
