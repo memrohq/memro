@@ -18,6 +18,7 @@ their own names (`*.bak`, `*.partial-*`) and aren't counted in any post.
 | `coordination/land-smoke-20261118`, `land-20261118` | the four worktree arms, `memro land` | [2026-11-18](../journal/2026-11-18-coordination-land-and-holds.md) |
 | `relay/pilot-20261117`, `pilot2-20261117`, `v2-20261118` | relay: does memory reach the next agent | [2026-11-17](../journal/2026-11-17-relay-benchmark.md) |
 | `relay/stage2-clone-20261118`, `stage2-big-20261118` | relay stage 2: a teammate's clone, a 300-fact memory (files arrive with PR #94) | [2026-11-17 §7](../journal/2026-11-17-relay-benchmark.md) |
+| `relay/hooks-big-20261118` | relay, big memory: notes vs Memro vs Memro + hooks (files arrive with PR #94) | [2026-11-17 §8](../journal/2026-11-17-relay-benchmark.md) |
 | `relay/smoke*` | harness smoke tests | – |
 | `longmemeval/*` | LongMemEval runs (`ledger.*.json` lists them per worktree) | [2026-10-23](../journal/2026-10-23-longmemeval-so-far.md), [2026-11-15 baselines](../journal/2026-11-15-baselines-no-memory-and-plain-rag.md), [2026-11-15 evolution](../journal/2026-11-15-evolution-engine-and-contradictions.md) |
 | `locomo/locomo-openai` | LoCoMo scores | none yet |
