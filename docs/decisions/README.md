@@ -41,7 +41,7 @@ each decision; don't rewrite old ones — supersede them with a new record.
 | [0033](0033-similarity-thresholds-and-whole-word-rules.md) | Thresholds use similarity, not the fused score; sentiment and negation match whole words | 2026-11-15 | Accepted |
 | [0034](0034-as-of-reads-from-the-archive.md) | "As of" reads: what the agent knew at a past time, from live and archived memories | 2026-11-15 | Accepted |
 | [0035](0035-hooks-save-stated-rules.md) | Hooks save the rules a user states, and show them every prompt | 2026-11-18 | Accepted |
-| [0036](0036-direction-shared-rulebook-across-tools.md) | Direction: the shared rulebook and coordination layer across agent tools | 2026-11-19 | Proposed |
+| [0036](0036-direction-shared-rulebook-across-tools.md) | Direction: capture, delivery and enforcement, the shared rulebook across agent tools | 2026-11-19 | Proposed |
 
 Template:
 

@@ -1,4 +1,4 @@
-# 0036. Direction: the shared rulebook and coordination layer across agent tools
+# 0036. Direction: capture, delivery and enforcement, the shared rulebook across agent tools
 Date: 2026-11-19 · Status: Proposed
 
 ## Context
@@ -37,16 +37,42 @@ better memory inside one agent:
 4. **Governance.** Who taught the agents what and when, what changed, and how
    to undo it (provenance, audit and as-of reads, ADRs 0032 and 0034).
 
-Order of work:
-1. Ship what works: the npm release of memro-cli with the hooks, and the
-   claim flow (ADR 0013 §2), so real agents aren't stuck at 1,000 memories.
-2. Benchmark the case a notes file can't follow: a rule saved in Claude Code
-   and obeyed by Codex in another clone. That is the Hacker News result.
-3. Retrieval: improve it or stop leaning on it in messaging; 45% for a plain
-   fact among 3,000 is weak.
-4. Have someone outside the team rerun the benchmarks from the published command.
-5. Team features: the shared board (ADR 0019), reviewing and editing the rules
-   the hook captured, organisation controls.
+The product is three capabilities, each measured separately:
+
+| Capability | Promise | State on 2026-11-19 |
+|---|---|---|
+| **Capture** | Remember what the user actually said, in their words | The prompt hook saves "never / always / from now on" sentences (ADR 0035), keyword detection only |
+| **Delivery** | The right memory reaches the agent at the right moment | Repo rules at every prompt (`GET /rules`), a file's memories on its first edit (ADR 0035 §3); measured by the relay's `b_saw_rule`. Search alone finds a buried plain fact about 45% of the time |
+| **Enforcement** | The agent doesn't break a rule the team set | Not built as such. The relay's 43/43 is compliance (hidden tests confirm the trap was avoided) in a two-trap, one-model, pre-seeded setting, not proof of enforcement in general |
+
+Delivery isn't compliance; write-ups report them as separate numbers.
+
+Order of work (detail in `docs/roadmap.md`):
+- **P0. Historical recall.** Search excludes memories older than 90 days and
+  has no default recency weight. Drop the exclusion, add a configurable
+  recency weight chosen by benchmark, base both on `document_date` with
+  `created_at` as fallback, and measure recall by memory age before and after.
+- **P1. Offline replay benchmark** of recorded queries: Recall@5, MRR,
+  age-adjusted recall, P95 latency, cost per successful recall. Every later
+  retrieval or enforcement change is judged on it.
+- **P2. Pre-edit enforcement, warnings first.** Extend ADR 0035's first-edit
+  step to every edit and command, matching deterministically on the
+  identifiers, paths and commands a rule names, and warn with the rule and
+  reason. Deny mode only once false positives are measured; model judgment
+  only for rules that can't be matched deterministically. Validate beyond the
+  relay: more rules, several repos, Claude Code, Codex and Gemini CLI, two
+  models, real edits, with precision, recall, false positives and negatives,
+  latency per edit and violations prevented.
+- **P3. Retrieval experiments** behind flags: query expansion and a hosted
+  cross-encoder reranker. No rewrite in another language and no new model
+  server.
+- **P4. ADR 0032 decision** with evidence from P1 on supersession (a job
+  change, a contradicted preference) and entity resolution (two people with
+  similar names).
+
+Alongside: the npm release of memro-cli with the hooks and the claim flow
+(ADR 0013 §2), a cross-tool benchmark a notes file can't follow, an outside
+rerun of the benchmarks, then team features (board, rule review).
 
 ## Alternatives considered
 - **Compete on memory benchmarks** (LongMemEval, LoCoMo). Plain RAG ties
@@ -63,8 +89,10 @@ Order of work:
   more traps with keywords the agent wouldn't guess, and a second model.
 - Public claims are about delivering rules across tools and people, and about
   beating built-in auto-memory, not about recall quality.
-- Work on Memro's search is judged by whether it moves the plain-fact relay
-  arm, not by leaderboard scores.
+- Work on Memro's search is judged on the P1 replay and the relay's
+  plain-fact arm, not by leaderboard scores.
+- The 100% delivery and 43/43 compliance figures are not a claim of 100%
+  enforcement; that needs its own violations-prevented rate (P2).
 - The hooks become the core of the product, so their failure modes (keyword
   rule detection, the 200-rule listing, failing open) need tests and limits
   stated up front.
