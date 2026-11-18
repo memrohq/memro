@@ -229,6 +229,34 @@ export const repoOf = (cwd = process.cwd()) => {
   return resource.startsWith(folder) ? folder : resource.split("/")[0];
 };
 
+// Rules the user states in a prompt are saved for every later agent in the
+// repo, and shown to each at every prompt: in the relay benchmark agents
+// skipped `remember` or searched with words the rule didn't share, and a
+// notes file read whole beat Memro (2026-11-18).
+const RULE = /\b(never|always|from now on|as a rule)\b/i;
+
+/** The prompt's rule sentences ("never…", "always…"), each with the sentence after it, which usually says why. */
+export function statedRules(prompt = "") {
+  const sentences = String(prompt).split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
+  return sentences.flatMap((x, i) => (RULE.test(x) && x.length >= 12 ? [`${x}${sentences[i + 1] ? ` ${sentences[i + 1]}` : ""}`.slice(0, 400)] : []));
+}
+
+const rulePrefix = (repo) => `Rule for ${repo}: `;
+
+/** The rules saved for this repo. shortcut: a keyword search for the prefix,
+ * capped at 20; a repo with more rules needs a filter by repo on the server. */
+async function rulesFor(cfg, repo) {
+  const { results = [] } = await call(cfg, `/search?${new URLSearchParams({ query: rulePrefix(repo).trim(), mode: "keyword", limit: "20" })}`);
+  return results.map((m) => m.content).filter((c) => c.startsWith(rulePrefix(repo)));
+}
+
+/** What Memro holds about a file, shown the first time a session edits it. */
+async function memoriesAbout(cfg, resource) {
+  const { results = [] } = await call(cfg, `/search?${new URLSearchParams({ query: resource, limit: "3" })}`);
+  // Below 0.4 a hit is as likely unrelated as not (ADR 0033); rules are shown at every prompt already.
+  return results.filter((m) => (m.similarity ?? 0) >= 0.4 && !m.content.startsWith("Rule for ")).map((m) => m.content);
+}
+
 /** Who else works in this repo right now, for the agent to plan around before
  * it starts; null when nobody does. */
 export function briefing(claims, session, repo, prompt = "") {
@@ -377,14 +405,21 @@ export async function handle(input, cfg, tool = "claude-code") {
     // A stop that a message already restarted doesn't check again, so two
     // agents can't keep waking each other forever.
     const quiet = event === "Notification" || (event === "Stop" && input.stop_hook_active);
-    const [, active] = await Promise.all([status, quiet ? { claims: [], intents: [] } : call(cfg, "/coordination/active")]);
+    const stated = event === "UserPromptSubmit" ? statedRules(input.prompt) : [];
+    const saved = Promise.all(stated.map((r) => call(cfg, "/memory", {
+      content: rulePrefix(repo) + r, memory_type: "procedural", metadata: { source: "memro-hook", repo },
+    }).catch(() => {})));
+    const rules = event === "UserPromptSubmit" ? rulesFor(cfg, repo).catch(() => []) : [];
+    const [, active, known] = await Promise.all([status, quiet ? { claims: [], intents: [] } : call(cfg, "/coordination/active"), rules, saved]);
     const inbox = unread(active.intents || [], session);
     if (event === "Stop") {
       if (inbox.length) return { decision: "block", reason: formatMessages(inbox, session) };
       await releaseFiles(cfg, session, { note: handoffNote(session, task, input.last_assistant_message || lastAssistantText(input.transcript_path)) });
       return null;
     }
+    const earlier = (known || []).filter((c) => !stated.some((r) => c === rulePrefix(repo) + r));
     const notes = [
+      earlier.length && `Memro: rules the user set for ${repo} in earlier sessions. Follow them in this task:\n${earlier.map((c) => `- ${c.slice(rulePrefix(repo).length)}`).join("\n")}`,
       event === "UserPromptSubmit" && briefing(active.claims || [], session, repo, input.prompt),
       inbox.length && formatMessages(inbox, session),
     ].filter(Boolean);
@@ -414,6 +449,11 @@ export async function handle(input, cfg, tool = "claude-code") {
     if (verdict?.deny) return deny(verdict.deny);
     if (verdict?.warn) warnings.push(verdict.warn);
     if (verdict?.note) warnings.push(verdict.note);
+    const { resource } = locate(file, input.cwd);
+    if (firstSighting(session, `memories ${resource}`)) {
+      const known = await memoriesAbout(cfg, resource).catch(() => []);
+      if (known.length) warnings.push(`Memro remembers this about ${resource}:\n${known.map((c) => `- ${c}`).join("\n")}`);
+    }
   }
   return warnings.length ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: warnings.join("\n") } } : null;
 }
