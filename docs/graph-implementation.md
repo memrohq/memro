@@ -81,6 +81,51 @@ writes no edges, so on most accounts the graph is close to empty.
 5. **Dashboard 3D view** (`memgraph.go`): memories, the entity tags they share,
    and their edges.
 
+## Why it's built this way: the 2026-10-24 ablation
+
+The bounds and the flags come from a graph ablation on LongMemEval-100
+(ADR 0023 §6–7; results in `docs/benchmarks/results/longmemeval/ablation-100/`).
+Every arm queried the same stored memories (ingested with
+`GRAPH_WRITE_EDGES=true`), server, reader (`gpt-4o-mini`) and judge. Accuracy
+below is recomputed from each arm's saved evaluation file; latency from
+ADR 0023.
+
+| Arm | What it tested | Answer accuracy | p95 search |
+|---|---|---|---|
+| A | Hybrid search, no graph (baseline) | 80/100 | 356 ms |
+| B | + the original walk (`graph=legacy`) | 78/100 | 808 ms |
+| C | + PR #43's bounded walk (`graph=bounded`) | 76/100 | 662 ms |
+| D | bounded walk + temporal resolution | 76/100 | 511 ms |
+| E | graph reranking, no new memories (`graph=rerank`) | 81/100 | 428 ms |
+| F | selective: rerank or expand by query intent (`graph=selective`) | 80/100 | 866 ms |
+| G | E + adaptive session diversity | 80/100 | — |
+| H | F + adaptive session diversity | 81/100 | — |
+
+What it decided:
+- **Blind expansion was rejected.** B–D added linked memories about the same
+  entity to every answer; on "how many / total" questions the reader
+  double-counted, and multi-session accuracy fell to 55.6%. Hence the cap of
+  a third of the slots, never displacing the top 5, and the edge, path and
+  time budgets.
+- **Reranking is the safer use.** E only reorders what hybrid search already
+  found, so it adds no distractors (multi-session 70.4%). `rerank` and
+  `selective` stay as opt-in modes.
+- **Both flags stay off.** The gate set in advance (ADR 0023 §6) asked for
+  accuracy above run-to-run noise, no loss in recall, at most 50 ms added to
+  p95 and at least 80% correct `updates` edges. E added 72 ms and lowered
+  Recall@5 from 99% to 95%, and 81 vs 80 is one question.
+- **No graph database.** Walks are at most 2 hops within one agent (ADR 0002).
+
+Limits of that evidence:
+- Each arm ran once; ADR 0023 planned three repeats, and later reruns
+  (journal 2026-11-15) showed identical runs differing by a few points, so
+  E's 81 vs A's 80 is within noise.
+- Arms G and H aren't in ADR 0023's table, and arm I (selective + diversity
+  + intent-aware supersession) has no saved evaluation.
+- The edge-precision audit (do `updates` edges actually hold?) has no
+  recorded result.
+- There is no journal write-up of the run, only ADR 0023 §7.
+
 ## What the benchmarks say
 
 From journal 2026-11-15 (evolution engine) and 2026-10-23 (LongMemEval):

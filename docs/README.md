@@ -18,7 +18,7 @@ it by meaning, keyword or time, and reason over how memories connect.
 | [Self-hosting](self-hosting.md) | Run the server, MCP server and dashboard yourself. |
 | [Graph implementation](graph-implementation.md) | How the memory graph is stored, written and read, and what it does today. |
 | [Decision records](decisions/README.md) | Why Memro is built the way it is. |
-| [Memro vs Mem0 vs Zep](comparisons/memro-vs-mem0-vs-zep.md) | How Memro's design differs from other agent memory projects, and when to pick each. |
+| [Memro vs Mem0, Zep, Supermemory and Cognee](comparisons/memro-vs-mem0-vs-zep.md) | How Memro's design differs from other agent memory projects, and when to pick each. |
 
 **Endpoints**
 
