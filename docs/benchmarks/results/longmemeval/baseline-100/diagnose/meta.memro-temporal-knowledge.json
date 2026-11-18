@@ -1,0 +1,17 @@
+{
+  "cost_usd": 0.090382,
+  "token_usage": {
+    "gpt-4o": {
+      "usd": 0.090247,
+      "prompt_tokens": 34219,
+      "completion_tokens": 470,
+      "calls": 3
+    },
+    "gpt-4o-mini": {
+      "usd": 0.000133,
+      "prompt_tokens": 871,
+      "completion_tokens": 4,
+      "calls": 3
+    }
+  }
+}

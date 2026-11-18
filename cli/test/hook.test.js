@@ -12,7 +12,7 @@ process.env.HOME = HOME;
 process.env.USERPROFILE = HOME;
 
 process.env.MEMRO_HOOK_WAIT_SECONDS = "0"; // the wait is tested on its own below
-const { briefing, handle, handoffNote, herdrOf, lastAssistantText, taskOf, patchFiles, resourceFor, sessionOf, shellFiles, whereOf } = await import("../src/hook.js");
+const { briefing, handle, statedRules, handoffNote, herdrOf, lastAssistantText, taskOf, patchFiles, resourceFor, sessionOf, shellFiles, whereOf } = await import("../src/hook.js");
 const { HOOK_FILE, hookSettingsFile, installHooks, removeHooks } = await import("../src/clients.js");
 
 const cfg = { api: "https://api.test", apiKey: "memro_sk_test" };
@@ -78,9 +78,9 @@ test("a held file in the same checkout is waited for, then claimed", async () =>
   process.env.MEMRO_HOOK_WAIT_SECONDS = "5";
   try {
     let n = 0;
-    serve(() => (++n === 1 ? { granted: false, holder_session: "codex:1", intent: `x [${ROOT_CHECKOUT}]` } : { granted: true }));
+    serve((route) => (route.startsWith("/search") ? {} : ++n === 1 ? { granted: false, holder_session: "codex:1", intent: `x [${ROOT_CHECKOUT}]` } : { granted: true }));
     assert.equal(await handle(edit("/x/a.js"), cfg), null);
-    assert.equal(n, 2);
+    assert.equal(n, 2, "claimed on the second try");
   } finally {
     process.env.MEMRO_HOOK_WAIT_SECONDS = "0";
   }
@@ -204,7 +204,7 @@ test("Codex: apply_patch claims each file as codex:<session> and is denied if on
   const input = { hook_event_name: "PreToolUse", session_id: "c0dex123456", cwd: "/w", tool_name: "apply_patch", tool_input: { command: PATCH } };
   serve(() => ({ granted: true }));
   assert.equal(await handle(input, cfg, "codex"), null);
-  assert.deepEqual(calls.map((c) => c.body.resource), ["/w/src/a.js", "/w/docs/new.md", "/w/old/name.js", "/w/new/name.js"].map((f) => P(f, "/w")));
+  assert.deepEqual(calls.filter((c) => c.body).map((c) => c.body.resource), ["/w/src/a.js", "/w/docs/new.md", "/w/old/name.js", "/w/new/name.js"].map((f) => P(f, "/w")));
   assert.equal(calls[0].body.session_id, "codex:c0dex123");
   assert.match(calls[0].body.intent, /^Codex editing a\.js/);
 
@@ -246,7 +246,7 @@ test("a shell write claims the file like an edit; plain commands make no call", 
   assert.equal(await handle(bash("node --test && git status"), cfg), null);
   assert.equal(calls.length, 0);
   await handle(bash("echo x > notes.txt"), cfg);
-  assert.deepEqual(calls.map((c) => c.body.resource), [P("notes.txt", "/w/memro")]);
+  assert.deepEqual(calls.filter((c) => c.body).map((c) => c.body.resource), [P("notes.txt", "/w/memro")]);
 });
 
 test("destructive git is refused while another agent works in this checkout", async () => {
@@ -370,7 +370,7 @@ test("Gemini CLI: write_file and shell are claimed, a refusal is a deny decision
   assert.equal(calls[0].body.session_id, "gemini-cli:g1234567");
   serve(() => ({ granted: true }));
   assert.equal(await run({ hook_event_name: "BeforeTool", session_id: "g1", cwd: "/w", tool_name: "run_shell_command", tool_input: { command: "echo x > b.txt" } }, cfg, "gemini-cli"), null);
-  assert.deepEqual(calls.map((c) => c.body.resource), [P("/w/b.txt", "/w")]);
+  assert.deepEqual(calls.filter((c) => c.body).map((c) => c.body.resource), [P("/w/b.txt", "/w")]);
   serve(inbox([]));
   assert.equal(await run({ hook_event_name: "BeforeTool", session_id: "g1", cwd: "/w", tool_name: "read_file", tool_input: {} }, cfg, "gemini-cli"), null);
   serve((route) => (route.startsWith("/coordination/active")
@@ -387,7 +387,7 @@ test("Cursor: file writes and shell commands are claimed, refusals use permissio
   assert.equal(calls[0].body.session_id, "cursor:c1234567");
   serve(() => ({ granted: true }));
   await run({ hook_event_name: "beforeShellExecution", conversation_id: "c1", command: "rm old.js", cwd: "/w" }, cfg, "cursor");
-  assert.deepEqual(calls.map((c) => c.body.resource), [P("/w/old.js", "/w")]);
+  assert.deepEqual(calls.filter((c) => c.body).map((c) => c.body.resource), [P("/w/old.js", "/w")]);
   serve(() => assert.fail("no call expected"));
   assert.equal(await run({ hook_event_name: "preToolUse", conversation_id: "c1", workspace_roots: ["/w"], tool_name: "Shell", tool_input: {} }, cfg, "cursor"), null, "shell is handled by beforeShellExecution");
   serve((route) => (route.startsWith("/coordination/active")
@@ -441,4 +441,38 @@ test("each edit holds its file briefly, and the turn's handoff covers files whos
   serve((route) => (route === "/coordination/active" ? { claims: [], intents: [] } : { granted: true }));
   await handle({ hook_event_name: "Stop", session_id: "touch123456", cwd: "/w", last_assistant_message: "again" }, cfg);
   assert.equal(calls.filter((c) => c.route === "/coordination/handoff").length, 0, "the list is cleared each turn");
+});
+
+test("statedRules picks rule sentences with the reason after them, and nothing from ordinary tasks", () => {
+  assert.deepEqual(statedRules("Add itemCount. By the way, never use Intl anywhere. POS devices have no ICU. Do not commit."),
+    ["By the way, never use Intl anywhere. POS devices have no ICU."]);
+  assert.deepEqual(statedRules("Add hasItem(cart, id). Do not edit test files. Do not commit."), []);
+});
+
+test("a rule stated in a prompt is saved for the repo, and later prompts are shown it", async () => {
+  const repo = P("/w/memro", "/w/memro");
+  serve(inbox([]));
+  await handle(ev("UserPromptSubmit", { prompt: "Add itemCount. Discounts must always round down. Finance had to refund." }), cfg);
+  const saved = calls.find((c) => c.route === "/memory").body;
+  assert.equal(saved.content, `Rule for ${repo}: Discounts must always round down. Finance had to refund.`);
+
+  serve((route) => (route.startsWith("/search")
+    ? { results: [{ content: saved.content }, { content: "Rule for other-repo: never deploy on Fridays." }] }
+    : inbox([])(route)));
+  const out = await handle(ev("UserPromptSubmit", { prompt: "Add couponTotal(cart, percent)." }), cfg);
+  const context = out.hookSpecificOutput.additionalContext;
+  assert.match(context, /rules the user set .* earlier sessions/);
+  assert.match(context, /- Discounts must always round down/);
+  assert.doesNotMatch(context, /Fridays/, "another repo's rules stay out");
+  assert.ok(!calls.some((c) => c.route === "/memory"), "nothing to save");
+});
+
+test("the first edit of a file shows what Memro holds about it, once", async () => {
+  serve((route) => (route.startsWith("/search")
+    ? { results: [{ content: "a.js parses dates as UTC", similarity: 0.62 }, { content: "unrelated", similarity: 0.2 }] }
+    : { granted: true }));
+  const out = await handle(edit(A), cfg);
+  assert.match(out.hookSpecificOutput.additionalContext, /remembers this about .*\n- a\.js parses dates as UTC$/);
+  const again = await handle(edit(A), cfg);
+  assert.equal(again, null, "shown once per session");
 });

@@ -1,0 +1,18 @@
+{
+  "cost_usd": 1.17219,
+  "token_usage": {
+    "gpt-4o-mini": {
+      "usd": 1.17219,
+      "prompt_tokens": 7550520,
+      "completion_tokens": 66023,
+      "calls": 3080
+    }
+  },
+  "name": "locomo-openai",
+  "created_at": "2026-10-22T22:09:56.243374+00:00",
+  "embedding_model": "text-embedding-3-small",
+  "answer_model": "gpt-4o-mini",
+  "top_k": 15,
+  "session_expansion": 3,
+  "dataset": "locomo10.json"
+}

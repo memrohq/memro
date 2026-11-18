@@ -1,0 +1,20 @@
+{
+  "cost_usd": 0.0,
+  "token_usage": {},
+  "name": "emb-text-embedding-3-small-ps-all2",
+  "commit": "1a349e1670dbff457698f0e0db80ec4d583ee9e3",
+  "engine_options": {
+    "top_k": 15,
+    "mode": "hybrid",
+    "answer_model": "gpt-4o-mini",
+    "session_expansion": 3,
+    "per_session": 2,
+    "per_session_scope": "all",
+    "format": "standard",
+    "write_time_supersession": "false",
+    "per_item_chars": 4000,
+    "embedding_model": "text-embedding-3-small"
+  },
+  "created_at": "2026-10-22T22:25:24.487940Z",
+  "questions_total": 100
+}

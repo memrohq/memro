@@ -1,0 +1,19 @@
+{
+  "name": "ablation-arm-g",
+  "description": "Arm G: Graph Rerank + Adaptive Session Diversity (PR 22)",
+  "arm_id": "arm-g",
+  "graph": "rerank",
+  "resolve_conflicts": false,
+  "adaptive_diversity": true,
+  "commit": "2e2adaf390efd7974bc37a146a321c427b3a7875",
+  "created_at": "2026-10-24T09:56:45.092240+00:00",
+  "cost_usd": 0.003816,
+  "token_usage": {
+    "gpt-4o-mini": {
+      "usd": 0.003816,
+      "prompt_tokens": 25008,
+      "completion_tokens": 107,
+      "calls": 100
+    }
+  }
+}

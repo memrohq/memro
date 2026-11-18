@@ -1,0 +1,22 @@
+{
+  "cost_usd": 0.0,
+  "token_usage": {},
+  "name": "r-ps3agg",
+  "commit": "f71c5d99f590ec5c3f6b8dd2c5cd1a237725be5c",
+  "engine_options": {
+    "top_k": 15,
+    "mode": "hybrid",
+    "answer_model": "gpt-4o-mini",
+    "session_expansion": 3,
+    "per_session": 3,
+    "per_session_scope": "agg",
+    "format": "standard",
+    "write_time_supersession": "false",
+    "per_item_chars": 4000,
+    "resolve_conflicts": true,
+    "order": "score",
+    "embedding_model": "text-embedding-3-small"
+  },
+  "created_at": "2026-10-25T21:07:47.776936Z",
+  "questions_total": 100
+}
