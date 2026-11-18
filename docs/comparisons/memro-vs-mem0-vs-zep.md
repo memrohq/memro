@@ -23,7 +23,7 @@ is out of date, please [open an issue](https://github.com/memrohq/memro/issues).
 | **MCP** | Built in, with 20+ tools including multi-agent task claiming and handoff | Through Mem0's editor integrations | Graphiti ships an MCP server | An MCP server | An MCP server |
 | **SDKs** | Python, TypeScript, Go | Python, TypeScript | Graphiti: Python. Zep Cloud: Python, TypeScript, Go. | Python, TypeScript | Python |
 | **Connectors** | 50 sources: 7 native OAuth (Slack, GitHub, Linear, Sentry, Notion, Jira, GitLab) and 43 declarative | Not a core feature | Not a core feature | Imports from documents and apps | Ingests files and data sources through its pipelines |
-| **Agent identity** | Each agent is an ed25519 key pair, and self-owned agents sign requests with a key that never leaves the machine | API keys | API keys | API keys | API keys |
+| **Agent identity** | Each agent is an ed25519 key pair, and self-owned agents sign requests with a key that never leaves the machine | API keys | API keys | API keys | API keys (hosted); none for the embedded library |
 
 ## Where Memro is different
 
