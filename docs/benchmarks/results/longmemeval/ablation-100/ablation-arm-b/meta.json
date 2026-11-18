@@ -1,0 +1,18 @@
+{
+  "name": "ablation-arm-b",
+  "description": "Arm B: Hybrid + Legacy Graph (pre-PR #43, drops short dead ends)",
+  "arm_id": "arm-b",
+  "graph": "legacy",
+  "resolve_conflicts": false,
+  "commit": "bfd4a7347f2e8a88b7ca9bdd562206045e0c03f4",
+  "created_at": "2026-10-24T08:46:02.001846+00:00",
+  "cost_usd": 0.003785,
+  "token_usage": {
+    "gpt-4o-mini": {
+      "usd": 0.003785,
+      "prompt_tokens": 24846,
+      "completion_tokens": 107,
+      "calls": 100
+    }
+  }
+}

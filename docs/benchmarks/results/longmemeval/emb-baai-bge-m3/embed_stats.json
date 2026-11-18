@@ -1,0 +1,7 @@
+{
+  "hits": 4909,
+  "misses": 21160,
+  "upstream_calls": 1429,
+  "prompt_tokens": 0,
+  "est_tokens": 10579238
+}

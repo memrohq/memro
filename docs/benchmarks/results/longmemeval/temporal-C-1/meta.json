@@ -1,0 +1,29 @@
+{
+  "cost_usd": 0.001392,
+  "token_usage": {
+    "gpt-4o-mini": {
+      "usd": 0.001392,
+      "prompt_tokens": 8947,
+      "completion_tokens": 83,
+      "calls": 2
+    }
+  },
+  "name": "temporal-C-1",
+  "commit": "894d14192c858f758737b0ce009377dec1a76c70",
+  "engine_options": {
+    "top_k": 15,
+    "mode": "hybrid",
+    "answer_model": "gpt-4o-mini",
+    "session_expansion": 3,
+    "per_session": 0,
+    "per_session_scope": "all",
+    "format": "standard",
+    "write_time_supersession": "false",
+    "per_item_chars": 4000,
+    "resolve_conflicts": true,
+    "order": "score",
+    "embedding_model": "text-embedding-3-small"
+  },
+  "created_at": "2026-11-15T09:41:22.028553Z",
+  "questions_total": 1
+}
