@@ -177,7 +177,7 @@ project whose `.mcp.json` overrides it; Claude Code itself uses the project's.
 * `--env-key`: Claude Code and Codex read the key from `$MEMRO_API_KEY` instead of storing it (see above).
 * `-y, --yes`: Configure every detected tool without prompting.
 * `--no-instructions`: Do not add Memro guidance to instruction files (`CLAUDE.md`, `AGENTS.md`, etc.).
-* `--no-hooks`: Do not add the Claude Code and Codex hooks that claim each file before it is edited.
+* `--no-hooks`: Do not add the hooks. Besides claiming each file before it is edited, they save rules you state in a prompt ("never…", "always…", "from now on…") to your Memro account and show a repo's saved rules at every prompt.
 * `--staging`, `--local` or `--api <url>`: Target another Memro server (e.g. self-hosted: `--api https://memro.example.com`).
 
 ---
