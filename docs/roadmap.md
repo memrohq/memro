@@ -91,6 +91,71 @@ the relay) and waits 30 minutes between attempts.
 the claim route is saved at `~/.memro/bench-agent.json` (mode 600) and holds
 no memories; delete the file, or the agent with `DELETE /identity/{id}`.
 
+## Next engineering cycle: capture, delivery, enforcement (ADR 0036)
+
+Memro's product is three capabilities, each measured on its own:
+
+| Capability | Promise | Where it stands | Measured by |
+|---|---|---|---|
+| **Capture** | Remember what the user actually said, in their words | The prompt hook saves "never / always / from now on" sentences (ADR 0035); keyword detection only | Rules caught from real prompts; wrong saves |
+| **Delivery** | The right memory reaches the agent at the right moment | Repo rules at every prompt via `GET /rules` (up to 200); a file's memories on its first edit (ADR 0035 §3). Search alone finds a buried plain fact about 45% of the time | `b_saw_rule` in the relay |
+| **Enforcement** | The agent doesn't break a rule the team set | Not built as such. The relay's 43/43 "trap avoided" at 25% depth is compliance (hidden tests), in a two-trap, one-model, pre-seeded setting | Violations prevented, false positives and negatives |
+
+Delivery isn't compliance: 43/43 is the compliance number, and `b_saw_rule`
+is the delivery number. Keep them apart in every write-up.
+
+**P0. Historical recall.** Search only looks at memories from the last 90
+days (`searchableFilter`, `engine.go`; carried over in the Go rewrite
+`87817ca` with no recorded reason), and ordinary search has no recency
+weight (`TemporalWeight` 0; only `/search/temporal` defaults to 0.3). Ship
+together:
+- drop the hard 90-day exclusion;
+- a configurable default recency weight, chosen by benchmarking several
+  values, with relevance still the main signal;
+- eligibility and recency use `document_date`, falling back to `created_at`,
+  so an imported two-year-old Slack message isn't treated as new.
+  (`created_at`: when Memro stored it; `document_date`: when the source was
+  written; `event_date`: when the described event happened.)
+- a memory-age benchmark before and after: the same queries against memories
+  0–30, 31–90, 91–180, 181–365 and 365+ days old (backdated in the test
+  database, since the API stamps `created_at` itself).
+
+**P1. Offline replay benchmark.** The base for every retrieval and
+enforcement change: replays recorded queries (the relay's recall calls,
+LongMemEval) against a server, in seconds and for cents. Cases: hybrid search
+as today, old memories, knowledge updates, contradictions, ambiguous
+entities, exact rule retrieval. Reports Recall@5, MRR, age-adjusted recall,
+P95 latency and cost per successful recall.
+
+**P2. Pre-edit enforcement, warnings first.** Extends the ADR 0035 hook, which
+already shows a file's memories on its first edit, rather than starting over:
+- run on every edit and command, not only a file's first edit;
+- match deterministically on what a rule names: identifiers (`Intl`,
+  `toLocaleString`), paths (`internal/client.go`) and commands;
+- warn with the rule and the reason, and leave the agent free to go on; a
+  deny mode comes only after the false-positive rate is known;
+- a model judges only rules that can't be matched deterministically
+  ("don't change public APIs"), and only later.
+
+Validation goes beyond the relay's two traps: more rules, several repos,
+Claude Code, Codex and Gemini CLI, two models, real edits. Report precision
+and recall of rule matching, false positives and negatives, added latency per
+edit, and violations prevented.
+
+**P3. Retrieval experiments, cheap and flagged.** Query expansion (guess the
+APIs and terms a task involves) and a hosted cross-encoder reranker, each
+behind a flag, judged on the P1 replay and the relay's plain-fact arm. No new
+infrastructure: no Rust or C++ rewrite, and no model server yet
+(`memro-model-server` is a coding-chat model for Acode, not an embedding or
+reranking service).
+
+**P4. Memory evolution: decide on ADR 0032 with evidence.** Use P1 to test
+three cases: a job change (the old fact becomes history), a contradicted
+preference (the newer one wins) and two people with similar names (kept
+apart). Today supersession is rule-based and slightly behind plain RAG on
+LongMemEval knowledge updates (12/16 vs 14/16), and entity resolution doesn't
+exist. Build ADR 0032 incrementally only where those cases fail.
+
 ## After that
 
 1. **Claim flow (ADR 0013 §2).** Accepted but not built:
