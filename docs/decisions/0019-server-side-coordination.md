@@ -126,6 +126,12 @@ Worktrees (the model of Orca, T3 Code, Paradev, and our own rules) keep agents a
 
 No server change: it is an ordinary lease. Still planned: claiming the files a plan will touch before work starts, so overlapping tasks are ordered before any code is written.
 
+**Planned: a team board** (decided 2026-11-18, to build after the launch benchmark). "Multiplayer" agent sessions (anyone can watch, redirect or take over a running agent) are being built by the coding tools themselves, each inside its own tool. What none of them will build is the view across tools. The dashboard gets a read-only board of every agent on the account, whatever tool runs it:
+- each session's status and task (`agents/<session>` leases), the files it holds, landings (`land/<repo>` handoffs), and the handoff notes on files;
+- a "send message" action that posts to `inbox/<session>`, as `memro send` does.
+
+It reads only what coordination already stores, so it needs no server change, and it shows no transcripts: Memro keeps facts, not raw sessions, and live session streaming would change that promise. Watching an agent's steps live is left out until users ask for it once the board ships. We ask in the GitHub discussion first whether people would use the board.
+
 Measured by two new arms in `bench/coordination/run.py`: `worktrees-land` (agents rebase and fast-forward with plain git, the fair baseline) and `memro-worktrees-land` (the same steps through `memro land`); the instructions ask for the same steps in both. Plan and pass bars: `docs/benchmarks/coordination-v3-plan.md`.
 
 ## Consequences
