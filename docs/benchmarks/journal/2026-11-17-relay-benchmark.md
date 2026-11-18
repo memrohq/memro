@@ -155,6 +155,35 @@ depending on either:
 With those, rerun `big`, and add a setting where a file can't keep up: a
 memory too big to read whole (thousands of facts), or shared across repos.
 
+## 8. The hooks fixes on the big memory (2026-11-18)
+
+- **Run directory**: `docs/benchmarks/results/relay/hooks-big-20261118`
+- **Code**: `cli/memory-hooks` at `a46e940`; arm `memro-hooks` installs the hooks as `memro connect` does, signed in with the bench agent's own API key, under a throwaway HOME
+- **Setting**: big (300 earlier facts); R1, R2, R4 × 5 runs × 3 arms, 45 relays, $0.48. The last two R4 relays hit the account's usage limit ($0, A failed) and were rerun; the failed rows are kept in `results.jsonl.usage-limit.bak`.
+
+Fixes from §7, in the hooks: the prompt hook saves the user's "never / always / from now on" sentences (with the sentence after, usually the reason) as `Rule for <repo>: …`, and shows the repo's saved rules at every prompt; the first edit of a file shows memories about it with similarity ≥ 0.4.
+
+| Arm | R1 (no `Intl`) | R2 (round down) | R1–R2 | R4 control |
+|---|---|---|---|---|
+| notes | 4/5 | 5/5 | 9/10 | 5/5 |
+| memro (tools only) | 3/5 | 5/5 | 8/10 | 5/5 |
+| **memro-hooks** | **5/5** | **5/5** | **10/10** | 5/5 |
+
+- **The hooks closed the gap.** Memro with its hooks avoided every trap with
+  300 facts in memory, against 6/10 (§7) and 8/10 (this run) for Memro's
+  tools alone. The rule reached B in all 10 relays without A deciding to
+  save it or B searching for the right words.
+- **The notes file's miss was a paraphrase.** A wrote "Cart code and
+  everything it imports must avoid Intl", narrowing the user's "never use
+  Intl… anywhere"; B worked in `format.js`, used `Intl` and recorded it as a
+  decision. The hook keeps the user's own words, so it can't narrow them.
+- **Not a significant win over notes**: 10/10 against 9/10 is one relay.
+  What the run shows is that Memro no longer depends on the model to save or
+  to search, which is what lost §7.
+
+Next: a memory too big to read whole (thousands of facts) and rules shared
+across repos, where a notes file has to be searched or copied too.
+
 ## 6. Caveats
 
 - One model (Haiku), small samples (5 relays per trap and arm).
