@@ -559,6 +559,14 @@ func (s *Store) ListMemories(ctx context.Context, agentID string, tenantID uuid.
 	return collectMemories(s.Pool.Query(ctx, q, args...))
 }
 
+// ListRules returns the rules the memory hooks saved for a repo (metadata
+// source "memro-hook", repo <repo>), newest first, up to limit.
+func (s *Store) ListRules(ctx context.Context, agentID string, tenantID uuid.UUID, repo string, limit int) ([]domain.Memory, error) {
+	return collectMemories(s.Pool.Query(ctx, `SELECT `+memoryColumns+` FROM memories
+		WHERE agent_id = $1 AND tenant_id = $2 AND metadata->>'source' = 'memro-hook' AND metadata->>'repo' = $3
+		ORDER BY created_at DESC LIMIT $4`, agentID, tenantID, repo, limit))
+}
+
 // ListMemoriesAsOf returns what the agent knew at asOf: memories created by
 // then that were still live, whether they are live now or were archived (by a
 // delete or an update) later. Purged memories are gone from both tables.

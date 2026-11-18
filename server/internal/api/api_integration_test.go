@@ -1280,3 +1280,31 @@ func TestMemoryGraphCacheAndFilters(t *testing.T) {
 		t.Fatal("a deleted memory is still in the cached graph")
 	}
 }
+
+func TestListRules(t *testing.T) {
+	e := setup(t)
+	a := newAgent(t)
+	e.register(a)
+	rule := func(repo, content string) {
+		code, body := e.do(&a, "v2", "POST", "/memory", j(map[string]any{
+			"content": content, "memory_type": "procedural", "metadata": map[string]any{"source": "memro-hook", "repo": repo},
+		}), nil)
+		e.must(200, code, body, "save rule")
+	}
+	// More than the 20 a keyword search returned, so none may be cut.
+	for i := range 30 {
+		rule("shop", fmt.Sprintf("Rule for shop: rule number %d", i))
+	}
+	rule("other", "Rule for other: not this repo")
+	e.remember(a, "Rule for shop: typed by hand, not saved by the hook", "procedural")
+
+	code, body := e.do(&a, "v2", "GET", "/rules?repo=shop", nil, nil)
+	e.must(200, code, body, "list rules")
+	var got []map[string]any
+	_ = json.Unmarshal(body, &got)
+	if len(got) != 30 {
+		t.Fatalf("want the repo's 30 hook rules, got %d: %s", len(got), body)
+	}
+	code, body = e.do(&a, "v2", "GET", "/rules", nil, nil)
+	e.must(400, code, body, "repo required")
+}

@@ -62,6 +62,20 @@ Per run:
 - **B looked**: B read `NOTES.md` or called `recall`.
 - B's time and cost.
 
+## Position and phrasing (`--plant`, `--phrasing`)
+
+Controls suggested after the 300-fact result. `--plant start|middle|end`
+skips agent A: the trap's rule is already in NOTES.md at line 1, the middle,
+or the end of the earlier facts (in the `huge` setting the end is past the
+2,000 lines Read shows), and in Memro as the rule hook would save it. Only B
+runs. `--phrasing direct` gives B a task that repeats the rule's words (R1:
+"what toLocaleString or Intl.NumberFormat gives"; R2: "coupon discount");
+`indirect` doesn't (R1 names the argument `lang`; R2 asks for `saleTotal`
+during a sale, which the hidden tests also accept). Each row adds
+`b_saw_rule`: the rule's own words, which are in neither task nor any
+earlier fact (ICU; "round down"), came back to B in a tool result or hook
+output. The report prints a Wilson 95% interval per arm.
+
 ## Isolation
 
 The `memro` arm runs against the local bench server, like LongMemEval: a fresh
