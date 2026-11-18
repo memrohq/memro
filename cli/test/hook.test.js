@@ -476,3 +476,17 @@ test("the first edit of a file shows what Memro holds about it, once", async () 
   const again = await handle(edit(A), cfg);
   assert.equal(again, null, "shown once per session");
 });
+
+test("MEMRO_HOOK_SAVE_RULES=0 saves nothing from prompts, and rules are looked up by the prompt", async () => {
+  process.env.MEMRO_HOOK_SAVE_RULES = "0";
+  try {
+    serve(inbox([]));
+    await handle(ev("UserPromptSubmit", { prompt: "Add formatMoney. Never use Intl anywhere." }), cfg);
+    assert.ok(!calls.some((c) => c.route === "/memory"), "nothing saved");
+    const search = new URLSearchParams(calls.find((c) => c.route.startsWith("/search")).route.split("?")[1]);
+    assert.equal(search.get("memory_type"), "procedural");
+    assert.match(search.get("query"), /^Rule for .*: Add formatMoney/);
+  } finally {
+    delete process.env.MEMRO_HOOK_SAVE_RULES;
+  }
+});

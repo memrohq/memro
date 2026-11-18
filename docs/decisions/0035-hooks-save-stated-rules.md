@@ -35,11 +35,14 @@ No server change. Like the rest of the hook, every step fails open.
 ## Consequences
 - Sentences from users' prompts are stored in their Memro account. This is
   stated in the CHANGELOG and the CLI README; `memro connect --no-hooks` turns
-  the hooks off. Whether to add a separate opt-out for rule saving is open
-  (PR #98).
+  the hooks off, and `MEMRO_HOOK_SAVE_RULES=0` (2026-11-18) stops only the
+  saving, still showing rules already saved.
 - Detection is keyword-based: a rule phrased without those words isn't saved,
   and an instruction with them ("always run the tests") is saved as a rule.
-- Listing a repo's rules is a keyword search capped at 20 (`shortcut:` in the
-  code); a repo with more needs a filter by repo on the server.
+- Listing a repo's rules is a search of procedural memories with the prompt as
+  the query, keeping the 20 nearest that carry the repo's prefix (2026-11-18;
+  first version: a keyword search for the prefix, which showed an arbitrary 20
+  once a repo had more). A filter by repo on the server would be exact
+  (`shortcut:` in the code).
 - Measured (journal §8, 45 relays): with 300 facts in memory, Memro with the
   hooks 10/10, a notes file 9/10, Memro's tools alone 8/10.

@@ -243,10 +243,14 @@ export function statedRules(prompt = "") {
 
 const rulePrefix = (repo) => `Rule for ${repo}: `;
 
-/** The rules saved for this repo. shortcut: a keyword search for the prefix,
- * capped at 20; a repo with more rules needs a filter by repo on the server. */
-async function rulesFor(cfg, repo) {
-  const { results = [] } = await call(cfg, `/search?${new URLSearchParams({ query: rulePrefix(repo).trim(), mode: "keyword", limit: "20" })}`);
+/** The repo's saved rules that matter most to this prompt: a project gathers
+ * many rules, so the 20 nearest the task are shown, not the 20 newest.
+ * shortcut: rules are told apart by their "Rule for <repo>: " prefix among
+ * procedural memories; a filter by repo on the server would be exact. */
+async function rulesFor(cfg, repo, prompt = "") {
+  // The server takes queries up to 500 characters.
+  const query = (rulePrefix(repo) + String(prompt)).slice(0, 500);
+  const { results = [] } = await call(cfg, `/search?${new URLSearchParams({ query, memory_type: "procedural", limit: "20" })}`);
   return results.map((m) => m.content).filter((c) => c.startsWith(rulePrefix(repo)));
 }
 
@@ -405,11 +409,12 @@ export async function handle(input, cfg, tool = "claude-code") {
     // A stop that a message already restarted doesn't check again, so two
     // agents can't keep waking each other forever.
     const quiet = event === "Notification" || (event === "Stop" && input.stop_hook_active);
-    const stated = event === "UserPromptSubmit" ? statedRules(input.prompt) : [];
+    // MEMRO_HOOK_SAVE_RULES=0 keeps prompts out of Memro; saved rules are still shown.
+    const stated = event === "UserPromptSubmit" && process.env.MEMRO_HOOK_SAVE_RULES !== "0" ? statedRules(input.prompt) : [];
     const saved = Promise.all(stated.map((r) => call(cfg, "/memory", {
       content: rulePrefix(repo) + r, memory_type: "procedural", metadata: { source: "memro-hook", repo },
     }).catch(() => {})));
-    const rules = event === "UserPromptSubmit" ? rulesFor(cfg, repo).catch(() => []) : [];
+    const rules = event === "UserPromptSubmit" ? rulesFor(cfg, repo, input.prompt).catch(() => []) : [];
     const [, active, known] = await Promise.all([status, quiet ? { claims: [], intents: [] } : call(cfg, "/coordination/active"), rules, saved]);
     const inbox = unread(active.intents || [], session);
     if (event === "Stop") {
