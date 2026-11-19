@@ -1,5 +1,5 @@
 # 0035. Hooks save the rules a user states, and show them every prompt
-Date: 2026-11-18 · Status: Accepted
+Date: 2026-11-18 · Status: Accepted; where rules are stored superseded by ADR 0037
 
 ## Context
 Memro's memory reached the next agent only when the model chose to call

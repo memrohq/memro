@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { CLIENTS, HOOK_TARGETS, KEY_ENV, findClient, installHooks, onPath, removeHooks, withSession } from "./clients.js";
-import { herdrOf, repoOf, rulePrefix, untagged } from "./hook.js";
+import { addRules, herdrOf, readRules, repoOf, rulesFile, rulesFor, untagged } from "./hook.js";
 import { pick, pickOne, promptText } from "./picker.js";
 import { codexTrusts, diagnose } from "./doctor.js";
 import { installInstructions, uninstallInstructions } from "./instructions.js";
@@ -32,11 +32,13 @@ Usage
   npx memro-cli send <agent> <message>
                              Message an agent (a name from \`agents\`); Claude Code
                              reads it at its next prompt or when it stops
-  npx memro-cli rules        List the rules saved for this repo ("never…", "always…")
+  npx memro-cli rules        List this repo's rules (.memro/rules.md), the ones every
+                             agent here is shown at each prompt
   npx memro-cli rules edit <n> <text>
                              Replace rule <n> (a number from \`rules\`) with <text>
   npx memro-cli rules delete <n>
                              Delete rule <n>, so agents stop seeing it
+  npx memro-cli rules import Move rules saved in your Memro account into .memro/rules.md
   npx memro-cli land         From a git worktree: rebase this branch on the main
                              checkout's branch and fast-forward it, one agent at
                              a time, showing what landed before you
@@ -596,38 +598,51 @@ async function send(opts) {
   console.log(`Sent to ${to}. It reads it at its next prompt or when it stops (within 2 hours).`);
 }
 
-/** List, edit or delete the rules the hook saved for this repo: the ones every
- * agent in it sees at each prompt, so a wrongly saved one has to be fixable. */
+/** List, edit or delete the repo's rules in .memro/rules.md, the ones every
+ * agent here is shown at each prompt, and move rules saved in the Memro
+ * account before the file existed into it. */
 async function rules(opts) {
   const [action, n, ...words] = opts.args;
-  const { api, key } = account(opts);
+  const file = rulesFile(process.cwd());
+  const shown = path.relative(process.cwd(), file);
+  const local = readRules(process.cwd());
   const repo = repoOf();
-  const res = await request(api, `/rules?${new URLSearchParams({ repo })}`, { key });
-  if (res.status === 404) throw new Error(`${api} doesn't list rules yet (no GET /rules); it needs a server from 2026-11-19 or later.`);
-  if (!res.ok) throw new Error(`Couldn't list rules: ${res.data?.message || res.status}`);
-  const list = res.data || [];
+  let cfg = null;
+  try { const { api, key } = account(opts); cfg = { api, apiKey: key }; } catch { /* no account: the file alone */ }
+  const older = cfg ? await rulesFor(cfg, repo).catch(() => []) : [];
+  const unmoved = older.filter((r) => !local.includes(r.text));
+
   if (!action) {
-    if (!list.length) return console.log(`No rules saved for ${repo}. Say one to your agent ("never…", "always…") and the hook saves it.`);
-    console.log(ui.c.dim(`Rules for ${repo}, newest first:`));
-    list.forEach((m, i) => console.log(`${String(i + 1).padStart(3)}. ${m.content.slice(rulePrefix(repo).length)}`));
+    if (!local.length && !unmoved.length) return console.log(`No rules yet. Tell your agent one ("never…", "always…") and the hook adds it to ${shown}.`);
+    if (local.length) console.log(ui.c.dim(`Rules in ${shown}:`));
+    local.forEach((r, i) => console.log(`${String(i + 1).padStart(3)}. ${r}`));
+    if (unmoved.length) {
+      console.log(ui.c.dim(`\nSaved in your Memro account before ${shown} (agents still see them). Move them into the file with \`npx memro-cli rules import\`:`));
+      for (const r of unmoved) console.log(`     ${r.text}`);
+    }
     return;
   }
-  // shortcut: rules are picked by their number in the listing, which shifts if a rule is saved in between; ids if that bites.
-  const rule = list[Number(n) - 1];
-  if (!/^\d+$/.test(n || "") || !rule) throw new Error(`No rule ${n ?? ""} for ${repo}. Run \`npx memro-cli rules\` for the numbers.`);
-  if (action === "delete") {
-    const del = await request(api, `/memory/${rule.id}`, { method: "DELETE", key });
-    if (!del.ok) throw new Error(`Couldn't delete: ${del.data?.message || del.status}`);
-    return console.log(`Deleted: ${rule.content.slice(rulePrefix(repo).length)}`);
+  if (action === "import") {
+    if (!cfg) account(opts); // throws "Not connected…"
+    if (!older.length) return console.log("Nothing to import: your Memro account holds no rules for this repo.");
+    addRules(process.cwd(), older.map((r) => r.text));
+    for (const r of older) {
+      const del = await request(cfg.api, `/memory/${r.id}`, { method: "DELETE", key: cfg.apiKey });
+      if (!del.ok) throw new Error(`Copied the rules into ${shown}, but couldn't remove one from your account: ${del.data?.message || del.status}`);
+    }
+    return console.log(`Moved ${older.length} rule${older.length === 1 ? "" : "s"} into ${shown}. Commit it to share them.`);
   }
-  if (action === "edit") {
-    const text = words.join(" ").trim();
-    if (!text) throw new Error("Usage: npx memro-cli rules edit <n> <new text>");
-    const put = await request(api, `/memory/${rule.id}`, { method: "PUT", key, json: { content: rulePrefix(repo) + text, reason: "edited with memro rules" } });
-    if (!put.ok) throw new Error(`Couldn't edit: ${put.data?.message || put.status}`);
-    return console.log(`Rule ${n} is now: ${text}`);
-  }
-  throw new Error(`Unknown rules action "${action}". Use \`rules\`, \`rules edit <n> <text>\` or \`rules delete <n>\`.`);
+  if (action !== "edit" && action !== "delete") throw new Error(`Unknown rules action "${action}". Use \`rules\`, \`rules edit <n> <text>\`, \`rules delete <n>\` or \`rules import\`.`);
+  const rule = local[Number(n) - 1];
+  if (!/^\d+$/.test(n || "") || !rule) throw new Error(`No rule ${n ?? ""} in ${shown}. Run \`npx memro-cli rules\` for the numbers.`);
+  const text = words.join(" ").replace(/\s+/g, " ").trim();
+  if (action === "edit" && !text) throw new Error("Usage: npx memro-cli rules edit <n> <new text>");
+  const lines = fs.readFileSync(file, "utf8").split("\n");
+  const at = lines.findIndex((l) => l.startsWith("- ") && l.slice(2).trim() === rule);
+  if (action === "edit") lines[at] = `- ${text}`;
+  else lines.splice(at, 1);
+  fs.writeFileSync(file, lines.join("\n"));
+  console.log(action === "edit" ? `Rule ${n} is now: ${text}` : `Deleted: ${rule}`);
 }
 
 /** Land this worktree's branch on the branch the main checkout has out, one

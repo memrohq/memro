@@ -243,16 +243,49 @@ export function statedRules(prompt = "") {
 
 export const rulePrefix = (repo) => `Rule for ${repo}: `;
 
-/** The rules saved for this repo, all of them (the server caps it at 200).
- * A server without /rules falls back to a keyword search, capped at 20. */
-async function rulesFor(cfg, repo) {
+// The repo's rules live in the repo, in .memro/rules.md (ADR 0037): the user
+// sees each saved rule in git diff, fixes it by editing a line, and every
+// clone and teammate gets it through git, with or without a Memro account.
+export const rulesFile = (cwd) => path.join(git(cwd, "rev-parse", "--show-toplevel") || cwd, ".memro", "rules.md");
+const RULES_HEADER = `# Rules for AI agents in this repo
+
+Saved by Memro's hooks from what you told an agent ("never…", "always…"), and
+shown to every agent here at each prompt. Edit or delete lines freely, and
+commit this file to share the rules.
+
+`;
+
+/** The rules in the repo's rules file: its "- " lines. */
+export function readRules(cwd) {
+  try {
+    return fs.readFileSync(rulesFile(cwd), "utf8").split("\n").filter((l) => l.startsWith("- ")).map((l) => l.slice(2).trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** Append rules the file doesn't have yet, creating it with a header. */
+export function addRules(cwd, rules) {
+  const have = new Set(readRules(cwd));
+  const fresh = [...new Set(rules.map((r) => r.replace(/\s+/g, " ").trim()))].filter((r) => r && !have.has(r));
+  if (!fresh.length) return;
+  const file = rulesFile(cwd);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (!fs.existsSync(file)) fs.writeFileSync(file, RULES_HEADER);
+  fs.appendFileSync(file, fresh.map((r) => `- ${r}\n`).join(""));
+}
+
+/** The rules saved for this repo in the Memro account before they moved to
+ * .memro/rules.md (the server caps it at 200), without the prefix. A server
+ * without /rules falls back to a keyword search, capped at 20. */
+export async function rulesFor(cfg, repo) {
   let mems;
   try {
     mems = await call(cfg, `/rules?${new URLSearchParams({ repo })}`);
   } catch {
     ({ results: mems = [] } = await call(cfg, `/search?${new URLSearchParams({ query: rulePrefix(repo).trim(), mode: "keyword", limit: "20" })}`));
   }
-  return mems.map((m) => m.content).filter((c) => c.startsWith(rulePrefix(repo)));
+  return mems.filter((m) => m.content.startsWith(rulePrefix(repo))).map((m) => ({ id: m.id, text: m.content.slice(rulePrefix(repo).length) }));
 }
 
 /** What Memro holds about a file, shown the first time a session edits it. */
@@ -411,20 +444,19 @@ export async function handle(input, cfg, tool = "claude-code") {
     // agents can't keep waking each other forever.
     const quiet = event === "Notification" || (event === "Stop" && input.stop_hook_active);
     const stated = event === "UserPromptSubmit" ? statedRules(input.prompt) : [];
-    const saved = Promise.all(stated.map((r) => call(cfg, "/memory", {
-      content: rulePrefix(repo) + r, memory_type: "procedural", metadata: { source: "memro-hook", repo },
-    }).catch(() => {})));
+    try { addRules(input.cwd, stated); } catch { /* a read-only checkout: the rule is still in this prompt */ }
     const rules = event === "UserPromptSubmit" ? rulesFor(cfg, repo).catch(() => []) : [];
-    const [, active, known] = await Promise.all([status, quiet ? { claims: [], intents: [] } : call(cfg, "/coordination/active"), rules, saved]);
+    const [, active, older] = await Promise.all([status, quiet ? { claims: [], intents: [] } : call(cfg, "/coordination/active"), rules]);
     const inbox = unread(active.intents || [], session);
     if (event === "Stop") {
       if (inbox.length) return { decision: "block", reason: formatMessages(inbox, session) };
       await releaseFiles(cfg, session, { note: handoffNote(session, task, input.last_assistant_message || lastAssistantText(input.transcript_path)) });
       return null;
     }
-    const earlier = (known || []).filter((c) => !stated.some((r) => c === rulePrefix(repo) + r));
+    const earlier = [...new Set([...(event === "UserPromptSubmit" ? readRules(input.cwd) : []), ...(older || []).map((r) => r.text)])]
+      .filter((r) => !stated.some((s) => r === s.replace(/\s+/g, " ").trim()));
     const notes = [
-      earlier.length && `Memro: rules the user set for ${repo} in earlier sessions. Follow them in this task:\n${earlier.map((c) => `- ${c.slice(rulePrefix(repo).length)}`).join("\n")}`,
+      earlier.length && `Memro: rules the user set for ${repo} in earlier sessions (.memro/rules.md). Follow them in this task:\n${earlier.map((r) => `- ${r}`).join("\n")}`,
       event === "UserPromptSubmit" && briefing(active.claims || [], session, repo, input.prompt),
       inbox.length && formatMessages(inbox, session),
     ].filter(Boolean);
