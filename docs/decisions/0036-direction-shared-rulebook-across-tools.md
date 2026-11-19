@@ -9,7 +9,7 @@ Four benchmarks so far show where Memro adds value and where it doesn't:
 | LongMemEval-100 | Memro 81%, plain semantic RAG 81% (McNemar p = 1.0) | journal 2026-11-15 |
 | Coordination, one folder | Memro ties an uncoordinated shared folder, 98/100 tasks landed each: Claude Code's Edit refuses stale writes | journal 2026-11-17 |
 | Relay, 300 facts | Memro + hooks 10/10, NOTES.md 9/10, Memro tools alone 8/10 | journal 2026-11-17 §8, ADR 0035 |
-| Relay, rule at 25% of 3,000 facts (interim) | Memro + hooks 43/43, NOTES.md 41/43, Memro search alone 19/43, Claude Code auto-memory 0/43 | journal 2026-11-19 |
+| Relay, rule at 25/50/75% of 3,000 facts, 150 trials per arm | Memro + hooks 150/150, NOTES.md 139/150 (p = 0.056 at the closest depth, short of the p < 0.01 bar: a tie), Memro search alone 58/150, Claude Code auto-memory 0/150 | journal 2026-11-19 |
 
 The pattern: Memro's search is no better than plain RAG, and alone it finds a
 buried rule about half the time. Memro wins when the hooks capture what the
@@ -42,8 +42,8 @@ The product is three capabilities, each measured separately:
 | Capability | Promise | State on 2026-11-19 |
 |---|---|---|
 | **Capture** | Remember what the user actually said, in their words | The prompt hook saves "never / always / from now on" sentences (ADR 0035), keyword detection only |
-| **Delivery** | The right memory reaches the agent at the right moment | Repo rules at every prompt (`GET /rules`), a file's memories on its first edit (ADR 0035 §3); measured by the relay's `b_saw_rule`. Search alone finds a buried plain fact about 45% of the time |
-| **Enforcement** | The agent doesn't break a rule the team set | Not built as such. The relay's 43/43 is compliance (hidden tests confirm the trap was avoided) in a two-trap, one-model, pre-seeded setting, not proof of enforcement in general |
+| **Delivery** | The right memory reaches the agent at the right moment | Repo rules at every prompt (`GET /rules`), a file's memories on its first edit (ADR 0035 §3); measured by the relay's `b_saw_rule`. Search alone finds a buried plain fact about 39% of the time (58/150) |
+| **Enforcement** | The agent doesn't break a rule the team set | Not built as such. The relay's 150/150 is compliance (hidden tests confirm the trap was avoided) in a two-trap, one-model, pre-seeded setting, not proof of enforcement in general |
 
 Delivery isn't compliance; write-ups report them as separate numbers.
 
@@ -91,7 +91,7 @@ rerun of the benchmarks, then team features (board, rule review).
   beating built-in auto-memory, not about recall quality.
 - Work on Memro's search is judged on the P1 replay and the relay's
   plain-fact arm, not by leaderboard scores.
-- The 100% delivery and 43/43 compliance figures are not a claim of 100%
+- The 100% delivery and 150/150 compliance figures are not a claim of 100%
   enforcement; that needs its own violations-prevented rate (P2).
 - The hooks become the core of the product, so their failure modes (keyword
   rule detection, the 200-rule listing, failing open) need tests and limits
