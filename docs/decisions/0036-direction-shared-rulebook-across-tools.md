@@ -48,6 +48,12 @@ The product is three capabilities, each measured separately:
 Delivery isn't compliance; write-ups report them as separate numbers.
 
 Order of work (detail in `docs/roadmap.md`):
+- **First (added 2026-11-19): rules the user can see and own.** `memro rules`
+  to list, edit and delete what the hook saved; rules kept as
+  `.memro/rules.md` in the repo, with the server syncing it; then P2 warnings
+  for rules that name something checkable; and a README that leads with
+  rules, not memory. Syncing one rules file across tools is already free
+  (rulesync and others), so Memro's edge is capture and enforcement.
 - **P0. Historical recall.** Search excludes memories older than 90 days and
   has no default recency weight. Drop the exclusion, add a configurable
   recency weight chosen by benchmark, base both on `document_date` with
