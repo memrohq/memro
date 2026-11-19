@@ -1,18 +1,24 @@
-# Memro: one memory for all your AI coding tools
+# Memro: rules your AI coding agents actually follow
 
-**Tell one tool once, and they all know.** Claude Code, Cursor, Codex, GitHub Copilot and any MCP client share one long-term memory of your decisions, preferences and project context, across sessions and across tools.
+**Tell one agent a rule once; every agent follows it.** Say "never use `Intl` in cart code" to Claude Code, and Codex, Cursor, Gemini CLI and OpenCode see it at every prompt, on every clone, and get a warning when an edit breaks it.
+
+```bash
+npx memro-cli init      # no account: rules in .memro/rules.md, hooks in every agent tool
+npx memro-cli connect   # optional: shared memory and coordination across machines and teammates
+```
+
+- **Caught as you say it:** "never…", "always…", "from now on…" in a prompt is saved to `.memro/rules.md` in your words. See it in `git diff`, fix it by editing a line, share it by committing.
+- **Shown to every agent, every prompt:** no search to miss it. In our [benchmark](docs/benchmarks/journal/2026-11-19-relay-rule-depth.md), with the rule buried among 3,000 facts, agents shown the rules this way avoided the trap 150/150 times; a notes file they were told to read, 139/150 (not a significant difference at our pre-set bar); search alone, 58/150.
+- **Checked on every edit:** put the thing to avoid in backticks and an edit or command that uses it gets a warning with the rule (Claude Code and Codex; warn only, never blocks).
+- **Memory and coordination too:** with an account, agents share long-term memory across tools and machines, and claim files so two agents don't edit one at once. Sync Slack, GitHub, Linear, Notion and [40+ more](https://memro.co/docs/connectors.html), hosted or self-hosted with Docker.
 
 <p align="center">
   <img src="docs/assets/memro-aha.gif" width="720" alt="Cursor forgets the deploy day decided in Claude Code; with Memro, a new Cursor session recalls it: Tuesdays, decided with Claude Code on Monday.">
 </p>
 
 ```bash
-npx memro-cli connect   # sign in and add Memro to every AI tool on this machine
+npx memro-cli rules     # list this repo's rules; rules edit <n> <text>, rules delete <n>
 ```
-
-- **Shared across tools:** what you tell Claude Code, Cursor recalls tomorrow. No more re-explaining your project.
-- **Current, not just similar:** memories are typed, linked and checked for contradictions, so agents recall what's true now.
-- **Your team's context too:** sync Slack, GitHub, Linear, Notion and [40+ more](https://memro.co/docs/connectors.html), hosted or self-hosted with Docker.
 
 ⭐ **If Memro saves you from re-explaining your project, star the repo (top right): it helps other developers find it.**
 

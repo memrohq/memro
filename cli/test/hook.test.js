@@ -12,7 +12,7 @@ process.env.HOME = HOME;
 process.env.USERPROFILE = HOME;
 
 process.env.MEMRO_HOOK_WAIT_SECONDS = "0"; // the wait is tested on its own below
-const { briefing, handle, statedRules, handoffNote, herdrOf, lastAssistantText, taskOf, patchFiles, resourceFor, sessionOf, shellFiles, whereOf } = await import("../src/hook.js");
+const { addedText, brokenRules, briefing, handle, statedRules, handoffNote, herdrOf, lastAssistantText, taskOf, patchFiles, resourceFor, sessionOf, shellFiles, whereOf } = await import("../src/hook.js");
 const { HOOK_FILE, hookSettingsFile, installHooks, removeHooks } = await import("../src/clients.js");
 
 const cfg = { api: "https://api.test", apiKey: "memro_sk_test" };
@@ -475,6 +475,44 @@ test("a rule stated in a prompt goes into .memro/rules.md, and later prompts are
   globalThis.fetch = async (url, init) => (url.includes("/rules?") || url.includes("/search?") ? { ok: false, status: 404 } : fake(url, init));
   const old = await handle(prompt("Add couponTotal(cart, percent)."), cfg);
   assert.match(old.hookSpecificOutput.additionalContext, /- Discounts must always round down/);
+});
+
+test("brokenRules flags a never-rule's backticked term, as a whole term, and ignores other rules", () => {
+  const rules = ["Never use `Intl` in cart code. POS has no ICU.", "Always use `Money` for prices.", "never run `git push --force`", "never use Intl (no backticks)"];
+  assert.deepEqual(brokenRules(rules, "const f = new Intl.NumberFormat()").map((b) => b.term), ["Intl"]);
+  assert.deepEqual(brokenRules(rules, "const International = 1; const m = Money(1)"), []);
+  assert.deepEqual(brokenRules(rules, "git push --force origin main").map((b) => b.term), ["git push --force"]);
+});
+
+test("addedText reads what an edit, a patch or a command adds", () => {
+  assert.equal(addedText({ tool_name: "Edit", tool_input: { old_string: "Intl", new_string: "x" } }), "x");
+  assert.equal(addedText({ tool_name: "MultiEdit", tool_input: { edits: [{ new_string: "a" }, { new_string: "b" }] } }), "a\nb");
+  assert.equal(addedText({ tool_name: "apply_patch", tool_input: { command: "*** Begin Patch\n-old Intl\n+new = 1\n" } }), "new = 1");
+  assert.equal(addedText({ tool_name: "Bash", tool_input: { command: "ls" } }), "ls");
+});
+
+test("an edit that breaks a rule in .memro/rules.md gets a warning, with or without an account", async () => {
+  const dir = fs.mkdtempSync(path.join(TEST_DIR, "warn-"));
+  fs.mkdirSync(path.join(dir, ".memro"));
+  fs.writeFileSync(path.join(dir, ".memro", "rules.md"), "# Rules\n\n- Never use `Intl` in cart code. POS has no ICU.\n");
+  const breaks = { ...edit(path.join(dir, "cart.js")), cwd: dir, tool_input: { file_path: path.join(dir, "cart.js"), new_string: "new Intl.NumberFormat()" } };
+  const offline = await handle(breaks, null);
+  assert.equal(offline.hookSpecificOutput.permissionDecision, undefined, "warn, never block");
+  assert.match(offline.hookSpecificOutput.additionalContext, /uses `Intl`, which a rule .* forbids:\n- Never use `Intl` in cart code/);
+  assert.equal(await handle({ ...breaks, tool_input: { ...breaks.tool_input, new_string: "formatMoney(x)" } }, null), null);
+
+  serve(() => ({ granted: true }));
+  const online = await handle(breaks, cfg);
+  assert.match(online.hookSpecificOutput.additionalContext, /uses `Intl`/);
+});
+
+test("without an account, prompts still save rules to the file and show them", async () => {
+  const dir = fs.mkdtempSync(path.join(TEST_DIR, "offline-"));
+  const prompt = (p) => ({ hook_event_name: "UserPromptSubmit", session_id: "off123", cwd: dir, prompt: p });
+  assert.equal(await handle(prompt("Never use `Intl` in cart code. POS has no ICU."), null), null);
+  const out = await handle(prompt("Add couponTotal."), null);
+  assert.match(out.hookSpecificOutput.additionalContext, /- Never use `Intl` in cart code\. POS has no ICU\./);
+  assert.equal(await handle({ hook_event_name: "Stop", session_id: "off123", cwd: dir }, null), null, "nothing else runs without an account");
 });
 
 test("the first edit of a file shows what Memro holds about it, once", async () => {
