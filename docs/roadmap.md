@@ -101,6 +101,10 @@ auto-memory off and delete most of what it saves, trust markdown plus grep,
 and want team-wide rules. Three Memro posts there drew 6 points and no
 outside comments, so that is opinion, not market proof.
 
+Status 2026-11-19: 1, 2 and 3 (warn only, Claude Code and Codex) are built
+(PR #103, ADR 0037, and the `memro init` PR); 4's README rewrite is done
+without a new GIF.
+
 1. **`memro rules`: list, edit and delete a repo's rules.** The hook saves
    rules, but nothing shows the user what it saved or lets them fix a wrong
    one. `GET /rules` already lists them; the CLI needs list, edit and delete.

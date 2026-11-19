@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { CLIENTS, HOOK_TARGETS, KEY_ENV, findClient, installHooks, onPath, removeHooks, withSession } from "./clients.js";
-import { addRules, herdrOf, readRules, repoOf, rulesFile, rulesFor, untagged } from "./hook.js";
+import { RULES_HEADER, addRules, brokenRules, herdrOf, readRules, repoOf, rulesFile, rulesFor, untagged } from "./hook.js";
 import { pick, pickOne, promptText } from "./picker.js";
 import { codexTrusts, diagnose } from "./doctor.js";
 import { installInstructions, uninstallInstructions } from "./instructions.js";
@@ -21,6 +21,9 @@ const CREDENTIALS = () => path.join(os.homedir(), ".memro", "credentials.json");
 const HELP = `memro-cli — connect your AI tools to Memro memory
 
 Usage
+  npx memro-cli init         Keep this repo's rules in .memro/rules.md, no account:
+                             add the hooks that save the rules you state, show them
+                             to every agent and warn when an edit breaks one
   npx memro-cli connect      Sign in and add Memro to Claude Code, Codex, Cursor,
                              Antigravity, OpenCode, Gemini CLI, VS Code, Windsurf
                              and Claude Desktop
@@ -356,6 +359,37 @@ async function chooseTargets(opts, cwd = process.cwd()) {
 const interactive = () => Boolean(process.stdin.isTTY && process.stdout.isTTY);
 const host = (url) => url.replace(/^https?:\/\//, "");
 
+/** Rules without an account: the hooks in every detected tool that has them,
+ * and the repo's .memro/rules.md. */
+async function init(opts) {
+  const cwd = process.cwd();
+  const scope = opts.scope || "user";
+  const targets = (opts.clients ? selectClients(opts.clients, scope, cwd) : CLIENTS.filter((c) => c.supportsScope(scope) && c.detect({ scope, cwd })))
+    .filter((c) => HOOK_TARGETS[c.id]);
+  ui.intro("Memro init", "rules for your agents, no account");
+  ui.gap();
+  if (!targets.length) return ui.outro("No tool with hooks found (Claude Code, Codex, Cursor, Gemini CLI, OpenCode).");
+  const width = Math.max(...targets.map((c) => c.name.length)) + 2;
+  for (const c of targets) {
+    try {
+      ui.ok(c.name.padEnd(width), formatPath(installHooks({ scope, cwd, tool: c.id }), scope, cwd));
+    } catch (err) {
+      ui.fail(c.name.padEnd(width), err.message);
+    }
+  }
+  const file = rulesFile(cwd);
+  if (!fs.existsSync(file)) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, RULES_HEADER);
+  }
+  ui.gap();
+  ui.outro(
+    `Rules go in ${path.relative(cwd, file)}. Tell an agent one ("never…", "always…"), or add a line yourself.`,
+    "Put the thing to avoid in backticks (never use `Intl` in cart code) and agents are warned when an edit uses it.",
+    "Restart your tools to load the hooks. Commit the file to share the rules.",
+  );
+}
+
 async function connect(opts) {
   ui.intro("Memro connect", host(opts.api));
   ui.gap();
@@ -615,7 +649,8 @@ async function rules(opts) {
   if (!action) {
     if (!local.length && !unmoved.length) return console.log(`No rules yet. Tell your agent one ("never…", "always…") and the hook adds it to ${shown}.`);
     if (local.length) console.log(ui.c.dim(`Rules in ${shown}:`));
-    local.forEach((r, i) => console.log(`${String(i + 1).padStart(3)}. ${r}`));
+    // Rules that name a term in backticks are checked on every edit.
+    local.forEach((r, i) => console.log(`${String(i + 1).padStart(3)}. ${r}${brokenRules([r], r.match(/`([^`]+)`/)?.[1] || "").length ? ui.c.dim("  (checked on edits)") : ""}`));
     if (unmoved.length) {
       console.log(ui.c.dim(`\nSaved in your Memro account before ${shown} (agents still see them). Move them into the file with \`npx memro-cli rules import\`:`));
       for (const r of unmoved) console.log(`     ${r.text}`);
@@ -802,6 +837,7 @@ function formatPath(filePath, scope, cwd) {
 export async function main(argv) {
   const opts = parseArgs(argv);
   switch (opts.command) {
+    case "init": return init(opts);
     case "connect": return connect(opts);
     case "status": return status(opts);
     case "doctor": return doctor(opts);

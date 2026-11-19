@@ -30,9 +30,15 @@ to every tool's format is already free (rulesync and others).
   its work may commit a new rule with it, which puts the rule in review.
 - A rule caught in a worktree lands in that worktree's file and reaches the
   others when it's merged, not at once.
-- The hook still runs only for a connected account (`handle` needs a key);
-  rules without an account need `memro connect` to install hooks without
-  signing in. Next step.
+- Without an account (`memro init`), the hooks still save, show and check
+  the file's rules; claims, statuses and memory need `memro connect`.
+- Enforcement, warn only: a "never…" rule naming something in backticks is
+  checked against what each edit or command adds (Claude Code edits, Codex
+  and OpenCode patches, shell commands), whole-term, and a match adds a note
+  with the rule. Every warning is logged to `~/.memro/hooks/log.jsonl`
+  (`rule-warn`), so the false-positive rate can be measured before a block
+  mode. Gemini CLI and Cursor pass only the file path and can't show a note
+  on an edit, so they get no warnings yet.
 - The relay benchmark's Memro arms seed rules in the account, which the hook
   still shows; a rerun should seed the file instead.
 - Two hook processes adding the same rule at once may write it twice; reading

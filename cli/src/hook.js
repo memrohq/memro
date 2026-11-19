@@ -247,7 +247,7 @@ export const rulePrefix = (repo) => `Rule for ${repo}: `;
 // sees each saved rule in git diff, fixes it by editing a line, and every
 // clone and teammate gets it through git, with or without a Memro account.
 export const rulesFile = (cwd) => path.join(git(cwd, "rev-parse", "--show-toplevel") || cwd, ".memro", "rules.md");
-const RULES_HEADER = `# Rules for AI agents in this repo
+export const RULES_HEADER = `# Rules for AI agents in this repo
 
 Saved by Memro's hooks from what you told an agent ("never…", "always…"), and
 shown to every agent here at each prompt. Edit or delete lines freely, and
@@ -273,6 +273,55 @@ export function addRules(cwd, rules) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   if (!fs.existsSync(file)) fs.writeFileSync(file, RULES_HEADER);
   fs.appendFileSync(file, fresh.map((r) => `- ${r}\n`).join(""));
+}
+
+// A "never…" rule that names something in backticks ("never use `Intl` in
+// cart code") is checked on every edit and command: in the 2026-11-19 depth
+// grid, 7 of the notes file's 11 misses were agents that had read the rule.
+// Warn only, until the false-positive rate is known (ADR 0037).
+const FORBIDS = /\b(never|don't|do not|avoid|must not|mustn't|stop using|no longer use)\b/i;
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** What an edit or command adds: the text the rule check reads. */
+export function addedText(i) {
+  const t = i.tool_input || {};
+  if (i.tool_name === "Bash") return String(t.command || "");
+  // Codex and OpenCode send edits as a patch: its added lines.
+  if (i.tool_name === "apply_patch") return String(t.command || "").split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).map((l) => l.slice(1)).join("\n");
+  return [t.new_string, t.content, ...(Array.isArray(t.edits) ? t.edits.map((e) => e?.new_string) : [])].filter((x) => typeof x === "string").join("\n");
+}
+
+/** The "never…" rules that `text` breaks, each with the backticked term it uses. */
+export function brokenRules(rules, text) {
+  if (!text) return [];
+  return rules.filter((r) => FORBIDS.test(r)).flatMap((rule) => {
+    const term = [...rule.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim()).find((t) => t && new RegExp(`(^|[^\\w])${escapeRe(t)}($|[^\\w])`).test(text));
+    return term ? [{ rule, term }] : [];
+  });
+}
+
+/** Warnings for an edit or command that breaks one of the repo's rules. */
+function ruleWarnings(input, tool, session) {
+  return brokenRules(readRules(input.cwd), addedText(input)).map(({ rule, term }) => {
+    log({ tool, session, outcome: "rule-warn", term });
+    return `Memro: this ${input.tool_name === "Bash" ? "command" : "edit"} uses \`${term}\`, which a rule the user set for this repo forbids:\n- ${rule}\n` +
+      "Change it to follow the rule, unless the user asked for this in this session.";
+  });
+}
+
+/** Without a Memro account the hooks keep the repo's rules only: save the ones
+ * a prompt states, show them at each prompt, and warn on edits that break one. */
+function rulesOnly(input, tool) {
+  const event = input.hook_event_name;
+  if (event === "UserPromptSubmit") {
+    const stated = statedRules(input.prompt);
+    try { addRules(input.cwd, stated); } catch { /* a read-only checkout */ }
+    const earlier = readRules(input.cwd).filter((r) => !stated.some((s) => r === s.replace(/\s+/g, " ").trim()));
+    return earlier.length ? { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: `Memro: rules the user set for this repo in earlier sessions (.memro/rules.md). Follow them in this task:\n${earlier.map((r) => `- ${r}`).join("\n")}` } } : null;
+  }
+  if (event !== "PreToolUse") return null;
+  const warnings = ruleWarnings(input, tool, sessionOf(input, tool));
+  return warnings.length ? { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: warnings.join("\n") } } : null;
 }
 
 /** The rules saved for this repo in the Memro account before they moved to
@@ -413,7 +462,8 @@ function firstSighting(session, key) {
 
 /** What to print for one hook event: a hook response, or null to stay silent. */
 export async function handle(input, cfg, tool = "claude-code") {
-  if (!cfg || !TOOLS[tool]) return null;
+  if (!TOOLS[tool]) return null;
+  if (!cfg) return rulesOnly(input, tool);
   const session = sessionOf(input, tool);
 
   const event = input.hook_event_name;
@@ -480,7 +530,7 @@ export async function handle(input, cfg, tool = "claude-code") {
       );
     }
   }
-  const warnings = [];
+  const warnings = ruleWarnings(input, tool, session);
   for (const file of command ? shellFiles(command) : TOOLS[tool].files(input)) {
     const verdict = await claimFile(cfg, file, input.cwd, session, tool);
     if (verdict?.deny) return deny(verdict.deny);

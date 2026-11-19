@@ -1,6 +1,20 @@
 # memro-cli
 
-Connect your AI tools to [Memro](https://memro.co) memory with one command.
+Rules your AI coding agents follow, and [Memro](https://memro.co) memory, with one command.
+
+```bash
+# No account: keep this repo's rules in .memro/rules.md
+npx memro-cli init
+npx memro-cli rules        # list them; rules edit <n> <text>, rules delete <n>
+```
+
+`init` adds hooks to Claude Code, Codex, Cursor, Gemini CLI and OpenCode. They
+save the rules you state in a prompt ("never…", "always…", "from now on…") to
+`.memro/rules.md`, show them to the agent at every prompt, and warn when an
+edit or command uses something a "never…" rule names in backticks (Claude Code
+and Codex). Commit the file to share the rules.
+
+For memory and coordination across machines and teammates, connect an account:
 
 ```bash
 # Global configuration (default)
