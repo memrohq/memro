@@ -80,3 +80,47 @@ above was written with the cap in mind and is left as it was.
   within each, so a slow model hour can shift one depth but not one arm.
 - The hooks arms are told by CLAUDE.md to recall first, and so is notes to
   read its file and automem to check its memory: same instruction, three stores.
+
+## 7. Results (added after the run; sections 1–6 unchanged)
+
+All 650 B sessions ran (2026-11-19, about 9 hours with usage-limit waits,
+$4.36). Raw rows: `docs/benchmarks/results/relay/depth-20261119/`. Trap
+avoided, R1 + R2, Wilson 95% interval, two-sided Fisher p against notes at the
+same depth:
+
+| Depth | memro-hooks | notes | memro-plain | automem | none |
+|---|---|---|---|---|---|
+| 25% | **50/50** (93–100%), p = 0.50 | 48/50 (87–99%) | 20/50 (28–54%), p = 8e-10 | 0/50 (0–7%), p = 3e-26 | – |
+| 50% | **50/50** (93–100%), p = 0.12 | 46/50 (81–97%) | 18/50 (24–50%), p = 4e-9 | 0/50 (0–7%), p = 6e-24 | 0/50 (0–7%) |
+| 75% | **50/50** (93–100%), p = 0.056 | 45/50 (79–96%) | 20/50 (28–54%), p = 2e-7 | 0/50 (0–7%), p = 7e-23 | – |
+
+`b_saw_rule`: memro-hooks 150/150, notes 146/150, memro-plain 70/150,
+automem 0/150.
+
+**Against the pass bar (§4): not met.** No depth reaches p < 0.01; the closest
+is 75% at p = 0.056. This is published as a tie with notes that leans towards
+Memro. Pooling the three depths (150/150 against 139/150, p = 0.0008) was not
+planned and is exploratory only.
+
+**Against the predictions (§3):**
+- notes: no dip at 75%. It slid gently, 96% → 92% → 90%. B mostly `cat`s
+  the whole file into a Bash result instead of using Read, so the 2,000-line
+  limit didn't apply. Of its 11 misses, 7 had the rule's words in a tool
+  result and broke it anyway; 4 never got it.
+- automem: as predicted, below notes everywhere, and further than expected:
+  0/150. B looked in the memory folder in 127/150 sessions but never reached
+  the rule.
+- memro-hooks: as predicted, flat at 50/50 at every depth.
+- memro-plain: as predicted, flat and lower, about 39%. It depends on the
+  trap: R1 0/75, R2 58/75. Search finds R2's rule and never R1's.
+- none: wrong. 0/50, not about a third; with this task wording, B never
+  avoids either trap by chance.
+
+**What it supports:** delivering a repo's rules at every prompt kept a fresh
+agent from breaking a rule buried in 3,000 facts every time, with nobody
+keeping a file. The same store using search alone found it far less often.
+**What it doesn't:** that Memro beats a notes file the agent is told to read
+(not significant at the bar set), or capture (rules were pre-seeded). The
+automem arm is a 3,000-line index Claude Code would not build itself; it
+shows what happens when project knowledge outgrows the 200 lines it loads,
+not how auto-memory does in normal use.
