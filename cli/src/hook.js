@@ -241,7 +241,7 @@ export function statedRules(prompt = "") {
   return sentences.flatMap((x, i) => (RULE.test(x) && x.length >= 12 ? [`${x}${sentences[i + 1] ? ` ${sentences[i + 1]}` : ""}`.slice(0, 400)] : []));
 }
 
-const rulePrefix = (repo) => `Rule for ${repo}: `;
+export const rulePrefix = (repo) => `Rule for ${repo}: `;
 
 /** The rules saved for this repo, all of them (the server caps it at 200).
  * A server without /rules falls back to a keyword search, capped at 20. */

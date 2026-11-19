@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { CLIENTS, HOOK_TARGETS, KEY_ENV, findClient, installHooks, onPath, removeHooks, withSession } from "./clients.js";
-import { herdrOf, repoOf, untagged } from "./hook.js";
+import { herdrOf, repoOf, rulePrefix, untagged } from "./hook.js";
 import { pick, pickOne, promptText } from "./picker.js";
 import { codexTrusts, diagnose } from "./doctor.js";
 import { installInstructions, uninstallInstructions } from "./instructions.js";
@@ -32,6 +32,11 @@ Usage
   npx memro-cli send <agent> <message>
                              Message an agent (a name from \`agents\`); Claude Code
                              reads it at its next prompt or when it stops
+  npx memro-cli rules        List the rules saved for this repo ("never…", "always…")
+  npx memro-cli rules edit <n> <text>
+                             Replace rule <n> (a number from \`rules\`) with <text>
+  npx memro-cli rules delete <n>
+                             Delete rule <n>, so agents stop seeing it
   npx memro-cli land         From a git worktree: rebase this branch on the main
                              checkout's branch and fast-forward it, one agent at
                              a time, showing what landed before you
@@ -98,7 +103,7 @@ export function parseArgs(argv) {
       opts.command = "help";
     } else if (!opts.command) {
       opts.command = a;
-    } else if (opts.command === "send") {
+    } else if (opts.command === "send" || opts.command === "rules") {
       opts.args.push(a);
     } else {
       throw new Error(`Unexpected argument: ${a}`);
@@ -591,6 +596,40 @@ async function send(opts) {
   console.log(`Sent to ${to}. It reads it at its next prompt or when it stops (within 2 hours).`);
 }
 
+/** List, edit or delete the rules the hook saved for this repo: the ones every
+ * agent in it sees at each prompt, so a wrongly saved one has to be fixable. */
+async function rules(opts) {
+  const [action, n, ...words] = opts.args;
+  const { api, key } = account(opts);
+  const repo = repoOf();
+  const res = await request(api, `/rules?${new URLSearchParams({ repo })}`, { key });
+  if (res.status === 404) throw new Error(`${api} doesn't list rules yet (no GET /rules); it needs a server from 2026-11-19 or later.`);
+  if (!res.ok) throw new Error(`Couldn't list rules: ${res.data?.message || res.status}`);
+  const list = res.data || [];
+  if (!action) {
+    if (!list.length) return console.log(`No rules saved for ${repo}. Say one to your agent ("never…", "always…") and the hook saves it.`);
+    console.log(ui.c.dim(`Rules for ${repo}, newest first:`));
+    list.forEach((m, i) => console.log(`${String(i + 1).padStart(3)}. ${m.content.slice(rulePrefix(repo).length)}`));
+    return;
+  }
+  // shortcut: rules are picked by their number in the listing, which shifts if a rule is saved in between; ids if that bites.
+  const rule = list[Number(n) - 1];
+  if (!/^\d+$/.test(n || "") || !rule) throw new Error(`No rule ${n ?? ""} for ${repo}. Run \`npx memro-cli rules\` for the numbers.`);
+  if (action === "delete") {
+    const del = await request(api, `/memory/${rule.id}`, { method: "DELETE", key });
+    if (!del.ok) throw new Error(`Couldn't delete: ${del.data?.message || del.status}`);
+    return console.log(`Deleted: ${rule.content.slice(rulePrefix(repo).length)}`);
+  }
+  if (action === "edit") {
+    const text = words.join(" ").trim();
+    if (!text) throw new Error("Usage: npx memro-cli rules edit <n> <new text>");
+    const put = await request(api, `/memory/${rule.id}`, { method: "PUT", key, json: { content: rulePrefix(repo) + text, reason: "edited with memro rules" } });
+    if (!put.ok) throw new Error(`Couldn't edit: ${put.data?.message || put.status}`);
+    return console.log(`Rule ${n} is now: ${text}`);
+  }
+  throw new Error(`Unknown rules action "${action}". Use \`rules\`, \`rules edit <n> <text>\` or \`rules delete <n>\`.`);
+}
+
 /** Land this worktree's branch on the branch the main checkout has out, one
  * agent at a time: worktrees keep agents apart while they work, but every
  * branch meets at merge time (the launch benchmark: 4 of 5 branches
@@ -754,6 +793,7 @@ export async function main(argv) {
     case "disconnect": return disconnect(opts);
     case "agents": return agents(opts);
     case "send": return send(opts);
+    case "rules": return rules(opts);
     case "land": return land(opts);
     case null:
     case "help": console.log(HELP); return;
