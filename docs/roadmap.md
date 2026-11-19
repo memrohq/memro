@@ -91,6 +91,44 @@ the relay) and waits 30 minutes between attempts.
 the claim route is saved at `~/.memro/bench-agent.json` (mode 600) and holds
 no memories; delete the file, or the agent with `DELETE /identity/{id}`.
 
+## First: rules the user can see and own (decided 2026-11-19)
+
+Before P0–P4 below. The depth grid (journal 2026-11-19) tied a notes file
+(150/150 against 139/150, p = 0.056 against a p < 0.01 bar) and showed that
+pushing rules, not searching for them, is what works. Hacker News threads on
+agent memory (2026-11) said the same from the other side: people turn
+auto-memory off and delete most of what it saves, trust markdown plus grep,
+and want team-wide rules. Three Memro posts there drew 6 points and no
+outside comments, so that is opinion, not market proof.
+
+1. **`memro rules`: list, edit and delete a repo's rules.** The hook saves
+   rules, but nothing shows the user what it saved or lets them fix a wrong
+   one. `GET /rules` already lists them; the CLI needs list, edit and delete.
+   About a day.
+2. **Rules as a file in the repo: `.memro/rules.md`.** Readable, committed
+   with git, the source of truth; the hooks read it, and the server only
+   syncs it across machines and teammates. Works without an account. No
+   local search index: the grid pushed about 100 rules per prompt without
+   one.
+3. **Warn on edits (P2 below), for rules that name something checkable**
+   (`Intl`, `float64` in `checkout/`, `git push --force`). The model may
+   propose the pattern at capture, and the user confirms it; rules without
+   one stay delivery-only. Observe and warn first. Check what Codex, Cursor
+   and Gemini CLI hooks can block before promising it for every tool.
+4. **README leads with rules, not memory:** "Tell one agent a rule once;
+   every agent follows it", with a GIF of a second tool following it. Drop
+   claims the benchmarks don't back (contradiction checking ties plain RAG).
+
+Syncing one rules file to every tool's format is already free (rulesync,
+agentsync, agent_sync), so Memro's edge is capture and enforcement, not
+distribution. Generating AGENTS.md and CLAUDE.md is a feature, not the
+pitch.
+
+Not now: a memory format standard, better search, more automatic saving.
+
+Validate with people before the launch: 10 developers using it across at
+least two agents, and where they get stuck.
+
 ## Next engineering cycle: capture, delivery, enforcement (ADR 0036)
 
 Memro's product is three capabilities, each measured on its own:
@@ -98,10 +136,10 @@ Memro's product is three capabilities, each measured on its own:
 | Capability | Promise | Where it stands | Measured by |
 |---|---|---|---|
 | **Capture** | Remember what the user actually said, in their words | The prompt hook saves "never / always / from now on" sentences (ADR 0035); keyword detection only | Rules caught from real prompts; wrong saves |
-| **Delivery** | The right memory reaches the agent at the right moment | Repo rules at every prompt via `GET /rules` (up to 200); a file's memories on its first edit (ADR 0035 §3). Search alone finds a buried plain fact about 45% of the time | `b_saw_rule` in the relay |
-| **Enforcement** | The agent doesn't break a rule the team set | Not built as such. The relay's 43/43 "trap avoided" at 25% depth is compliance (hidden tests), in a two-trap, one-model, pre-seeded setting | Violations prevented, false positives and negatives |
+| **Delivery** | The right memory reaches the agent at the right moment | Repo rules at every prompt via `GET /rules` (up to 200); a file's memories on its first edit (ADR 0035 §3). Search alone finds a buried plain fact 58/150 times (39%) | `b_saw_rule` in the relay |
+| **Enforcement** | The agent doesn't break a rule the team set | Not built as such. The depth grid's 150/150 "trap avoided" is compliance (hidden tests), in a two-trap, one-model, pre-seeded setting | Violations prevented, false positives and negatives |
 
-Delivery isn't compliance: 43/43 is the compliance number, and `b_saw_rule`
+Delivery isn't compliance: 150/150 is the compliance number, and `b_saw_rule`
 is the delivery number. Keep them apart in every write-up.
 
 **P0. Historical recall.** Search only looks at memories from the last 90
@@ -219,5 +257,7 @@ exist. Build ADR 0032 incrementally only where those cases fail.
    per-window MCP holder, which needs memro-cloud's core pin bumped).
 6. **Team board** in the dashboard (ADR 0019): read-only, cross-tool, after
    the launch benchmark; ask in discussion #93 first whether people want it.
-7. **Launch**: Hacker News only after a pass bar is clearly met, with the
-   numbers and rerun command on memro.co (see the launch status page).
+7. **Launch**: one Show HN, only after a pass bar is clearly met and steps
+   1–3 of "First" ship, linking a page with the GIF and the install line,
+   not the repo root. The 2026-11 posts all linked the repo root and came
+   three in five days, which got the author comments flagged.

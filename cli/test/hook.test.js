@@ -449,28 +449,31 @@ test("statedRules picks rule sentences with the reason after them, and nothing f
   assert.deepEqual(statedRules("Add hasItem(cart, id). Do not edit test files. Do not commit."), []);
 });
 
-test("a rule stated in a prompt is saved for the repo, and later prompts are shown it", async () => {
-  const repo = P("/w/memro", "/w/memro");
+test("a rule stated in a prompt goes into .memro/rules.md, and later prompts are shown it", async () => {
+  const dir = fs.mkdtempSync(path.join(TEST_DIR, "rules-"));
+  const repo = P(dir, dir);
+  const prompt = (p) => ({ ...ev("UserPromptSubmit", { prompt: p }), cwd: dir });
   serve(inbox([]));
-  await handle(ev("UserPromptSubmit", { prompt: "Add itemCount. Discounts must always round down. Finance had to refund." }), cfg);
-  const saved = calls.find((c) => c.route === "/memory").body;
-  assert.equal(saved.content, `Rule for ${repo}: Discounts must always round down. Finance had to refund.`);
+  await handle(prompt("Add itemCount. Discounts must always round down. Finance had to refund."), cfg);
+  assert.match(fs.readFileSync(path.join(dir, ".memro", "rules.md"), "utf8"), /\n- Discounts must always round down\. Finance had to refund\.\n$/);
+  assert.ok(!calls.some((c) => c.route === "/memory"), "nothing saved to the account");
 
+  // Rules saved in the account before the file existed are still shown, once.
   serve((route) => (route.startsWith("/rules")
-    ? [{ content: saved.content }, { content: "Rule for other-repo: never deploy on Fridays." }]
+    ? [{ content: `Rule for ${repo}: never deploy on Fridays.` }, { content: `Rule for ${repo}: Discounts must always round down. Finance had to refund.` }, { content: "Rule for other-repo: never use tabs." }]
     : inbox([])(route)));
-  const out = await handle(ev("UserPromptSubmit", { prompt: "Add couponTotal(cart, percent)." }), cfg);
+  const out = await handle(prompt("Add couponTotal(cart, percent)."), cfg);
   const context = out.hookSpecificOutput.additionalContext;
   assert.match(context, /rules the user set .* earlier sessions/);
-  assert.match(context, /- Discounts must always round down/);
-  assert.doesNotMatch(context, /Fridays/, "another repo's rules stay out");
-  assert.ok(!calls.some((c) => c.route === "/memory"), "nothing to save");
+  assert.equal(context.match(/- Discounts must always round down/g).length, 1);
+  assert.match(context, /- never deploy on Fridays/);
+  assert.doesNotMatch(context, /tabs/, "another repo's rules stay out");
 
-  // A server without /rules: the keyword search still finds them.
-  serve((route) => (route.startsWith("/search") ? { results: [{ content: saved.content }] } : inbox([])(route)));
+  // A server without /rules: the file still reaches the agent.
+  serve(inbox([]));
   const fake = globalThis.fetch;
-  globalThis.fetch = async (url, init) => (url.includes("/rules?") ? { ok: false, status: 404 } : fake(url, init));
-  const old = await handle(ev("UserPromptSubmit", { prompt: "Add couponTotal(cart, percent)." }), cfg);
+  globalThis.fetch = async (url, init) => (url.includes("/rules?") || url.includes("/search?") ? { ok: false, status: 404 } : fake(url, init));
+  const old = await handle(prompt("Add couponTotal(cart, percent)."), cfg);
   assert.match(old.hookSpecificOutput.additionalContext, /- Discounts must always round down/);
 });
 
