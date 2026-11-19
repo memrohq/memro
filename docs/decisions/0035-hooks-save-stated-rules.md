@@ -39,7 +39,11 @@ No server change. Like the rest of the hook, every step fails open.
   (PR #98).
 - Detection is keyword-based: a rule phrased without those words isn't saved,
   and an instruction with them ("always run the tests") is saved as a rule.
-- Listing a repo's rules is a keyword search capped at 20 (`shortcut:` in the
-  code); a repo with more needs a filter by repo on the server.
+- Listing a repo's rules was a keyword search capped at 20. In the 3,000-fact
+  smoke test (2026-11-19) a repo with 102 rules got 20 others and never the
+  trap's, so the server gained `GET /rules?repo=…`: the hook-saved rules for
+  that repo (metadata `source`/`repo`), newest first, up to 200 (about 5,000
+  tokens per prompt). The hook falls back to the keyword search on a server
+  without it.
 - Measured (journal §8, 45 relays): with 300 facts in memory, Memro with the
   hooks 10/10, a notes file 9/10, Memro's tools alone 8/10.

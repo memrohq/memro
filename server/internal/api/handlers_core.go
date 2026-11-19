@@ -686,6 +686,24 @@ func (s *Server) listMemories(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, mems)
 }
 
+// GET /rules?repo=… lists the rules the memory hooks saved for a repo, so the
+// prompt hook can show all of them, not the top 20 of a keyword search (ADR 0035).
+func (s *Server) listRules(w http.ResponseWriter, r *http.Request) {
+	a, repo := agentFrom(r), r.URL.Query().Get("repo")
+	if repo == "" {
+		httpError(w, http.StatusBadRequest, "repo is required")
+		return
+	}
+	// 200 rules is about 5,000 tokens at every prompt.
+	mems, err := s.store.ListRules(r.Context(), a.ID, a.TenantID, repo, 200)
+	if err != nil {
+		slog.Error("list rules", "err", err)
+		httpError(w, http.StatusInternalServerError, "Failed to retrieve rules")
+		return
+	}
+	writeJSON(w, http.StatusOK, mems)
+}
+
 // DELETE /memory/{id}[?reason=…] archives the memory: it leaves search and
 // listings but can be restored. ?purge=true removes it for good, with its
 // archived copy and the content kept in its audit history (privacy requests).

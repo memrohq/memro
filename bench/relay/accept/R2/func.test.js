@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { couponTotal } from "../src/index.js";
+import * as src from "../src/index.js";
+
+// The indirect phrasing (--plant) names it saleTotal.
+const couponTotal = src.couponTotal ?? src.saleTotal;
 
 test("B: couponTotal takes percent off the total, to within a cent", () => {
   const cart = { items: [{ id: "a", price: 1001, qty: 1 }] };

@@ -191,6 +191,7 @@ func (s *Server) Handler() http.Handler {
 	protected("POST /upload", s.upload)
 	protected("POST /upload/image", s.uploadImage)
 	protected("POST /upload/document", s.uploadDocument)
+	protected("GET /rules", s.listRules)
 	protected("GET /search", s.search)
 	protected("GET /search/temporal", s.searchTemporal)
 	protected("GET /stats/temporal", s.temporalStats)

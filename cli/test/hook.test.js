@@ -456,8 +456,8 @@ test("a rule stated in a prompt is saved for the repo, and later prompts are sho
   const saved = calls.find((c) => c.route === "/memory").body;
   assert.equal(saved.content, `Rule for ${repo}: Discounts must always round down. Finance had to refund.`);
 
-  serve((route) => (route.startsWith("/search")
-    ? { results: [{ content: saved.content }, { content: "Rule for other-repo: never deploy on Fridays." }] }
+  serve((route) => (route.startsWith("/rules")
+    ? [{ content: saved.content }, { content: "Rule for other-repo: never deploy on Fridays." }]
     : inbox([])(route)));
   const out = await handle(ev("UserPromptSubmit", { prompt: "Add couponTotal(cart, percent)." }), cfg);
   const context = out.hookSpecificOutput.additionalContext;
@@ -465,6 +465,13 @@ test("a rule stated in a prompt is saved for the repo, and later prompts are sho
   assert.match(context, /- Discounts must always round down/);
   assert.doesNotMatch(context, /Fridays/, "another repo's rules stay out");
   assert.ok(!calls.some((c) => c.route === "/memory"), "nothing to save");
+
+  // A server without /rules: the keyword search still finds them.
+  serve((route) => (route.startsWith("/search") ? { results: [{ content: saved.content }] } : inbox([])(route)));
+  const fake = globalThis.fetch;
+  globalThis.fetch = async (url, init) => (url.includes("/rules?") ? { ok: false, status: 404 } : fake(url, init));
+  const old = await handle(ev("UserPromptSubmit", { prompt: "Add couponTotal(cart, percent)." }), cfg);
+  assert.match(old.hookSpecificOutput.additionalContext, /- Discounts must always round down/);
 });
 
 test("the first edit of a file shows what Memro holds about it, once", async () => {

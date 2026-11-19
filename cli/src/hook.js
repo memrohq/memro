@@ -243,11 +243,16 @@ export function statedRules(prompt = "") {
 
 const rulePrefix = (repo) => `Rule for ${repo}: `;
 
-/** The rules saved for this repo. shortcut: a keyword search for the prefix,
- * capped at 20; a repo with more rules needs a filter by repo on the server. */
+/** The rules saved for this repo, all of them (the server caps it at 200).
+ * A server without /rules falls back to a keyword search, capped at 20. */
 async function rulesFor(cfg, repo) {
-  const { results = [] } = await call(cfg, `/search?${new URLSearchParams({ query: rulePrefix(repo).trim(), mode: "keyword", limit: "20" })}`);
-  return results.map((m) => m.content).filter((c) => c.startsWith(rulePrefix(repo)));
+  let mems;
+  try {
+    mems = await call(cfg, `/rules?${new URLSearchParams({ repo })}`);
+  } catch {
+    ({ results: mems = [] } = await call(cfg, `/search?${new URLSearchParams({ query: rulePrefix(repo).trim(), mode: "keyword", limit: "20" })}`));
+  }
+  return mems.map((m) => m.content).filter((c) => c.startsWith(rulePrefix(repo)));
 }
 
 /** What Memro holds about a file, shown the first time a session edits it. */
