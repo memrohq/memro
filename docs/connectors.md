@@ -6,11 +6,11 @@ who made it; their memories are private to their agent, like any other.
 
 | | Slack | GitHub | Linear | Sentry | Notion |
 |---|---|---|---|---|---|
-| What becomes memory | Messages in the channels you turn on, one item per channel per day, threads kept together | Issues and pull requests with their comments | Issues, projects, priorities, and discussion from teams | Production issues, exceptions, stack traces, and culprit files | Specs, architectural decisions, RFCs, and database pages |
-| Kept current by | Events API (new, edited, deleted messages), plus a sync every 30 minutes | App webhooks, plus a sync every 30 minutes | Webhooks, plus reconciliation sync | Webhooks, plus reconciliation sync | Webhooks, plus reconciliation sync |
-| History on connect | Last `CONNECTOR_BACKFILL_DAYS` (30) | Items updated in the last `CONNECTOR_BACKFILL_DAYS` | Active issues updated in last 30 days | Unresolved issues in the last 14 days | Active pages in shared databases |
-| You choose | Channels, in the Memro dashboard | Repositories, on GitHub | Teams, in the Memro dashboard | Projects, in the Memro dashboard | Databases and pages shared with integration |
-| Left out | Bot messages, joins/leaves and other system messages | Bot comments, template comments (`<!-- -->`) | Automated bot noise | Archive events | Archived/trashed pages |
+| What becomes memory | Messages in the channels you turn on, one item per channel per day, threads kept together | Issues and pull requests with their comments | Issues with their comments, projects and priorities from teams | Production issues with the latest exception, stack trace and culprit file (event counts and last-seen are in `metadata`, not the text) | Specs, architectural decisions, RFCs, and database pages, including nested blocks (toggles, columns, sub-lists) up to 3 levels and 1,000 blocks |
+| Kept current by | Events API (new, edited, deleted messages), plus a sync every 30 minutes | App webhooks, plus a sync every 30 minutes | Webhooks, plus a sync every 30 minutes of issues changed since the last one | Webhooks, plus a sync every 30 minutes (issues with no new events are skipped) | Webhooks, plus a sync every 30 minutes of pages edited since the last one |
+| History on connect | Last `CONNECTOR_BACKFILL_DAYS` (30) | Items updated in the last `CONNECTOR_BACKFILL_DAYS` | Issues updated in the last `CONNECTOR_BACKFILL_DAYS` | Unresolved issues in the last 14 days | Database pages edited in the last `CONNECTOR_BACKFILL_DAYS` |
+| You choose | Channels, in the Memro dashboard | Repositories, on GitHub | Teams, in the Memro dashboard | Projects, in the Memro dashboard | Databases and pages shared with the integration; a page brings its sub-pages |
+| Left out | Bot messages, joins/leaves and other system messages | Bot comments, template comments (`<!-- -->`), "🤖 Generated with …" agent footers | Automated bot noise | Archive events | Archived/trashed pages; pages deleted, moved out or no longer shared are removed on the next sync |
 | Memory type | `episodic` | `semantic` | `semantic` | `episodic` | `semantic` |
 
 Memories made by a connector have `metadata.source` (`slack`, `github`, `linear`, `sentry`, or `notion`),
@@ -355,6 +355,9 @@ syncing for that account.
 - Work runs as jobs in the `connector_jobs` table. Every API instance runs
   workers; rows are claimed with `FOR UPDATE SKIP LOCKED`, so several
   instances (blue-green deploys, replicas) share the queue safely.
+- If part of an item fails to load (comments, page content, the latest
+  Sentry event), the job fails and retries; the stored item is left as it
+  was rather than saved without that part.
 - Jobs retry with backoff (30 s doubling to 1 h, 8 attempts). Rate limits
   wait for the provider's `Retry-After` without using an attempt. If the
   provider revokes access the connection becomes *Disconnected*; if a sync

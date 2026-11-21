@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,6 +23,9 @@ type linearIssue struct {
 	CreatedAt   time.Time      `json:"createdAt"`
 	UpdatedAt   time.Time      `json:"updatedAt"`
 	URL         string         `json:"url"`
+	Comments    struct {
+		Nodes []linearComment `json:"nodes"`
+	} `json:"comments"`
 }
 
 type linearState struct {
@@ -75,10 +79,15 @@ func renderLinearIssue(issue *linearIssue, comments []linearComment) (header, bo
 	if teamName == "" {
 		teamName = issue.Team.Key
 	}
-	header = fmt.Sprintf("[Linear %s · %s · %s]", issue.Identifier, issue.Title, teamName)
+	short := truncate(issue.Title, 120)
+	header = fmt.Sprintf("[Linear %s · %s · %s]", issue.Identifier, short, teamName)
 
+	// The header carries the title; repeat it only when the header cut it short.
 	var b strings.Builder
-	fmt.Fprintf(&b, "Issue: %s\nTitle: %s\nTeam: %s (%s)\n", issue.Identifier, issue.Title, issue.Team.Name, issue.Team.Key)
+	if short != issue.Title {
+		fmt.Fprintf(&b, "Title: %s\n", issue.Title)
+	}
+	fmt.Fprintf(&b, "Team: %s (%s)\n", issue.Team.Name, issue.Team.Key)
 	if issue.State.Name != "" {
 		fmt.Fprintf(&b, "State: %s\n", issue.State.Name)
 	}
@@ -148,7 +157,9 @@ func renderLinearIssue(issue *linearIssue, comments []linearComment) (header, bo
 	return header, strings.TrimRight(b.String(), "\n"), meta
 }
 
-func linearItem(issue *linearIssue, comments []linearComment) item {
+func linearItem(issue *linearIssue) item {
+	comments := issue.Comments.Nodes
+	sort.Slice(comments, func(i, j int) bool { return comments[i].CreatedAt.Before(comments[j].CreatedAt) })
 	header, body, meta := renderLinearIssue(issue, comments)
 	updated := issue.UpdatedAt
 	if updated.IsZero() {

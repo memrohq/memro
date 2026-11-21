@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -291,13 +292,16 @@ func (p *gitlabProvider) syncMR(ctx context.Context, c *conn, key string) error 
 }
 
 func (p *gitlabProvider) ingestMR(ctx context.Context, c *conn, projectID string, mr *gitlabMergeRequest) error {
-	// Fetch discussions/notes for context
+	// The newest 30 notes, put back in the order they were written.
 	var notes []gitlabNote
-	notesPath := fmt.Sprintf("/projects/%s/merge_requests/%d/notes?per_page=30&order_by=created_at&sort=asc", projectID, mr.IID)
-	_ = p.apiGet(ctx, c, notesPath, &notes)
+	notesPath := fmt.Sprintf("/projects/%s/merge_requests/%d/notes?per_page=30&order_by=created_at&sort=desc", url.PathEscape(projectID), mr.IID)
+	if err := p.apiGet(ctx, c, notesPath, &notes); err != nil {
+		return fmt.Errorf("gitlab mr notes: %w", err) // keep the stored MR rather than save it without them
+	}
+	slices.Reverse(notes)
 
 	sourceName := projectID
-	if src, err := p.m.source(ctx, c.ID, projectID); err == nil && src.Name != "" {
+	if src, err := p.m.source(ctx, c.ID, projectID); err == nil && src != nil && src.Name != "" {
 		sourceName = src.Name
 	}
 
@@ -321,7 +325,7 @@ func (p *gitlabProvider) ingestMR(ctx context.Context, c *conn, projectID string
 
 func (p *gitlabProvider) ingestPipelineFailure(ctx context.Context, c *conn, projectID string, pipe *gitlabPipeline) error {
 	sourceName := projectID
-	if src, err := p.m.source(ctx, c.ID, projectID); err == nil && src.Name != "" {
+	if src, err := p.m.source(ctx, c.ID, projectID); err == nil && src != nil && src.Name != "" {
 		sourceName = src.Name
 	}
 

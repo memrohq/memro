@@ -93,7 +93,6 @@ func TestRenderLinearIssue(t *testing.T) {
 	}
 
 	for _, substr := range []string{
-		"Issue: ENG-412",
 		"Priority: High (2)",
 		"Assignee: Alex Developer",
 		"Project: Reliability Q4",
@@ -107,15 +106,21 @@ func TestRenderLinearIssue(t *testing.T) {
 		}
 	}
 
+	if strings.Contains(body, "Title:") || strings.Contains(body, "Issue:") {
+		t.Fatalf("body repeats what the header already has:\n%s", body)
+	}
+
 	if meta["identifier"] != "ENG-412" || meta["priority"] != "High" || meta["state"] != "In Progress" {
 		t.Fatalf("unexpected meta: %+v", meta)
 	}
 
-	it := linearItem(issue, comments)
+	// The item takes the comments the API returned with the issue, oldest first.
+	issue.Comments.Nodes = []linearComment{comments[1], comments[0]}
+	it := linearItem(issue)
 	if it.Key != "issue:iss-123" {
 		t.Fatalf("item key %q", it.Key)
 	}
-	if it.Header != header {
-		t.Fatalf("item header mismatch")
+	if it.Header != header || it.Body != body {
+		t.Fatalf("item header/body mismatch:\n%s", it.Body)
 	}
 }

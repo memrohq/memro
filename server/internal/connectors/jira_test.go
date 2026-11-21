@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -90,5 +91,29 @@ func TestRenderJiraIssue(t *testing.T) {
 	}
 	if meta["issue_key"] != "PROJ-456" {
 		t.Fatalf("expected meta issue_key 'PROJ-456', got %v", meta["issue_key"])
+	}
+}
+
+func TestJiraIssueFromV3Response(t *testing.T) {
+	// Jira's v3 API sends rich text as Atlassian Document Format and the
+	// issue's comments under fields.comment.
+	raw := `{"id":"1","key":"ENG-7","fields":{"summary":"Pool exhaustion","project":{"key":"ENG","name":"Engineering"},
+		"description":{"type":"doc","version":1,"content":[
+			{"type":"paragraph","content":[{"type":"text","text":"Pool runs out "},{"type":"mention","attrs":{"text":"@ana"}}]},
+			{"type":"bulletList","content":[{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"raise limit"}]}]}]}]},
+		"comment":{"comments":[{"id":"9","author":{"displayName":"Bob"},"created":"2026-10-20T14:45:00.000+0000",
+			"body":{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"Fixed in #42"}]}]}}]}}}`
+	var issue jiraIssue
+	if err := json.Unmarshal([]byte(raw), &issue); err != nil {
+		t.Fatal(err)
+	}
+	_, body, _ := renderJiraIssue(&issue, issue.Fields.Comment.Comments, "")
+	for _, s := range []string{"Pool runs out @ana", "- raise limit", "Bob (2026-10-20 14:45):", "Fixed in #42"} {
+		if !strings.Contains(body, s) {
+			t.Fatalf("body missing %q:\n%s", s, body)
+		}
+	}
+	if strings.Contains(body, "Pool exhaustion") {
+		t.Fatalf("body repeats the title that the header already has:\n%s", body)
 	}
 }

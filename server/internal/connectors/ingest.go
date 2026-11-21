@@ -169,6 +169,12 @@ func (m *Manager) storeItem(ctx context.Context, c *conn, it item) error {
 		}
 		created = append(created, mem)
 	}
+	// Chunks whose text did not change keep their memory; bring their
+	// metadata (state, counts) up to date.
+	if _, err := tx.Exec(ctx, `UPDATE memories SET metadata = $3 WHERE connection_id = $1 AND source_item = $2
+		AND metadata IS DISTINCT FROM $3::jsonb`, c.ID, it.Key, metaJSON); err != nil {
+		return err
+	}
 	if len(created) > 0 {
 		_ = m.linkCrossReferences(ctx, tx, c, created)
 	}
@@ -238,8 +244,10 @@ func (m *Manager) afterWrite(ctx context.Context, c *conn, created []domain.Memo
 // lockItem creates the item row if needed and locks it for this transaction,
 // so concurrent jobs for one item apply one after the other.
 func lockItem(ctx context.Context, tx pgx.Tx, connID uuid.UUID, key, sourceID string) (string, []string, error) {
+	// An item keeps the source it is stored under now (a Notion page can move).
 	if _, err := tx.Exec(ctx, `INSERT INTO connector_items (connection_id, item_key, source_id) VALUES ($1, $2, $3)
-		ON CONFLICT DO NOTHING`, connID, key, sourceID); err != nil {
+		ON CONFLICT (connection_id, item_key) DO UPDATE SET source_id = EXCLUDED.source_id
+		WHERE connector_items.source_id IS DISTINCT FROM EXCLUDED.source_id`, connID, key, sourceID); err != nil {
 		return "", nil, err
 	}
 	var hash string
@@ -247,6 +255,17 @@ func lockItem(ctx context.Context, tx pgx.Tx, connID uuid.UUID, key, sourceID st
 	err := tx.QueryRow(ctx, `SELECT content_hash, chunk_hashes FROM connector_items
 		WHERE connection_id = $1 AND item_key = $2 FOR UPDATE`, connID, key).Scan(&hash, &chunks)
 	return hash, chunks, err
+}
+
+// storedMeta returns the metadata of an item's stored memories, or nil.
+func (m *Manager) storedMeta(ctx context.Context, connID uuid.UUID, key string) (map[string]any, error) {
+	var meta map[string]any
+	err := m.deps.Pool.QueryRow(ctx, `SELECT metadata FROM memories WHERE connection_id = $1 AND source_item = $2 LIMIT 1`,
+		connID, key).Scan(&meta)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return meta, err
 }
 
 func itemMemories(ctx context.Context, tx pgx.Tx, connID uuid.UUID, key string) ([]storedMemory, error) {

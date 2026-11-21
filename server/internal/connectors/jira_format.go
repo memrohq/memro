@@ -1,6 +1,7 @@
 package connectors
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -17,7 +18,7 @@ type jiraIssue struct {
 
 type jiraIssueFields struct {
 	Summary     string        `json:"summary"`
-	Description string        `json:"description"`
+	Description jiraDoc       `json:"description"`
 	Status      jiraStatus    `json:"status"`
 	Priority    *jiraPriority `json:"priority"`
 	IssueType   jiraIssueType `json:"issuetype"`
@@ -26,6 +27,9 @@ type jiraIssueFields struct {
 	Reporter    *jiraUser     `json:"reporter"`
 	Created     string        `json:"created"`
 	Updated     string        `json:"updated"`
+	Comment     struct {
+		Comments []jiraComment `json:"comments"`
+	} `json:"comment"`
 }
 
 type jiraStatus struct {
@@ -61,8 +65,69 @@ type jiraUser struct {
 type jiraComment struct {
 	ID      string    `json:"id"`
 	Author  *jiraUser `json:"author"`
-	Body    string    `json:"body"`
+	Body    jiraDoc   `json:"body"`
 	Created string    `json:"created"`
+}
+
+// jiraDoc is rich text from Jira's v3 API, which sends it as an Atlassian
+// Document Format tree; it decodes to plain text. A plain string is kept.
+type jiraDoc string
+
+type adfNode struct {
+	Type    string         `json:"type"`
+	Text    string         `json:"text"`
+	Attrs   map[string]any `json:"attrs"`
+	Content []adfNode      `json:"content"`
+}
+
+func (d *jiraDoc) UnmarshalJSON(b []byte) error {
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		*d = jiraDoc(s)
+		return nil
+	}
+	var n adfNode
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	var sb strings.Builder
+	n.writeText(&sb)
+	*d = jiraDoc(strings.TrimSpace(sb.String()))
+	return nil
+}
+
+func (n *adfNode) writeText(b *strings.Builder) {
+	switch n.Type {
+	case "text":
+		b.WriteString(n.Text)
+	case "hardBreak":
+		b.WriteString("\n")
+	case "mention", "emoji", "status", "date":
+		if t, ok := n.Attrs["text"].(string); ok {
+			b.WriteString(t)
+		}
+	case "inlineCard", "blockCard":
+		if u, ok := n.Attrs["url"].(string); ok {
+			b.WriteString(u)
+		}
+	case "listItem":
+		b.WriteString("- ")
+	case "codeBlock":
+		b.WriteString("```\n")
+	}
+	for i := range n.Content {
+		n.Content[i].writeText(b)
+	}
+	switch n.Type {
+	case "codeBlock":
+		b.WriteString("\n```\n\n")
+	case "paragraph", "heading", "blockquote", "rule", "table", "panel":
+		b.WriteString("\n\n")
+	case "tableRow":
+		b.WriteString("\n")
+	case "tableCell", "tableHeader":
+		b.WriteString(" | ")
+	}
 }
 
 func parseJiraTime(s string) time.Time {
@@ -85,10 +150,15 @@ func renderJiraIssue(issue *jiraIssue, comments []jiraComment, baseURL string) (
 	if projName == "" {
 		projName = issue.Fields.Project.Key
 	}
-	header = fmt.Sprintf("[Jira %s · %s · %s]", issue.Key, issue.Fields.Summary, projName)
+	short := truncate(issue.Fields.Summary, 120)
+	header = fmt.Sprintf("[Jira %s · %s · %s]", issue.Key, short, projName)
 
+	// The header carries the title; repeat it only when the header cut it short.
 	var b strings.Builder
-	fmt.Fprintf(&b, "Issue: %s\nTitle: %s\nProject: %s (%s)\n", issue.Key, issue.Fields.Summary, projName, issue.Fields.Project.Key)
+	if short != issue.Fields.Summary {
+		fmt.Fprintf(&b, "Title: %s\n", issue.Fields.Summary)
+	}
+	fmt.Fprintf(&b, "Project: %s (%s)\n", projName, issue.Fields.Project.Key)
 	if issue.Fields.IssueType.Name != "" {
 		fmt.Fprintf(&b, "Type: %s\n", issue.Fields.IssueType.Name)
 	}
@@ -125,7 +195,7 @@ func renderJiraIssue(issue *jiraIssue, comments []jiraComment, baseURL string) (
 
 	if issue.Fields.Description != "" {
 		b.WriteString("\nDescription:\n")
-		b.WriteString(strings.TrimSpace(issue.Fields.Description))
+		b.WriteString(strings.TrimSpace(string(issue.Fields.Description)))
 		b.WriteString("\n")
 	}
 
@@ -141,7 +211,7 @@ func renderJiraIssue(issue *jiraIssue, comments []jiraComment, baseURL string) (
 			if !cTime.IsZero() {
 				dateStr = fmt.Sprintf(" (%s)", cTime.Format("2006-01-02 15:04"))
 			}
-			fmt.Fprintf(&b, "- %s%s:\n  %s\n", author, dateStr, strings.ReplaceAll(strings.TrimSpace(c.Body), "\n", "\n  "))
+			fmt.Fprintf(&b, "- %s%s:\n  %s\n", author, dateStr, strings.ReplaceAll(strings.TrimSpace(string(c.Body)), "\n", "\n  "))
 		}
 	}
 

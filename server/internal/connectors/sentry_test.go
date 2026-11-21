@@ -106,9 +106,8 @@ func TestRenderSentryIssue(t *testing.T) {
 	}
 
 	for _, substr := range []string{
-		"Issue: MEMRO-42 (ID: 9412)",
+		"Issue: MEMRO-42",
 		"Culprit: server/internal/connectors/store.go in ClaimJobs",
-		"Occurrences: 142 events across 28 users",
 		"Exception: DBConnectionTimeout: pgx: pool exhausted (max 20 connections)",
 		"at Manager.ClaimJobs in server/internal/connectors/store.go:45",
 		"release: v0.1.4",
@@ -119,7 +118,12 @@ func TestRenderSentryIssue(t *testing.T) {
 		}
 	}
 
-	if meta["issue_id"] != "9412" || meta["project_slug"] != "memro-backend" || meta["level"] != "error" {
+	// Counts change on every sync, so they stay out of the text.
+	if strings.Contains(body, "142") || strings.Contains(body, "Last Seen") || strings.Contains(body, "Title:") {
+		t.Fatalf("body has counts, last-seen or a repeated title:\n%s", body)
+	}
+	if meta["issue_id"] != "9412" || meta["project_slug"] != "memro-backend" || meta["level"] != "error" ||
+		meta["count"] != int64(142) || meta["user_count"] != 28 {
 		t.Fatalf("unexpected meta: %+v", meta)
 	}
 

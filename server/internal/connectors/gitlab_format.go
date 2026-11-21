@@ -86,10 +86,14 @@ var (
 )
 
 func renderGitLabMR(mr *gitlabMergeRequest, notes []gitlabNote, projectName string) (header, body string, meta map[string]any) {
-	header = fmt.Sprintf("[GitLab MR !%d · %s · %s]", mr.IID, mr.Title, projectName)
+	short := truncate(mr.Title, 120)
+	header = fmt.Sprintf("[GitLab MR !%d · %s · %s]", mr.IID, short, projectName)
 
+	// The header carries the title; repeat it only when the header cut it short.
 	var b strings.Builder
-	fmt.Fprintf(&b, "Merge Request: !%d\nTitle: %s\nProject: %s\n", mr.IID, mr.Title, projectName)
+	if short != mr.Title {
+		fmt.Fprintf(&b, "Title: %s\n", mr.Title)
+	}
 	fmt.Fprintf(&b, "Branches: %s -> %s\nState: %s\nAuthor: %s (@%s)\n", mr.SourceBranch, mr.TargetBranch, mr.State, mr.Author.Name, mr.Author.Username)
 
 	if len(mr.Assignees) > 0 {

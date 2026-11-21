@@ -9,8 +9,12 @@ import (
 // HTML comments are how issue and PR templates hide their instructions.
 var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
 
+// Coding agents sign PRs and comments with a "🤖 Generated with …" line.
+var agentFooter = regexp.MustCompile(`(?m)^🤖 Generated with .*$`)
+
 func cleanMarkdown(s string) string {
 	s = htmlComment.ReplaceAllString(s, "")
+	s = agentFooter.ReplaceAllString(s, "")
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	return strings.TrimSpace(s)
 }
@@ -28,11 +32,15 @@ func renderGitHubIssue(repo string, is *githubIssue, comments []githubComment) (
 	if is.State == "closed" && is.StateReason == "not_planned" {
 		state = "closed (not planned)"
 	}
-	header := fmt.Sprintf("[GitHub %s#%d · %s]", repo, is.Number, truncate(is.Title, 120))
+	short := truncate(is.Title, 120)
+	header := fmt.Sprintf("[GitHub %s#%d · %s]", repo, is.Number, short)
 
+	// The header carries the title; repeat it only when the header cut it short.
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s #%d: %s\n", kind, is.Number, is.Title)
-	fmt.Fprintf(&b, "State: %s · Opened by %s on %s", state, is.User.Login, is.CreatedAt.UTC().Format("2006-01-02"))
+	if short != is.Title {
+		fmt.Fprintf(&b, "%s\n", is.Title)
+	}
+	fmt.Fprintf(&b, "%s · State: %s · Opened by %s on %s", kind, state, is.User.Login, is.CreatedAt.UTC().Format("2006-01-02"))
 	if len(is.Labels) > 0 {
 		names := make([]string, len(is.Labels))
 		for i, l := range is.Labels {

@@ -1,12 +1,18 @@
 package connectors
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/memrohq/memro/server/config"
 )
 
 func TestVerifyNotionSignature(t *testing.T) {
@@ -139,8 +145,6 @@ func TestRenderNotionPage(t *testing.T) {
 	}
 
 	for _, substr := range []string{
-		"Title: RFC 42: Cross-Source Connector Architecture",
-		"Workspace: Acme Corp",
 		"Status: In Review",
 		"Tags: Architecture, Backend",
 		"Sprint: 2026-Q4-Sprint-3",
@@ -155,6 +159,10 @@ func TestRenderNotionPage(t *testing.T) {
 		if !strings.Contains(body, substr) {
 			t.Fatalf("body missing %q:\n%s", substr, body)
 		}
+	}
+
+	if strings.Contains(body, "Title:") || strings.Contains(body, "Workspace:") {
+		t.Fatalf("body repeats what the header already has:\n%s", body)
 	}
 
 	if meta["page_id"] != "page-99" || meta["database_id"] != "db-eng-specs" || meta["source"] != ProviderNotion {
@@ -186,11 +194,48 @@ func TestRenderNotionPage(t *testing.T) {
 		t.Errorf("expected sentry ref 9412 in refs: %+v", refs)
 	}
 
-	it := notionItem("Acme Corp", page, blocks)
+	it := notionItem("Acme Corp", page, blocks, "db-eng-specs")
 	if it.Key != "page:page-99" {
 		t.Fatalf("got item key %q", it.Key)
 	}
 	if it.SourceID != "db-eng-specs" {
 		t.Fatalf("got item source_id %q", it.SourceID)
+	}
+}
+
+func TestNotionFetchBlocksPagesAndNests(t *testing.T) {
+	// A page with two pages of top-level blocks; the toggle has children and
+	// the child page is skipped (it syncs on its own).
+	pages := map[string]string{
+		"/blocks/pg/children?page_size=100": `{"results":[
+			{"id":"a","type":"paragraph","paragraph":{"rich_text":[{"plain_text":"first"}]}},
+			{"id":"t","type":"toggle","has_children":true,"toggle":{"rich_text":[{"plain_text":"Details"}]}},
+			{"id":"cp","type":"child_page","has_children":true}],
+			"has_more":true,"next_cursor":"c2"}`,
+		"/blocks/pg/children?page_size=100&start_cursor=c2": `{"results":[
+			{"id":"b","type":"paragraph","paragraph":{"rich_text":[{"plain_text":"last"}]}}]}`,
+		"/blocks/t/children?page_size=100": `{"results":[
+			{"id":"n","type":"bulleted_list_item","bulleted_list_item":{"rich_text":[{"plain_text":"nested"}]}}]}`,
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, ok := pages[r.URL.RequestURI()]
+		if !ok {
+			t.Errorf("unexpected request %s", r.URL.RequestURI())
+			http.NotFound(w, r)
+			return
+		}
+		io.WriteString(w, body)
+	}))
+	defer srv.Close()
+	m, err := New(Deps{Config: config.Config{Connectors: config.ConnectorsConfig{NotionAPIURL: srv.URL, EncryptionKey: key32()}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := (&notionProvider{m: m}).fetchBlocks(context.Background(), "tok", "pg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := renderBlocks(blocks), "first\n\nDetails\n\n- nested\nlast"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
