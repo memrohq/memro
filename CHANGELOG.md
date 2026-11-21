@@ -7,6 +7,9 @@ and every release and package raises only the last number of its version (see RE
 
 ## [Unreleased]
 
+### Changed
+- **Releases publish to PyPI and npm without token secrets**: `release.yml` uses trusted publishing, so `memro`, `memro-mcp`, `@memro/sdk` and `memro-cli` are published by CI again (v0.1.1 and v0.1.2 had to be published by hand). npm packages now carry provenance.
+
 ## [v0.1.2] - 2026-11-21
 
 ### Added
