@@ -387,6 +387,7 @@ async function init(opts) {
     `Rules go in ${path.relative(cwd, file)}. Tell an agent one ("never…", "always…"), or add a line yourself.`,
     "Put the thing to avoid in backticks (never use `Intl` in cart code) and agents are warned when an edit uses it.",
     "Restart your tools to load the hooks. Commit the file to share the rules.",
+    "★ Find Memro useful? A star helps others find it: https://github.com/memrohq/memro",
   );
 }
 
