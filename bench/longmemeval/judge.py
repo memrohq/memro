@@ -7,6 +7,8 @@ Prompts are copied verbatim from LongMemEval (MIT License, Di Wu et al.):
 https://github.com/xiaowu0162/LongMemEval/blob/main/src/evaluation/evaluate_qa.py
 The official setup judges with gpt-4o; gpt-4o-mini is used here for cost, and
 the --sample cross-check reports how often the two agree.
+
+    python judge.py runs/full --model claude-sonnet   # on the Claude plan, no OpenAI key
 """
 import argparse
 import concurrent.futures as cf
@@ -15,7 +17,7 @@ import pathlib
 import random
 import threading
 
-from common import BudgetExceeded, RunTracker, chat, set_run_tracker
+from common import BudgetExceeded, RunTracker, chat, claude_cli, set_run_tracker
 
 
 def get_anscheck_prompt(task, question, answer, response, abstention=False):
@@ -43,7 +45,11 @@ def get_anscheck_prompt(task, question, answer, response, abstention=False):
 def grade(row, model):
     prompt = get_anscheck_prompt(row["question_type"], row["question"], row["answer"], row["hypothesis"],
                                  abstention="_abs" in row["question_id"])
-    out = chat(model, [{"role": "user", "content": prompt}], 10, len(prompt) / 3.0 * 10 / 1e6)
+    if model.startswith("claude-"):
+        # --model claude-sonnet etc.: graded on the Claude plan through `claude -p`.
+        out = claude_cli(model.removeprefix("claude-"), "You grade answers. Reply with only yes or no.", prompt)
+    else:
+        out = chat(model, [{"role": "user", "content": prompt}], 10, len(prompt) / 3.0 * 10 / 1e6)
     return "yes" in out.lower()
 
 

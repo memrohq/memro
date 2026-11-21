@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import pathlib
+import subprocess
 import threading
 import time
 import urllib.error
@@ -170,6 +171,30 @@ def openai_post(path: str, body: dict, retries: int = 8) -> dict:
                 continue
             raise
     raise RuntimeError("unreachable")
+
+
+def claude_cli(model: str, system: str, message: str) -> str:
+    """One answer from `claude -p --model <model>`: the Claude plan, not the OpenAI budget.
+    No tools, hooks, MCP servers or saved session, run from an empty folder. `system` replaces
+    Claude Code's own system prompt (under it Haiku answered NONE for every LongMemEval session),
+    and `message` goes in as the user turn (with it in the system prompt, Haiku answered NONE
+    for 2 of 3 tries on a session full of facts)."""
+    cwd = RUNS / "_claude_cwd"
+    cwd.mkdir(exist_ok=True)
+    for attempt in range(3):
+        p = subprocess.run(["claude", "-p", "--system-prompt", system, "--model", model,
+                            "--output-format", "json", "--tools", "",
+                            "--setting-sources", "local", "--strict-mcp-config", "--no-session-persistence",
+                            "--disable-slash-commands"], input=message, cwd=cwd, capture_output=True, text=True,
+                           timeout=300)
+        try:
+            out = json.loads(p.stdout)
+            if not out.get("is_error"):
+                return out.get("result") or ""
+        except json.JSONDecodeError:
+            pass
+        time.sleep(20 * (attempt + 1))
+    raise RuntimeError(f"claude -p failed: {(p.stdout + p.stderr)[-300:]}")
 
 
 def chat(model: str, messages: list, max_tokens: int, estimate_usd: float, usage: Optional[dict] = None) -> str:
