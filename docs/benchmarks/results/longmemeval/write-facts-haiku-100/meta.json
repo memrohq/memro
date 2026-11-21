@@ -1,0 +1,34 @@
+{
+  "cost_usd": 0.056135,
+  "token_usage": {
+    "gpt-4o-mini": {
+      "usd": 0.056135,
+      "prompt_tokens": 337532,
+      "completion_tokens": 9177,
+      "calls": 200
+    }
+  },
+  "name": "write-facts-haiku-100",
+  "commit": "07e60ba06d2e7ad895e80a741489cc7d7b333627",
+  "engine_options": {
+    "top_k": 15,
+    "baseline": "memro",
+    "hide_superseded": false,
+    "mode": "hybrid",
+    "answer_model": "gpt-4o-mini",
+    "session_expansion": 3,
+    "per_session": 0,
+    "per_session_scope": "all",
+    "format": "standard",
+    "write_time_supersession": "false",
+    "per_item_chars": 4000,
+    "token_budget": 0,
+    "resolve_conflicts": true,
+    "order": "score",
+    "embedding_model": "text-embedding-3-small",
+    "write_mode": "facts",
+    "extract_model": "claude-haiku"
+  },
+  "created_at": "2026-11-21T21:53:53.112275Z",
+  "questions_total": 100
+}

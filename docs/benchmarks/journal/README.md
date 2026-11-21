@@ -6,6 +6,8 @@ Internal engineering journal tracking Memro's memory retrieval quality, benchmar
 
 ## Entries (Newest First)
 
+- **[2026-11-22: LongMemEval-100, Memories Written by a Model](2026-11-22-longmemeval-model-writes.md)**: Claude Haiku extracts one fact per memory from each session, against storing exchanges word for word. A tie: facts 80/100 and raw 84/100 (gpt-4o-mini, McNemar p = 0.50; claude-sonnet judge 79 vs 83), with 3.1k vs 10.8k prompt tokens per answer. Facts lose on single-session-assistant questions (6/11 vs 11/11) and gain on temporal ones (23/26 vs 20/26).
+
 - **[2026-11-17: Relay Benchmark — Does Memory Stop a Fresh Agent Repeating Mistakes?](2026-11-17-relay-benchmark.md)**: agent A learns a fact, a fresh agent B must respect it; arms none / notes file / Memro. Pilot v1 traps were too easy (every arm 6/6: A wrote the fact into code comments); v2 tells A the fact during unrelated work: none 5/15, notes 15/15, Memro 15/15 on R1–R3. Memory is the whole difference; in one checkout a notes file ties Memro. Stage 2: a teammate's clone ties (10/10 each); with 300 earlier facts a notes file wins 10/10 to Memro's 6/10 (A didn't save, or B's search missed). With hooks that save the user's stated rules and show them every prompt: Memro 10/10, notes 9/10, Memro tools alone 8/10.
 
 - **[2026-11-15: Baselines — No Memory, Plain RAG and Memro](2026-11-15-baselines-no-memory-and-plain-rag.md)**: on LongMemEval-100, no memory 6%, plain semantic top-15 81%, Memro 81% (p = 1.0 vs RAG); memory is the whole score, Memro's extras show no gain on this subset.

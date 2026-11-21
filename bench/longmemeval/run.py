@@ -20,7 +20,7 @@ import threading
 import time
 import uuid
 
-from common import BENCH, PRICES, ROOT, RUNS, BudgetExceeded, RunTracker, chat, set_run_tracker
+from common import BENCH, PRICES, ROOT, RUNS, BudgetExceeded, RunTracker, chat, claude_cli, set_run_tracker
 
 sdk_path = os.environ.get("MEMRO_SDK")
 if not sdk_path:
@@ -64,6 +64,18 @@ HIDE_SUPERSEDED = os.environ.get("HIDE_SUPERSEDED", "false").lower() == "true"
 # answer() adds every exchange from the top N retrieved sessions
 SESSION_EXPANSION = 0 if BASELINE == "rag" else int(os.environ.get("SESSION_EXPANSION", "3"))
 NS_SESSION = uuid.UUID("6f1c2a8e-5b8f-4c4e-9d55-0a4f7d1c3b21")
+# What each session writes: "raw" one memory per exchange, word for word (as
+# every run before 2026-11-22); "facts" what EXTRACT_MODEL pulls out of the
+# session, one memory per fact; "facts+raw" both.
+WRITE_MODE = os.environ.get("WRITE_MODE", "raw")
+assert WRITE_MODE in ("raw", "facts", "facts+raw"), WRITE_MODE
+EXTRACT_MODEL = os.environ.get("EXTRACT_MODEL", "gpt-4o-mini")
+# Shared by the facts arms, so both store the same facts.
+FACTS_CACHE = RUNS / "_facts" / EXTRACT_MODEL
+EXTRACT_RULES = """You will be given one chat session between a user and an AI assistant. Write down everything from it that could matter in a later conversation: facts about the user (events, plans, possessions, preferences, people, numbers, dates, and changes to anything they said before) and specific things the assistant said or recommended.
+One fact per line. Make each fact self-contained (say who or what, never just "he" or "it"), keep exact names, numbers and amounts, and turn relative dates ("last week") into dates using the session date. No commentary or headings. If nothing is worth keeping, write NONE."""
+EXTRACT_SESSION = "Session held on {date}:\n{text}"
+EXTRACT = EXTRACT_RULES + "\n\n" + EXTRACT_SESSION
 
 
 def parse_date(s):
@@ -199,6 +211,8 @@ def get_engine_options():
         "order": os.environ.get("SEARCH_ORDER", "score"),
         # Set by whoever started the server (bench/cf/eval_embeddings.py does).
         "embedding_model": os.environ.get("BENCH_EMBEDDING_MODEL", "text-embedding-3-small"),
+        "write_mode": WRITE_MODE,
+        **({"extract_model": EXTRACT_MODEL} if WRITE_MODE != "raw" else {}),
     }
 
 
@@ -302,6 +316,31 @@ def ask(prompt, model=ANSWER_MODEL, usage=None):
     return chat(model, [{"role": "user", "content": prompt}], 400, est, usage)
 
 
+def session_facts(q, sid, date, session):
+    """EXTRACT_MODEL's facts from one session, cached on disk across runs."""
+    f = FACTS_CACHE / q["question_id"] / f"{re.sub(r'[^A-Za-z0-9_.-]', '_', sid)}.json"
+    if f.exists():
+        return json.loads(f.read_text())
+    text = "\n".join(f"{t['role'].capitalize()}: {t['content']}" for t in session)
+    prompt = EXTRACT.format(date=date, text=text)
+    if EXTRACT_MODEL.startswith("claude-"):
+        out = claude_cli(EXTRACT_MODEL.removeprefix("claude-"), EXTRACT_RULES, EXTRACT_SESSION.format(date=date, text=text))
+    else:
+        pin, pout = PRICES[EXTRACT_MODEL]
+        out = chat(EXTRACT_MODEL, [{"role": "user", "content": prompt}], 2000, len(text) / 3.0 * pin / 1e6 + 2000 * pout / 1e6)
+    facts = [re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", l).strip() for l in out.splitlines()]
+    facts = [x[:MAX_MEMORY_CHARS] for x in facts if x and x.upper() != "NONE"]
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(facts))
+    return facts
+
+
+def writes(q, sid, date, session):
+    """The texts this session stores, per WRITE_MODE."""
+    return ((session_facts(q, sid, date, session) if WRITE_MODE != "raw" else [])
+            + (rounds(session) if WRITE_MODE != "facts" else []))
+
+
 def answer(q, hits, meta, session_memories, usage=None):
     superseded_ids = {h["memory_id"] for h in hits if h.get("is_superseded")}
     return ask(build_prompt(q, context_ids(hits, meta, session_memories), meta, superseded_ids=superseded_ids),
@@ -318,7 +357,7 @@ def retrieve(q, client, agent):
         when = parse_date(date)
         session_memories[sid] = []
         sess_uuid = str(uuid.uuid5(NS_SESSION, f"{q['question_id']}:{sid}"))
-        for text in rounds(session):
+        for text in writes(q, sid, date, session):
             m = client.create_memory(agent.agent_id, agent._private_key, text, "episodic",
                                      event_date=when.strftime("%Y-%m-%dT%H:%M:%SZ"),
                                      session_id=sess_uuid)
