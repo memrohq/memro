@@ -7,6 +7,7 @@ Memro connects to leading agent development environments and MCP clients with ze
 - [Claude Code Integration Guide](claude-code.md): Complete setup and session verification lifecycle for Anthropic's Claude Code CLI.
 - [Cursor Integration Guide](cursor.md): Configuration and verification steps for Cursor Composer and Chat.
 - [OpenAI Codex Integration Guide](codex.md): Setup and verification steps for OpenAI Codex CLI and agents.
+- [GitHub Copilot Integration Guide](github-copilot.md): MCP config, instruction files and verification steps for Copilot in VS Code.
 
 ## One-Command Setup
 
