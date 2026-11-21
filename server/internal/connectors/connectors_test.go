@@ -176,7 +176,7 @@ func TestRenderSlackDoc(t *testing.T) {
 
 func TestRenderGitHubIssue(t *testing.T) {
 	merged := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
-	is := &githubIssue{Number: 42, Title: "Fix login", Body: "Body text\n<!-- template hint -->", State: "closed",
+	is := &githubIssue{Number: 42, Title: "Fix login", Body: "Body text\n<!-- template hint -->\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)", State: "closed",
 		HTMLURL: "https://github.com/o/r/pull/42", CreatedAt: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
 		User: githubUser{Login: "ana"}}
 	is.PullRequest = &struct {
@@ -189,13 +189,16 @@ func TestRenderGitHubIssue(t *testing.T) {
 	if header != "[GitHub o/r#42 · Fix login]" {
 		t.Fatalf("header %q", header)
 	}
-	for _, s := range []string{"Pull request #42: Fix login", "State: merged", "Body text", "bob commented on 2026-10-02: LGTM"} {
+	for _, s := range []string{"Pull request · State: merged", "Body text", "bob commented on 2026-10-02: LGTM"} {
 		if !strings.Contains(body, s) {
 			t.Fatalf("body missing %q:\n%s", s, body)
 		}
 	}
-	if strings.Contains(body, "template hint") || strings.Contains(body, "Coverage") {
-		t.Fatalf("body has template comments or bot comments:\n%s", body)
+	if strings.Contains(body, "template hint") || strings.Contains(body, "Coverage") || strings.Contains(body, "Generated with") {
+		t.Fatalf("body has template comments, bot comments or an agent footer:\n%s", body)
+	}
+	if strings.Contains(body, "Fix login") {
+		t.Fatalf("body repeats the title that the header already has:\n%s", body)
 	}
 	if meta["kind"] != "pull_request" || meta["state"] != "merged" {
 		t.Fatalf("meta %v", meta)
