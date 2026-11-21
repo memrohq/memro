@@ -75,10 +75,17 @@ func renderSentryIssue(issue *sentryIssue, latestEvent *sentryEvent) (header, bo
 	if projName == "" {
 		projName = issue.Project.Name
 	}
-	header = fmt.Sprintf("[Sentry · %s · Issue #%s · %s]", projName, issue.ID, issue.Title)
+	short := truncate(issue.Title, 120)
+	header = fmt.Sprintf("[Sentry · %s · Issue #%s · %s]", projName, issue.ID, short)
 
+	// The header carries the title; repeat it only when the header cut it
+	// short. Counts and last-seen change on every sync, so they live in
+	// metadata, not the text: the text then changes only with the error.
 	var b strings.Builder
-	fmt.Fprintf(&b, "Issue: %s (ID: %s)\nTitle: %s\n", issue.ShortID, issue.ID, issue.Title)
+	fmt.Fprintf(&b, "Issue: %s\n", issue.ShortID)
+	if short != issue.Title {
+		fmt.Fprintf(&b, "Title: %s\n", issue.Title)
+	}
 	fmt.Fprintf(&b, "Project: %s (%s)\n", issue.Project.Name, issue.Project.Slug)
 	if issue.Status != "" {
 		fmt.Fprintf(&b, "Status: %s\n", issue.Status)
@@ -89,21 +96,8 @@ func renderSentryIssue(issue *sentryIssue, latestEvent *sentryEvent) (header, bo
 	if issue.Culprit != "" {
 		fmt.Fprintf(&b, "Culprit: %s\n", issue.Culprit)
 	}
-
-	if issue.Count > 0 {
-		fmt.Fprintf(&b, "Occurrences: %d events", issue.Count)
-		if issue.UserCount > 0 {
-			fmt.Fprintf(&b, " across %d users", issue.UserCount)
-		}
-		b.WriteString("\n")
-	}
-
 	if !issue.FirstSeen.IsZero() {
-		fmt.Fprintf(&b, "First Seen: %s", issue.FirstSeen.Format("2006-01-02 15:04"))
-		if !issue.LastSeen.IsZero() {
-			fmt.Fprintf(&b, " · Last Seen: %s", issue.LastSeen.Format("2006-01-02 15:04"))
-		}
-		b.WriteString("\n")
+		fmt.Fprintf(&b, "First Seen: %s\n", issue.FirstSeen.Format("2006-01-02 15:04"))
 	}
 
 	if issue.Permalink != "" {
@@ -176,6 +170,9 @@ func renderSentryIssue(issue *sentryIssue, latestEvent *sentryEvent) (header, bo
 		"status":       issue.Status,
 		"culprit":      issue.Culprit,
 		"url":          issue.Permalink,
+		"count":        int64(issue.Count),
+		"user_count":   issue.UserCount,
+		"last_seen":    issue.LastSeen.UTC().Format(time.RFC3339),
 	}
 
 	return header, strings.TrimRight(b.String(), "\n"), meta

@@ -169,6 +169,12 @@ func (m *Manager) storeItem(ctx context.Context, c *conn, it item) error {
 		}
 		created = append(created, mem)
 	}
+	// Chunks whose text did not change keep their memory; bring their
+	// metadata (state, counts) up to date.
+	if _, err := tx.Exec(ctx, `UPDATE memories SET metadata = $3 WHERE connection_id = $1 AND source_item = $2
+		AND metadata IS DISTINCT FROM $3::jsonb`, c.ID, it.Key, metaJSON); err != nil {
+		return err
+	}
 	if len(created) > 0 {
 		_ = m.linkCrossReferences(ctx, tx, c, created)
 	}
@@ -247,6 +253,17 @@ func lockItem(ctx context.Context, tx pgx.Tx, connID uuid.UUID, key, sourceID st
 	err := tx.QueryRow(ctx, `SELECT content_hash, chunk_hashes FROM connector_items
 		WHERE connection_id = $1 AND item_key = $2 FOR UPDATE`, connID, key).Scan(&hash, &chunks)
 	return hash, chunks, err
+}
+
+// storedMeta returns the metadata of an item's stored memories, or nil.
+func (m *Manager) storedMeta(ctx context.Context, connID uuid.UUID, key string) (map[string]any, error) {
+	var meta map[string]any
+	err := m.deps.Pool.QueryRow(ctx, `SELECT metadata FROM memories WHERE connection_id = $1 AND source_item = $2 LIMIT 1`,
+		connID, key).Scan(&meta)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return meta, err
 }
 
 func itemMemories(ctx context.Context, tx pgx.Tx, connID uuid.UUID, key string) ([]storedMemory, error) {

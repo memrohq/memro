@@ -238,11 +238,20 @@ func (p *linearProvider) refreshSources(ctx context.Context, c *conn) error {
 	return p.m.replaceSources(ctx, c.ID, list, false)
 }
 
+// syncTeam reads one page of the team's issues changed since the last
+// finished pass (or within the backfill window) and queues the next page.
 func (p *linearProvider) syncTeam(ctx context.Context, c *conn, teamID string) error {
-
-	// Read team cursor
-	cursor := ""
-	_ = p.m.deps.Pool.QueryRow(ctx, `SELECT cursor FROM connector_sources WHERE connection_id = $1 AND external_id = $2`, c.ID, teamID).Scan(&cursor)
+	src, err := p.m.source(ctx, c.ID, teamID)
+	if err != nil {
+		return err
+	}
+	if src == nil || !src.Enabled {
+		return nil
+	}
+	var st syncState
+	if src.cursor != "" {
+		_ = json.Unmarshal([]byte(src.cursor), &st) // a pre-checkpoint cursor restarts the pass
+	}
 
 	var q struct {
 		Data struct {
@@ -259,13 +268,20 @@ func (p *linearProvider) syncTeam(ctx context.Context, c *conn, teamID string) e
 	}
 
 	vars := map[string]any{"teamId": teamID}
-	if cursor != "" {
-		vars["after"] = cursor
+	if st.Cursor != "" {
+		vars["after"] = st.Cursor
+	}
+	since := st.Checkpoint
+	if since == "" && p.m.cfg.BackfillDays > 0 {
+		since = p.m.now().AddDate(0, 0, -p.m.cfg.BackfillDays).UTC().Format(time.RFC3339)
+	}
+	if since != "" {
+		vars["filter"] = map[string]any{"updatedAt": map[string]string{"gte": since}}
 	}
 
-	query := `query($teamId: String!, $after: String) {
+	query := `query($teamId: String!, $after: String, $filter: IssueFilter) {
 		team(id: $teamId) {
-			issues(first: 50, after: $after, orderBy: updatedAt) {
+			issues(first: 50, after: $after, orderBy: updatedAt, filter: $filter) {
 				pageInfo { hasNextPage endCursor }
 				nodes {
 					id identifier title description priority
@@ -275,6 +291,9 @@ func (p *linearProvider) syncTeam(ctx context.Context, c *conn, teamID string) e
 					project { id name }
 					team { id name key }
 					createdAt updatedAt url
+					comments(first: 50) {
+						nodes { id body user { id name email } createdAt }
+					}
 				}
 			}
 		}
@@ -285,23 +304,24 @@ func (p *linearProvider) syncTeam(ctx context.Context, c *conn, teamID string) e
 	}
 
 	for _, issue := range q.Data.Team.Issues.Nodes {
-		it := linearItem(&issue, nil)
-		if err := p.m.storeItem(ctx, c, it); err != nil {
+		if err := p.m.storeItem(ctx, c, linearItem(&issue)); err != nil {
 			return err
 		}
+		st.High = laterOf(st.High, issue.UpdatedAt.UTC().Format(time.RFC3339Nano))
 	}
 
 	pageInfo := q.Data.Team.Issues.PageInfo
 	if pageInfo.HasNextPage && pageInfo.EndCursor != "" {
-		// Update cursor and queue next page
-		if err := p.m.saveCursor(ctx, c.ID, teamID, pageInfo.EndCursor, false); err != nil {
+		st.Cursor = pageInfo.EndCursor
+		b, _ := json.Marshal(st)
+		if err := p.m.saveCursor(ctx, c.ID, teamID, string(b), false); err != nil {
 			return err
 		}
 		return p.m.enqueue(ctx, nil, c.ID, jobSync, teamID, nil, 0)
 	}
 
-	// Done: clear cursor
-	return p.m.saveCursor(ctx, c.ID, teamID, "", true)
+	b, _ := json.Marshal(syncState{Checkpoint: laterOf(st.Checkpoint, st.High)})
+	return p.m.saveCursor(ctx, c.ID, teamID, string(b), true)
 }
 
 func (p *linearProvider) syncIssue(ctx context.Context, c *conn, issueID string) error {
@@ -343,7 +363,7 @@ func (p *linearProvider) syncIssue(ctx context.Context, c *conn, issueID string)
 		return p.m.removeItem(ctx, c, "issue:"+issueID)
 	}
 
-	it := linearItem(q.Data.Issue, nil)
+	it := linearItem(q.Data.Issue)
 	return p.m.storeItem(ctx, c, it)
 }
 

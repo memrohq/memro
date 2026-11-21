@@ -309,7 +309,7 @@ func (p *jiraProvider) syncIssue(ctx context.Context, c *conn, issueKey string) 
 }
 
 func (p *jiraProvider) ingestIssue(ctx context.Context, c *conn, issue *jiraIssue) error {
-	header, body, meta := renderJiraIssue(issue, nil, c.str("site_url"))
+	header, body, meta := renderJiraIssue(issue, issue.Fields.Comment.Comments, c.str("site_url"))
 	evDate := parseJiraTime(issue.Fields.Updated)
 	if evDate.IsZero() {
 		evDate = parseJiraTime(issue.Fields.Created)

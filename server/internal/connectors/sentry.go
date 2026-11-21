@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -263,7 +264,15 @@ func (p *sentryProvider) syncProject(ctx context.Context, c *conn, projectSlug s
 		return err
 	}
 	for i := range issues {
-		if err := p.m.storeItem(ctx, c, sentryItem(&issues[i], nil)); err != nil {
+		// Unchanged since the last store: skip the latest-event fetch.
+		meta, err := p.m.storedMeta(ctx, c.ID, "issue:"+issues[i].ID)
+		if err != nil {
+			return err
+		}
+		if meta != nil && meta["last_seen"] == issues[i].LastSeen.UTC().Format(time.RFC3339) && meta["status"] == issues[i].Status {
+			continue
+		}
+		if err := p.ingest(ctx, c, &issues[i]); err != nil {
 			return err
 		}
 	}
@@ -285,9 +294,22 @@ func (p *sentryProvider) syncIssue(ctx context.Context, c *conn, issueID string)
 	if src, err := p.m.source(ctx, c.ID, issue.Project.Slug); err != nil || src == nil || !src.Enabled {
 		return err
 	}
-	var latestEvent sentryEvent
-	_, _ = p.call(ctx, c, fmt.Sprintf("/issues/%s/events/latest/", url.PathEscape(issueID)), &latestEvent)
-	return p.m.storeItem(ctx, c, sentryItem(&issue, &latestEvent))
+	return p.ingest(ctx, c, &issue)
+}
+
+// ingest stores an issue with its latest error and stack trace. Webhook and
+// scheduled syncs both come here, so the stored text is the same either way.
+func (p *sentryProvider) ingest(ctx context.Context, c *conn, issue *sentryIssue) error {
+	var ev sentryEvent
+	_, err := p.call(ctx, c, fmt.Sprintf("/issues/%s/events/latest/", url.PathEscape(issue.ID)), &ev)
+	var pe *permanentError
+	if errors.As(err, &pe) {
+		return p.m.storeItem(ctx, c, sentryItem(issue, nil)) // no event to show
+	}
+	if err != nil {
+		return err // retry rather than store it without its stack trace
+	}
+	return p.m.storeItem(ctx, c, sentryItem(issue, &ev))
 }
 
 func (p *sentryProvider) setSources(ctx context.Context, c *conn, enabled map[string]bool) error {

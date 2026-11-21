@@ -267,53 +267,113 @@ func (p *notionProvider) syncSource(ctx context.Context, c *conn, sourceID strin
 	token := c.str("access_token")
 	wsName := c.str("workspace_name")
 
-	cursor := ""
-	_ = p.m.deps.Pool.QueryRow(ctx, `SELECT cursor FROM connector_sources WHERE connection_id = $1 AND external_id = $2`, c.ID, sourceID).Scan(&cursor)
+	src, err := p.m.source(ctx, c.ID, sourceID)
+	if err != nil {
+		return err
+	}
+	if src == nil || !src.Enabled {
+		return nil
+	}
+	var st syncState
+	if src.cursor != "" {
+		_ = json.Unmarshal([]byte(src.cursor), &st) // a pre-checkpoint cursor restarts the pass
+	}
 
-	// Attempt to query as database
-	qBody := map[string]any{"page_size": 50}
-	if cursor != "" {
-		qBody["start_cursor"] = cursor
+	// Only rows edited since the last finished pass, oldest edit first.
+	qBody := map[string]any{"page_size": 50,
+		"sorts": []map[string]string{{"timestamp": "last_edited_time", "direction": "ascending"}}}
+	if st.Checkpoint != "" {
+		qBody["filter"] = map[string]any{"timestamp": "last_edited_time",
+			"last_edited_time": map[string]string{"on_or_after": st.Checkpoint}}
+	} else if p.m.cfg.BackfillDays > 0 {
+		qBody["filter"] = map[string]any{"timestamp": "last_edited_time",
+			"last_edited_time": map[string]string{"on_or_after": p.m.now().AddDate(0, 0, -p.m.cfg.BackfillDays).UTC().Format(time.RFC3339)}}
+	}
+	if st.Cursor != "" {
+		qBody["start_cursor"] = st.Cursor
 	}
 
 	var qRes notionQueryResults
-	err := p.request(ctx, token, http.MethodPost, fmt.Sprintf("/databases/%s/query", sourceID), qBody, &qRes)
+	err = p.request(ctx, token, http.MethodPost, fmt.Sprintf("/databases/%s/query", sourceID), qBody, &qRes)
 	if err == nil {
 		for _, pg := range qRes.Results {
 			if pg.Archived {
 				_ = p.m.removeItem(ctx, c, "page:"+pg.ID)
 				continue
 			}
-			blocks, _ := p.fetchBlocks(ctx, token, pg.ID)
+			blocks, err := p.fetchBlocks(ctx, token, pg.ID)
+			if err != nil {
+				return err // keep the stored page rather than save it empty
+			}
 			it := notionItem(wsName, &pg, blocks)
 			if err := p.m.storeItem(ctx, c, it); err != nil {
 				return err
 			}
+			st.High = laterOf(st.High, pg.LastEditedTime.UTC().Format(time.RFC3339))
 		}
 
 		if qRes.HasMore && qRes.NextCursor != "" {
-			if err := p.m.saveCursor(ctx, c.ID, sourceID, qRes.NextCursor, false); err != nil {
+			st.Cursor = qRes.NextCursor
+			b, _ := json.Marshal(st)
+			if err := p.m.saveCursor(ctx, c.ID, sourceID, string(b), false); err != nil {
 				return err
 			}
 			return p.m.enqueue(ctx, nil, c.ID, jobSync, sourceID, nil, 0)
 		}
 
-		return p.m.saveCursor(ctx, c.ID, sourceID, "", true)
+		b, _ := json.Marshal(syncState{Checkpoint: laterOf(st.Checkpoint, st.High)})
+		return p.m.saveCursor(ctx, c.ID, sourceID, string(b), true)
 	}
-
 	// If database query failed, try as individual page
 	return p.syncPage(ctx, c, sourceID)
 }
 
+// Bounds on one page's content: nesting deeper than this, or blocks past
+// this many, are left out.
+const (
+	notionMaxDepth  = 3
+	notionMaxBlocks = 1000
+)
+
+// fetchBlocks reads a page's blocks in order, every page of them, with the
+// children of toggles, columns and nested lists placed after their parent.
+// Child pages and databases are synced as pages of their own.
 func (p *notionProvider) fetchBlocks(ctx context.Context, token, blockID string) ([]notionBlock, error) {
-	var res struct {
-		Results []notionBlock `json:"results"`
+	var out []notionBlock
+	return out, p.appendBlocks(ctx, token, blockID, 0, &out)
+}
+
+func (p *notionProvider) appendBlocks(ctx context.Context, token, blockID string, depth int, out *[]notionBlock) error {
+	cursor := ""
+	for {
+		var res struct {
+			Results    []notionBlock `json:"results"`
+			HasMore    bool          `json:"has_more"`
+			NextCursor string        `json:"next_cursor"`
+		}
+		path := fmt.Sprintf("/blocks/%s/children?page_size=100", blockID)
+		if cursor != "" {
+			path += "&start_cursor=" + url.QueryEscape(cursor)
+		}
+		if err := p.request(ctx, token, http.MethodGet, path, nil, &res); err != nil {
+			return err
+		}
+		for _, b := range res.Results {
+			if len(*out) >= notionMaxBlocks {
+				return nil
+			}
+			*out = append(*out, b)
+			if b.HasChild && depth+1 < notionMaxDepth && b.Type != "child_page" && b.Type != "child_database" {
+				if err := p.appendBlocks(ctx, token, b.ID, depth+1, out); err != nil {
+					return err
+				}
+			}
+		}
+		if !res.HasMore || res.NextCursor == "" {
+			return nil
+		}
+		cursor = res.NextCursor
 	}
-	path := fmt.Sprintf("/blocks/%s/children?page_size=100", blockID)
-	if err := p.request(ctx, token, http.MethodGet, path, nil, &res); err != nil {
-		return nil, err
-	}
-	return res.Results, nil
 }
 
 func (p *notionProvider) syncPage(ctx context.Context, c *conn, pageID string) error {
@@ -334,7 +394,10 @@ func (p *notionProvider) syncPage(ctx context.Context, c *conn, pageID string) e
 		return nil
 	}
 
-	blocks, _ := p.fetchBlocks(ctx, token, pg.ID)
+	blocks, err := p.fetchBlocks(ctx, token, pg.ID)
+	if err != nil {
+		return err // keep the stored page rather than save it empty
+	}
 	it := notionItem(wsName, &pg, blocks)
 	if err := p.m.storeItem(ctx, c, it); err != nil {
 		return err

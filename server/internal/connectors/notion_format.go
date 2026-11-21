@@ -80,6 +80,7 @@ type notionBlock struct {
 	Code      *notionCodeObj `json:"code,omitempty"`
 	Callout   *notionTextObj `json:"callout,omitempty"`
 	Quote     *notionTextObj `json:"quote,omitempty"`
+	Toggle    *notionTextObj `json:"toggle,omitempty"`
 	Divider   map[string]any `json:"divider,omitempty"`
 }
 
@@ -245,6 +246,10 @@ func renderBlocks(blocks []notionBlock) string {
 		case "quote":
 			if block.Quote != nil {
 				fmt.Fprintf(&b, "> %s\n\n", formatRichText(block.Quote.RichText))
+			}
+		case "toggle":
+			if block.Toggle != nil {
+				fmt.Fprintf(&b, "%s\n\n", formatRichText(block.Toggle.RichText))
 			}
 		case "divider":
 			b.WriteString("---\n\n")
