@@ -53,6 +53,7 @@ type notionParent struct {
 	Type       string `json:"type"`
 	DatabaseID string `json:"database_id,omitempty"`
 	PageID     string `json:"page_id,omitempty"`
+	BlockID    string `json:"block_id,omitempty"`
 	Workspace  bool   `json:"workspace,omitempty"`
 }
 
@@ -61,6 +62,7 @@ type notionPage struct {
 	CreatedTime    time.Time                 `json:"created_time"`
 	LastEditedTime time.Time                 `json:"last_edited_time"`
 	Archived       bool                      `json:"archived"`
+	InTrash        bool                      `json:"in_trash"`
 	URL            string                    `json:"url"`
 	Parent         notionParent              `json:"parent"`
 	Properties     map[string]map[string]any `json:"properties"`
@@ -264,11 +266,14 @@ func renderNotionPage(workspaceName string, page *notionPage, blocks []notionBlo
 	if ws == "" {
 		ws = "Workspace"
 	}
-	header = fmt.Sprintf("[Notion · %s · %s]", ws, title)
+	short := truncate(title, 120)
+	header = fmt.Sprintf("[Notion · %s · %s]", ws, short)
 
+	// The header carries the title; repeat it only when the header cut it short.
 	var b strings.Builder
-	fmt.Fprintf(&b, "Title: %s\n", title)
-	fmt.Fprintf(&b, "Workspace: %s\n", ws)
+	if short != title {
+		fmt.Fprintf(&b, "Title: %s\n", title)
+	}
 	if page.URL != "" {
 		fmt.Fprintf(&b, "URL: %s\n", page.URL)
 	}
@@ -298,6 +303,7 @@ func renderNotionPage(workspaceName string, page *notionPage, blocks []notionBlo
 		"workspace_name": ws,
 		"title":          title,
 		"url":            page.URL,
+		"last_edited":    page.LastEditedTime.UTC().Format(time.RFC3339),
 	}
 	if page.Parent.DatabaseID != "" {
 		meta["database_id"] = page.Parent.DatabaseID
@@ -306,15 +312,9 @@ func renderNotionPage(workspaceName string, page *notionPage, blocks []notionBlo
 	return header, strings.TrimRight(b.String(), "\n"), meta
 }
 
-func notionItem(workspaceName string, page *notionPage, blocks []notionBlock) item {
+// notionItem renders a page as an item of the chosen source it syncs under.
+func notionItem(workspaceName string, page *notionPage, blocks []notionBlock, sourceID string) item {
 	header, body, meta := renderNotionPage(workspaceName, page, blocks)
-	sourceID := page.Parent.DatabaseID
-	if sourceID == "" {
-		sourceID = page.Parent.PageID
-	}
-	if sourceID == "" {
-		sourceID = "workspace"
-	}
 	eventDate := page.LastEditedTime
 	if eventDate.IsZero() {
 		eventDate = page.CreatedTime

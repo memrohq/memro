@@ -175,6 +175,15 @@ func (m *Manager) setSourceEnabled(ctx context.Context, connID uuid.UUID, id str
 	return err
 }
 
+// sourceItemKeys lists the keys of the items stored under one source.
+func (m *Manager) sourceItemKeys(ctx context.Context, connID uuid.UUID, sourceID string) ([]string, error) {
+	rows, err := m.deps.Pool.Query(ctx, `SELECT item_key FROM connector_items WHERE connection_id = $1 AND source_id = $2`, connID, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
 func (m *Manager) saveCursor(ctx context.Context, connID uuid.UUID, id, cursor string, finished bool) error {
 	q := `UPDATE connector_sources SET cursor = $3 WHERE connection_id = $1 AND external_id = $2`
 	if finished {

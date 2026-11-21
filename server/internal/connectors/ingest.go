@@ -244,8 +244,10 @@ func (m *Manager) afterWrite(ctx context.Context, c *conn, created []domain.Memo
 // lockItem creates the item row if needed and locks it for this transaction,
 // so concurrent jobs for one item apply one after the other.
 func lockItem(ctx context.Context, tx pgx.Tx, connID uuid.UUID, key, sourceID string) (string, []string, error) {
+	// An item keeps the source it is stored under now (a Notion page can move).
 	if _, err := tx.Exec(ctx, `INSERT INTO connector_items (connection_id, item_key, source_id) VALUES ($1, $2, $3)
-		ON CONFLICT DO NOTHING`, connID, key, sourceID); err != nil {
+		ON CONFLICT (connection_id, item_key) DO UPDATE SET source_id = EXCLUDED.source_id
+		WHERE connector_items.source_id IS DISTINCT FROM EXCLUDED.source_id`, connID, key, sourceID); err != nil {
 		return "", nil, err
 	}
 	var hash string

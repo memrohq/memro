@@ -145,8 +145,6 @@ func TestRenderNotionPage(t *testing.T) {
 	}
 
 	for _, substr := range []string{
-		"Title: RFC 42: Cross-Source Connector Architecture",
-		"Workspace: Acme Corp",
 		"Status: In Review",
 		"Tags: Architecture, Backend",
 		"Sprint: 2026-Q4-Sprint-3",
@@ -161,6 +159,10 @@ func TestRenderNotionPage(t *testing.T) {
 		if !strings.Contains(body, substr) {
 			t.Fatalf("body missing %q:\n%s", substr, body)
 		}
+	}
+
+	if strings.Contains(body, "Title:") || strings.Contains(body, "Workspace:") {
+		t.Fatalf("body repeats what the header already has:\n%s", body)
 	}
 
 	if meta["page_id"] != "page-99" || meta["database_id"] != "db-eng-specs" || meta["source"] != ProviderNotion {
@@ -192,7 +194,7 @@ func TestRenderNotionPage(t *testing.T) {
 		t.Errorf("expected sentry ref 9412 in refs: %+v", refs)
 	}
 
-	it := notionItem("Acme Corp", page, blocks)
+	it := notionItem("Acme Corp", page, blocks, "db-eng-specs")
 	if it.Key != "page:page-99" {
 		t.Fatalf("got item key %q", it.Key)
 	}
