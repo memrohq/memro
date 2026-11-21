@@ -202,10 +202,13 @@ jobs:
       - name: Publish @memro/sdk and memro-cli
         run: |
           if [ -z "$NODE_AUTH_TOKEN" ]; then echo "::warning::NPM_TOKEN is not set; skipping npm"; exit 0; fi
+          # One package failing (v0.1.1 and v0.1.2: npm refused @memro/sdk) mustn't stop the others.
+          failed=""
           for dir in sdk/js cli; do
             name=$(node -p "require('./$dir/package.json').name"); version=$(node -p "require('./$dir/package.json').version")
             if npm view "$name@$version" version >/dev/null 2>&1; then
               echo "$name $version is already on npm; skipping"; continue
             fi
-            (cd "$dir" && { [ ! -f package-lock.json ] || npm ci; } && npm test && npm publish --access public)
+            (cd "$dir" && { [ ! -f package-lock.json ] || npm ci; } && npm test && npm publish --access public) || { echo "::error::$name $version failed to publish"; failed="$failed $name"; }
           done
+          [ -z "$failed" ] || { echo "Not published:$failed"; exit 1; }
