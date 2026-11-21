@@ -7,6 +7,8 @@ and every release and package raises only the last number of its version (see RE
 
 ## [Unreleased]
 
+## [v0.1.2] - 2026-11-21
+
 ### Added
 - **`memro init`: rules for your agents with no account**: adds the hooks to every detected tool and starts `.memro/rules.md`; the hooks then save stated rules, show them at each prompt and warn on edits, without a Memro account or server.
 - **Edits that break a rule get a warning**: a "never…" rule that names something in backticks (never use `Intl` in cart code) is checked on every edit and command in Claude Code and Codex; an edit that uses it gets a note with the rule, never a block. `memro rules` marks the rules that are checked.
