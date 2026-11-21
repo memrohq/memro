@@ -6,6 +6,8 @@ Internal engineering journal tracking Memro's memory retrieval quality, benchmar
 
 ## Entries (Newest First)
 
+- **[2026-11-18: Landing Worktrees One at a Time, and Shorter Holds](2026-11-18-coordination-land-and-holds.md)**: agents landing their own branches fix worktrees (20/100 → 100/100) with or without Memro; `memro land` is 38% cheaper and 21% faster than plain git, not more successful. In one folder Memro lands 100/100 with no give-ups but at 2.0× the time.
+
 - **[2026-11-17: Relay Benchmark — Does Memory Stop a Fresh Agent Repeating Mistakes?](2026-11-17-relay-benchmark.md)**: agent A learns a fact, a fresh agent B must respect it; arms none / notes file / Memro. Pilot v1 traps were too easy (every arm 6/6: A wrote the fact into code comments); v2 tells A the fact during unrelated work: none 5/15, notes 15/15, Memro 15/15 on R1–R3. Memory is the whole difference; in one checkout a notes file ties Memro. Stage 2: a teammate's clone ties (10/10 each); with 300 earlier facts a notes file wins 10/10 to Memro's 6/10 (A didn't save, or B's search missed). With hooks that save the user's stated rules and show them every prompt: Memro 10/10, notes 9/10, Memro tools alone 8/10.
 
 - **[2026-11-15: Baselines — No Memory, Plain RAG and Memro](2026-11-15-baselines-no-memory-and-plain-rag.md)**: on LongMemEval-100, no memory 6%, plain semantic top-15 81%, Memro 81% (p = 1.0 vs RAG); memory is the whole score, Memro's extras show no gain on this subset.
