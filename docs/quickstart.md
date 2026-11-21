@@ -101,4 +101,6 @@ reply = llm(system=f"Relevant memory:\n{context}", user=user_message)
 agent.remember(f"User asked: {user_message}", type="episodic")
 ```
 
+You're set up. ★ [Star memrohq/memro on GitHub](https://github.com/memrohq/memro) to follow releases; it also helps other developers find it.
+
 Next: [Concepts](concepts.md) · [API reference](api-reference.md) · [MCP server](mcp.md)
