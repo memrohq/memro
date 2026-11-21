@@ -653,8 +653,8 @@ func TestGitHubConnector(t *testing.T) {
 	}
 	e.drain()
 	text := e.memoryText()
-	for _, want := range []string{"[GitHub acme-org/api#1 · Login fails on Safari]", "Issue #1: Login fails on Safari",
-		"Labels: bug", "bob commented on", "Reproduced on Safari 18.", "Pull request #2: Add rate limits", "State: merged"} {
+	for _, want := range []string{"[GitHub acme-org/api#1 · Login fails on Safari]", "Issue · State:",
+		"Labels: bug", "bob commented on", "Reproduced on Safari 18.", "[GitHub acme-org/api#2 · Add rate limits]", "Pull request · State: merged"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("memories missing %q:\n%s", want, text)
 		}
@@ -682,7 +682,7 @@ func TestGitHubConnector(t *testing.T) {
 	fake.mu.Unlock()
 	hook("issues", "edited", 1)
 	e.drain()
-	if text = e.memoryText(); !strings.Contains(text, "Issue #1: Login fails on Safari 18\n") || strings.Contains(text, "Safari]") {
+	if text = e.memoryText(); !strings.Contains(text, "· Login fails on Safari 18]") || strings.Contains(text, "Safari]") {
 		t.Fatalf("after edit:\n%s", text)
 	}
 
@@ -699,7 +699,7 @@ func TestGitHubConnector(t *testing.T) {
 	for _, m := range e.memories() {
 		if strings.Contains(m.Content, "acme-org/api#1") {
 			n++
-			if strings.Contains(m.Content, "Issue #1:") {
+			if strings.Contains(m.Content, "Issue · State:") {
 				first = m
 			}
 		}
@@ -722,7 +722,7 @@ func TestGitHubConnector(t *testing.T) {
 	if !strings.Contains(text, "Fixed in #2.") {
 		t.Fatalf("new comment missing:\n%s", text)
 	}
-	if strings.Contains(text, "Issue #1: Login fails") {
+	if strings.Contains(text, "Issue · State:") {
 		t.Fatal("a memory the user deleted was recreated")
 	}
 

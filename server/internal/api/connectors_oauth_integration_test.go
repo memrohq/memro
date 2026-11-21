@@ -514,7 +514,151 @@ func TestGitLabAndSentryWebhooksReachOnlyChosenProjects(t *testing.T) {
 	if issue("22", "payments"); strings.Contains(e.memoryText(), "Crash 22") {
 		t.Fatal("sentry: a project the user did not choose was stored")
 	}
-	if issue("11", "web"); !strings.Contains(e.memoryText(), "Crash 11") || !strings.Contains(e.memoryText(), "1234") {
+	issue("11", "web")
+	// The count changes with every event, so it is kept in metadata, not the text.
+	countInMeta := false
+	for _, m := range e.memories() {
+		var meta map[string]any
+		_ = json.Unmarshal(m.Metadata, &meta)
+		countInMeta = countInMeta || meta["count"] == float64(1234)
+	}
+	if !strings.Contains(e.memoryText(), "Crash 11") || !countInMeta {
 		t.Fatalf("sentry: the chosen project's issue (count sent as a string) was not stored:\n%s", e.memoryText())
+	}
+}
+
+// A Notion workspace with a wiki (root → child → grand) and a database. The
+// wiki's sub-pages sync under the chosen root; a page no longer shared, a page
+// moved out of the wiki and a deleted database row are removed on the next
+// pass; unchanged pages are not fetched again.
+func TestNotionPageTreeAndSweep(t *testing.T) {
+	var mu sync.Mutex
+	parent := map[string]map[string]any{
+		"root":  {"type": "workspace", "workspace": true},
+		"child": {"type": "page_id", "page_id": "root"},
+		"grand": {"type": "page_id", "page_id": "child"},
+		"moved": {"type": "page_id", "page_id": "root"},
+		"row-1": {"type": "database_id", "database_id": "db-1"},
+		"row-2": {"type": "database_id", "database_id": "db-1"},
+	}
+	children := map[string][]string{"root": {"child", "moved"}, "child": {"grand"}}
+	rows := []string{"row-1", "row-2"}
+	unshared := map[string]bool{}
+	blockFetches := map[string]int{}
+	page := func(id string) map[string]any {
+		return map[string]any{"id": id, "object": "page", "url": "https://notion.so/" + id, "parent": parent[id],
+			"created_time": "2026-10-20T10:00:00Z", "last_edited_time": "2026-10-20T11:00:00Z",
+			"properties": map[string]any{"Name": map[string]any{"type": "title", "title": []any{map[string]any{"plain_text": "Page " + id}}}}}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		p := r.URL.Path
+		id := strings.Split(strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(p, "/v1/pages/"), "/v1/blocks/"), "/v1/databases/"), "/")[0]
+		switch {
+		case p == "/v1/oauth/token":
+			_, _ = io.WriteString(w, `{"access_token":"n-1","workspace_id":"ws-1","workspace_name":"Acme","bot_id":"b1","owner":{"type":"user","user":{"id":"u1","name":"Ana"}}}`)
+		case p == "/v1/search":
+			var body struct{ Filter struct{ Value string } }
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.Filter.Value == "database" {
+				_, _ = io.WriteString(w, `{"results":[{"object":"database","id":"db-1","title":[{"plain_text":"Specs"}]}]}`)
+				return
+			}
+			res := []any{}
+			for _, id := range []string{"root", "child", "grand", "row-1"} {
+				res = append(res, page(id))
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"results": res})
+		case p == "/v1/databases/db-1/query":
+			res := []any{}
+			for _, id := range rows {
+				res = append(res, page(id))
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"results": res})
+		case p == "/v1/databases/db-1":
+			_, _ = io.WriteString(w, `{"object":"database","parent":{"type":"workspace","workspace":true}}`)
+		case strings.HasPrefix(p, "/v1/databases/"):
+			w.WriteHeader(http.StatusNotFound) // not a database
+		case strings.HasPrefix(p, "/v1/pages/") || (strings.HasPrefix(p, "/v1/blocks/") && !strings.HasSuffix(p, "/children")):
+			if unshared[id] || parent[id] == nil {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(page(id))
+		case strings.HasSuffix(p, "/children"):
+			blockFetches[id]++
+			res := []any{map[string]any{"id": id + "-text", "type": "paragraph",
+				"paragraph": map[string]any{"rich_text": []any{map[string]any{"plain_text": "Body of " + id}}}}}
+			for _, c := range children[id] {
+				res = append(res, map[string]any{"id": c, "type": "child_page", "has_children": true})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"results": res})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	e := setupConnectorsDeps(t, 1000, func(c *config.Config) {
+		c.Connectors.NotionClientID, c.Connectors.NotionClientSecret = "nid", "nsec"
+	}, fakeClient(srv))
+	ctx := context.Background()
+	conn := e.connectOAuth("notion")
+	e.drain()
+
+	// Sources: the database and the top of the wiki, not its sub-pages or rows.
+	var srcs []string
+	rs, _ := e.st.Pool.Query(ctx, `SELECT external_id FROM connector_sources WHERE connection_id = $1 ORDER BY 1`, conn.ID)
+	for rs.Next() {
+		var s string
+		_ = rs.Scan(&s)
+		srcs = append(srcs, s)
+	}
+	if strings.Join(srcs, ",") != "db-1,root" {
+		t.Fatalf("sources %v, want db-1 and root", srcs)
+	}
+
+	e.enableSources(conn.ID, "db-1", "root")
+	e.drain()
+	for _, id := range []string{"root", "child", "grand", "moved", "row-1", "row-2"} {
+		if !strings.Contains(e.memoryText(), "Body of "+id) && !strings.Contains(e.memoryText(), "Page "+id) {
+			t.Fatalf("page %s not synced:\n%s", id, e.memoryText())
+		}
+	}
+	var grandSource string
+	_ = e.st.Pool.QueryRow(ctx, `SELECT source_id FROM connector_items WHERE connection_id = $1 AND item_key = 'page:grand'`, conn.ID).Scan(&grandSource)
+	if grandSource != "root" {
+		t.Fatalf("grand is stored under %q, want the chosen root", grandSource)
+	}
+
+	// Next pass: grand is no longer shared, moved leaves the wiki, row-2 is deleted.
+	mu.Lock()
+	unshared["grand"] = true
+	parent["moved"] = map[string]any{"type": "workspace", "workspace": true}
+	children["root"] = []string{"child"}
+	rows = []string{"row-1"}
+	before := blockFetches["child"]
+	mu.Unlock()
+	for _, src := range []string{"db-1", "root"} {
+		if _, err := e.st.Pool.Exec(ctx, `INSERT INTO connector_jobs (connection_id, kind, key, run_at) VALUES ($1, 'sync', $2, NOW())`, conn.ID, src); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.drain()
+	text := e.memoryText()
+	for _, gone := range []string{"Page grand", "Page moved", "Page row-2"} {
+		if strings.Contains(text, gone) {
+			t.Fatalf("%s should have been removed:\n%s", gone, text)
+		}
+	}
+	for _, kept := range []string{"Page root", "Page child", "Page row-1"} {
+		if !strings.Contains(text, kept) {
+			t.Fatalf("%s was lost:\n%s", kept, text)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if blockFetches["child"] != before {
+		t.Fatalf("unchanged page child was fetched again (%d → %d)", before, blockFetches["child"])
 	}
 }
