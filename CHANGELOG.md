@@ -7,6 +7,9 @@ and every release and package raises only the last number of its version (see RE
 
 ## [Unreleased]
 
+### Added
+- **`MEMRO_MCP_TOOLS` lists only the tools you name** (`memro-mcp`): every listed tool's definition is read again on each model call, about 5,200 tokens for all 26. With `MEMRO_MCP_TOOLS=recall,remember,update_memory` it is about 1,700, and in the GitHub history benchmark Memro then answered with 0.64× the tokens of `gh` at the same accuracy (28/30). Unset, every tool is listed as before.
+
 ## [v0.1.2] - 2026-11-21
 
 ### Added

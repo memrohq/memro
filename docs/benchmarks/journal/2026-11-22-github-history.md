@@ -150,3 +150,68 @@ of 2–3× fewer tokens was wrong.
 3. Recall's default `limit` of 5 for agents: try 10 and report misses.
 
 Raw rows: [`results/github-history/run-20261122`](../results/github-history/run-20261122/).
+
+## Follow-up: a slim tool list (plan written before the run)
+
+`memro-mcp` now takes `MEMRO_MCP_TOOLS`, a comma-separated list of the tools
+to list (unset: all 26, as before). With `recall,remember,update_memory`, a
+session that only says "hi" reads 2,515 tokens instead of 6,018, so the
+per-call overhead drops from ~5,200 to ~1,700.
+
+**Run.** The same 30 questions, a new run (`run-slim-20261122`) with three
+arms interleaved: gh, memro-raw (all tools, a replication of the first run)
+and **memro-slim** (memro-raw's memories, the slim list). Every arm is still
+allowed to call only what it was allowed before.
+
+**Pass bar.** The same as above, for memro-slim against gh in this run:
+fewer input tokens on at least 21 of 30 (sign test p < 0.05), and not
+significantly less accurate (McNemar).
+
+**Prediction.** memro-slim's median falls to about 9,000 (two turns × 3,500
+fewer), around 0.55 of gh, and its accuracy matches memro-raw's, since the
+retrieval is the same.
+
+### Follow-up results
+
+**The pass bar was met. With the slim tool list, Memro read fewer input
+tokens than gh on 26 of 30 questions (sign test p = 0.00006), a median of
+0.64 of gh's, at the same accuracy (28/30 each).**
+
+| Arm | Correct | Median input tokens | Range | Median seconds | Median cost |
+|---|---|---|---|---|---|
+| gh | 28/30 | 15,208 | 6,490–36,884 | 13.9 | $0.0015 |
+| memro-raw (26 tools) | 28/30 | 16,871 | 14,979–24,834 | 6.2 | $0.0015 |
+| **memro-slim (3 tools)** | **28/30** | **10,320** | 8,062–11,907 | **6.0** | $0.0016 |
+
+| Against gh | Fewer tokens | Sign test p | Median ratio | Right where gh wasn't / the reverse | McNemar p |
+|---|---|---|---|---|---|
+| memro-raw | 10/30 | 0.10 | 1.20 | 1 / 1 | 1.0 |
+| memro-slim | **26/30** | **0.00006** | **0.64** | 2 / 2 | 1.0 |
+
+- **The replication holds.** memro-raw again ties gh on tokens (slightly
+  more this time). Its accuracy rose from 26 to 28 with the same memories,
+  which shows how much one run per question moves.
+- **The prediction was close.** The median was 10,320, against the predicted
+  9,000; slim sessions took a median of 3 turns, not 2.
+- **Tokens fell, but dollars didn't.** The repeated tool list was billed as
+  cache reads, which cost a tenth as much, so memro-slim's median cost
+  ($0.0016) is about the same as gh's ($0.0015). The saving is in context
+  room and in how predictable a session is: memro-slim never went past
+  11,907 tokens, while gh went up to 36,884.
+- **Misses** were again ranking misses: q09 (both Memro arms found #91's
+  handoff notes, not #98) and q18. gh missed q06 and q07 (the flawed
+  question).
+
+### What it means now
+
+- On this repo, Memro's GitHub connector, with the MCP server listing only
+  the tools a session needs, answers history questions with about a third
+  fewer tokens than `gh`, 2.3× faster, and with the same accuracy. It is not
+  cheaper in dollars on Claude's cache pricing.
+- Without the slim list it saves nothing: all 26 tool definitions cost
+  ~5,200 tokens on every call. memro-cli should set `MEMRO_MCP_TOOLS` when it
+  connects a tool, or the server should list fewer tools by default.
+- Still open: a larger repo, more than one run per question, and recall's
+  ranking misses (`limit` 5).
+
+Raw rows: [`results/github-history/run-slim-20261122`](../results/github-history/run-slim-20261122/).

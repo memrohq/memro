@@ -9,6 +9,8 @@ Each question is put to a fresh headless Claude Code agent (Haiku) in four arms:
                (rendered and chunked by the connector's own code, see
                server/internal/connectors/github_dump_test.go)
   memro-facts  the same, over facts Claude Haiku extracted from each issue/PR
+  memro-slim   memro-raw's memories, with the MCP server listing only recall,
+               remember and update_memory (MEMRO_MCP_TOOLS)
 
 An answer is graded against the reference by Claude Sonnet. Tokens are all the
 input tokens the agent's turns read (input + cache writes + cache reads).
@@ -46,7 +48,8 @@ FACTS = DATA / "facts-haiku"
 API = os.environ.get("MEMRO_API", "http://127.0.0.1:18090")
 DB = os.environ.get("MEMRO_DATABASE_URL", "postgres://memro@localhost:55434/memro?sslmode=disable")
 MEMRO_MCP = ROOT / "mcp" / ".venv" / "bin" / "memro-mcp"
-ARMS = ["none", "gh", "memro-raw", "memro-facts"]
+ARMS = ["none", "gh", "memro-raw", "memro-facts", "memro-slim"]
+SLIM = "recall,remember,update_memory"
 
 SYSTEM = (f"You answer a developer's question about the history of the GitHub repository {REPO}: "
           "its pull requests and issues. {how} Answer in at most three sentences. "
@@ -56,12 +59,14 @@ HOW = {
     "gh": f"Look it up with the gh CLI (gh pr, gh issue and gh search, always with -R {REPO}).",
     "memro-raw": "Look it up with the recall tool, which searches a memory synced from the repository's issues and pull requests.",
     "memro-facts": "Look it up with the recall tool, which searches a memory synced from the repository's issues and pull requests.",
+    "memro-slim": "Look it up with the recall tool, which searches a memory synced from the repository's issues and pull requests.",
 }
 TOOLS = {
     "none": ["--tools", ""],
     "gh": ["--tools", "Bash", "--allowedTools", "Bash(gh pr:*)", "Bash(gh issue:*)", "Bash(gh search:*)"],
     "memro-raw": ["--tools", "", "--allowedTools", "mcp__memro__recall"],
     "memro-facts": ["--tools", "", "--allowedTools", "mcp__memro__recall"],
+    "memro-slim": ["--tools", "", "--allowedTools", "mcp__memro__recall"],
 }
 
 EXTRACT = ("You will be given one GitHub issue or pull request with its discussion. Write down every fact in it a "
@@ -129,7 +134,8 @@ def ask(arm, question, out, creds):
     if creds:
         cfg = out / f"mcp-{arm}.json"
         cfg.write_text(json.dumps({"mcpServers": {"memro": {"command": str(MEMRO_MCP), "env": {
-            "MEMRO_BASE_URL": API, "MEMRO_AGENT_ID": creds["agent_id"], "MEMRO_PRIVATE_KEY": creds["private_key"]}}}}))
+            "MEMRO_BASE_URL": API, "MEMRO_AGENT_ID": creds["agent_id"], "MEMRO_PRIVATE_KEY": creds["private_key"],
+            **({"MEMRO_MCP_TOOLS": SLIM} if arm == "memro-slim" else {})}}}}))
         cmd += ["--mcp-config", str(cfg)]
     t0 = time.time()
     p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=600, stdin=subprocess.DEVNULL)
@@ -153,19 +159,20 @@ def ask(arm, question, out, creds):
     return row
 
 
-def run(out, ids=None):
+def run(out, ids=None, arms=ARMS):
     out = out.resolve()  # the agents run in out/_cwd, and the MCP config path must still resolve there
     out.mkdir(parents=True, exist_ok=True)
     qs = [q for q in json.loads((HERE / "questions.json").read_text()) if not ids or q["id"] in ids]
     res = out / "results.jsonl"
     done = {(r["id"], r["arm"]) for r in map(json.loads, res.read_text().splitlines())} if res.exists() else set()
-    agents = {a: memory(a, out) for a in ARMS if a.startswith("memro")}
+    # memro-slim reads memro-raw's memories; only the listed tools differ.
+    agents = {a: memory("memro-raw" if a == "memro-slim" else a, out) for a in arms if a.startswith("memro")}
     print({a: c["memories"] for a, c in agents.items()}, "memories")
     rng = random.Random(1122)
     for q in qs:
-        arms = ARMS[:]
-        rng.shuffle(arms)  # interleaved, in a fixed random order per question
-        for arm in arms:
+        order = list(arms)
+        rng.shuffle(order)  # interleaved, in a fixed random order per question
+        for arm in order:
             if (q["id"], arm) in done:
                 continue
             row = {"id": q["id"], "arm": arm, **ask(arm, q["question"], out, agents.get(arm))}
@@ -196,7 +203,7 @@ def report(out):
             print(f"| {a} | {sum(r['correct'] for r in rs)}/{len(rs)} | {statistics.median(r['input_tokens'] for r in rs):,.0f} | "
                   f"{statistics.mean(r['input_tokens'] for r in rs):,.0f} | {statistics.median(r['turns'] for r in rs)} | "
                   f"{statistics.median(r['seconds'] for r in rs)} | {sum(r['cost_usd'] or 0 for r in rs):.2f} |")
-    for a in ("memro-raw", "memro-facts"):
+    for a in ("memro-raw", "memro-facts", "memro-slim"):
         pair = [(by[(i, a)], by[(i, "gh")]) for i in ids if (i, a) in by and (i, "gh") in by]
         if not pair:
             continue
@@ -214,5 +221,6 @@ if __name__ == "__main__":
     ap.add_argument("--out", type=pathlib.Path)
     ap.add_argument("--report", type=pathlib.Path)
     ap.add_argument("--ids", nargs="*", help="only these questions (a smoke test)")
+    ap.add_argument("--arms", nargs="*", default=ARMS, choices=ARMS)
     a = ap.parse_args()
-    report(a.report) if a.report else run(a.out, a.ids)
+    report(a.report) if a.report else run(a.out, a.ids, a.arms)

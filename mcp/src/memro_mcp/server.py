@@ -208,7 +208,10 @@ async def list_tools() -> list[Tool]:
     unique: dict[str, Tool] = {}
     for tool in _all_tools():
         unique.setdefault(tool.name, tool)
-    return list(unique.values())
+    # MEMRO_MCP_TOOLS=recall,remember lists only those: every listed tool's
+    # definition is read again on each model call (~5k tokens for all of them).
+    keep = {t.strip() for t in os.getenv("MEMRO_MCP_TOOLS", "").split(",") if t.strip()}
+    return [t for t in unique.values() if not keep or t.name in keep]
 
 
 # A memory's type, for the remember tools. No default: an omitted type lets the

@@ -57,6 +57,7 @@ Once connected, agents have direct access to:
 | `MEMRO_PRIVATE_KEY` | auto | Sovereign agent Ed25519 private key |
 | `MCP_TRANSPORT` | `stdio` | `stdio` for local CLI tools, or `sse` for HTTP SSE transport |
 | `MCP_LOG_LEVEL` | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `MEMRO_MCP_TOOLS` | all tools | Comma-separated tools to list, e.g. `recall,remember,update_memory`. Each listed tool's definition is read on every model call; all 26 cost about 5,200 tokens a call, these three about 1,700 |
 
 ---
 
