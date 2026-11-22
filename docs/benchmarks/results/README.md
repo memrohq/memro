@@ -23,6 +23,7 @@ their own names (`*.bak`, `*.partial-*`) and aren't counted in any post.
 | `relay/smoke*` | harness smoke tests | – |
 | `longmemeval/*` | LongMemEval runs (`ledger.*.json` lists them per worktree) | [2026-10-23](../journal/2026-10-23-longmemeval-so-far.md), [2026-11-15 baselines](../journal/2026-11-15-baselines-no-memory-and-plain-rag.md), [2026-11-15 evolution](../journal/2026-11-15-evolution-engine-and-contradictions.md) |
 | `longmemeval/write-raw-100`, `write-facts-haiku-100` | raw exchanges vs Haiku-extracted facts | [2026-11-22](../journal/2026-11-22-longmemeval-model-writes.md) |
+| `github-history/run-20261122` | GitHub history: gh vs Memro connector recall vs facts, 30 questions × 4 arms | [2026-11-22](../journal/2026-11-22-github-history.md) |
 | `locomo/locomo-openai` | LoCoMo scores | none yet |
 
 Print a coordination or relay table again with the harness's `--report`:
