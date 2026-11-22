@@ -18,9 +18,10 @@ Pushing the tag runs
 3. creates the GitHub release, with that changelog section as the notes,
 4. pushes `server/vX.Y.Z` and `sdk/go/vX.Y.Z` so Go modules resolve the version,
 5. publishes packages whose version isn't on the registry yet: `memro` and
-   `memro-mcp` to PyPI, `@memro/sdk` and `memro-cli` to npm. A registry whose
-   token secret (`PYPI_API_TOKEN`, `NPM_TOKEN`) isn't set is skipped with a
-   warning. To publish a package, raise its version in its `pyproject.toml`
+   `memro-mcp` to PyPI, `@memro/sdk` and `memro-cli` to npm. Both registries
+   trust `release.yml` through trusted publishing (each package's settings on
+   pypi.org and npmjs.com name memrohq/memro and `release.yml`), so no token
+   secrets are needed. To publish a package, raise its version in its `pyproject.toml`
    or `package.json` before the release.
 
 ## Steps
