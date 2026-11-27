@@ -233,9 +233,11 @@ export const repoOf = (cwd = process.cwd()) => {
 // repo, and shown to each at every prompt: in the relay benchmark agents
 // skipped `remember` or searched with words the rule didn't share, and a
 // notes file read whole beat Memro (2026-11-18).
-const RULE = /\b(never|always|from now on|as a rule)\b/i;
+// "Don't use X" is a rule too, but "do not commit" or "do not edit tests" is a
+// task instruction, so only a ban on using something counts.
+const RULE = /\b(never|always|from now on|as a rule)\b|\b(don't|do not)\s+(use|import|install)\b/i;
 
-/** The prompt's rule sentences ("never…", "always…"), each with the sentence after it, which usually says why. */
+/** The prompt's rule sentences ("never…", "always…", "don't use…"), each with the sentence after it, which usually says why. */
 export function statedRules(prompt = "") {
   const sentences = String(prompt).split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
   return sentences.flatMap((x, i) => (RULE.test(x) && x.length >= 12 ? [`${x}${sentences[i + 1] ? ` ${sentences[i + 1]}` : ""}`.slice(0, 400)] : []));
@@ -275,8 +277,8 @@ export function addRules(cwd, rules) {
   fs.appendFileSync(file, fresh.map((r) => `- ${r}\n`).join(""));
 }
 
-// A "never…" rule that names something in backticks ("never use `Intl` in
-// cart code") is checked on every edit and command: in the 2026-11-19 depth
+// A "never…" rule that names something, in backticks ("never use `Intl` in
+// cart code") or as one bare word (below), is checked on every edit and command: in the 2026-11-19 depth
 // grid, 7 of the notes file's 11 misses were agents that had read the rule.
 // Warn only, until the false-positive rate is known (ADR 0037).
 const FORBIDS = /\b(never|don't|do not|avoid|must not|mustn't|stop using|no longer use)\b/i;
@@ -291,11 +293,24 @@ export function addedText(i) {
   return [t.new_string, t.content, ...(Array.isArray(t.edits) ? t.edits.map((e) => e?.new_string) : [])].filter((x) => typeof x === "string").join("\n");
 }
 
-/** The "never…" rules that `text` breaks, each with the backticked term it uses. */
+// Without backticks, people still name one thing right after the ban ("never
+// use Intl in cart code", "don't use moment, use date-fns"). Take that word
+// only when the next thing is punctuation, the end or a preposition, so
+// "never use inline styles" or "never deploy on Fridays" name nothing.
+const BARE_BAN = /\b(?:(?:never|don't|do not|must not|mustn't|no longer)\s+(?:use|import|call|install)|stop using|avoid(?:\s+using)?)\s+([A-Za-z_$@][\w$@/.-]*?)\.?(?=\s*$|\s*[,;:!?)]|\.\s|\s+(?:in|for|on|anywhere|here|inside|within|when|because|unless|or|and|again)\b)/gi;
+const NOT_TERMS = new Set(["the", "a", "an", "this", "that", "it", "them", "these", "those"]);
+
+/** What a "never…" rule names: its backticked terms, else the one word after "never use" and the like. */
+const bannedTerms = (rule) => {
+  const ticked = [...rule.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim());
+  return ticked.length ? ticked : [...rule.matchAll(BARE_BAN)].map((m) => m[1]).filter((t) => !NOT_TERMS.has(t.toLowerCase()));
+};
+
+/** The "never…" rules that `text` breaks, each with the term it uses. */
 export function brokenRules(rules, text) {
   if (!text) return [];
   return rules.filter((r) => FORBIDS.test(r)).flatMap((rule) => {
-    const term = [...rule.matchAll(/`([^`]+)`/g)].map((m) => m[1].trim()).find((t) => t && new RegExp(`(^|[^\\w])${escapeRe(t)}($|[^\\w])`).test(text));
+    const term = bannedTerms(rule).find((t) => t && new RegExp(`(^|[^\\w])${escapeRe(t)}($|[^\\w])`).test(text));
     return term ? [{ rule, term }] : [];
   });
 }

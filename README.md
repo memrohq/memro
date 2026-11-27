@@ -7,9 +7,9 @@ npx memro-cli init      # no account: rules in .memro/rules.md, hooks in every a
 npx memro-cli connect   # optional: shared memory and coordination across machines and teammates
 ```
 
-- **Caught as you say it:** "never…", "always…", "from now on…" in a prompt is saved to `.memro/rules.md` in your words. See it in `git diff`, fix it by editing a line, share it by committing.
+- **Caught as you say it:** "never…", "always…", "from now on…", "don't use…" in a prompt is saved to `.memro/rules.md` in your words. See it in `git diff`, fix it by editing a line, share it by committing.
 - **Shown to every agent, every prompt:** no search to miss it. In our [benchmark](docs/benchmarks/journal/2026-11-19-relay-rule-depth.md), with the rule buried among 3,000 facts, agents shown the rules this way avoided the trap 150/150 times; a notes file they were told to read, 139/150 (not a significant difference at our pre-set bar); search alone, 58/150.
-- **Checked on every edit:** put the thing to avoid in backticks and an edit or command that uses it gets a warning with the rule (Claude Code and Codex; warn only, never blocks).
+- **Checked on every edit:** name the thing to avoid ("never use Intl in cart code", or in backticks for anything longer than a word) and an edit or command that uses it gets a warning with the rule (Claude Code and Codex; warn only, never blocks).
 - **Memory and coordination too:** with an account, agents share long-term memory across tools and machines, and claim files so two agents don't edit one at once. Sync Slack, GitHub, Linear, Notion and [40+ more](https://memro.co/docs/connectors.html), hosted or self-hosted with Docker.
 
 <p align="center">
