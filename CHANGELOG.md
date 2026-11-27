@@ -7,6 +7,9 @@ and every release and package raises only the last number of its version (see RE
 
 ## [Unreleased]
 
+### Fixed
+- **`memro connect` no longer dead-ends on a separate project memory** (`memro-cli`): choosing "Separate for this project" without a key in hand cancelled the whole setup. It now says where to create a key (app.memro.co → API keys), and pressing Enter uses shared memory instead.
+
 ### Added
 - **Rules without backticks, and "don't use…" rules** (`memro-cli`): "Never use Intl in cart code" now warns on an edit that uses `Intl`, as the backticked form did; the term is the one word after "never use", "don't use", "avoid" or "stop using", and a phrase ("never use inline styles") still names nothing. "Don't use / import / install X" is saved as a rule; "do not commit" and other task instructions still aren't.
 - **`MEMRO_MCP_TOOLS` lists only the tools you name** (`memro-mcp`): every listed tool's definition is read again on each model call, about 5,200 tokens for all 26. With `MEMRO_MCP_TOOLS=recall,remember,update_memory` it is about 1,700, and in the GitHub history benchmark Memro then answered with 0.64× the tokens of `gh` at the same accuracy (28/30). Unset, every tool is listed as before.

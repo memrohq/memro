@@ -446,9 +446,12 @@ async function connect(opts) {
       );
       if (!memoryChoice) return ui.cancelled();
       if (memoryChoice.value === "isolated") {
+        // Without a key in hand this used to cancel the whole setup, so say where
+        // to get one and let Enter fall back to shared memory instead.
+        ui.line(ui.c.dim("Create a key at app.memro.co → API keys, or press Enter to use shared memory."));
         const enteredKey = await promptText(`${ui.bar()}  Project API key (memro_sk_…): `);
-        if (!enteredKey) return ui.cancelled("No key entered. Nothing changed.");
-        opts.key = enteredKey;
+        if (enteredKey) opts.key = enteredKey;
+        else ui.answered("Memory", "Shared with your account");
         ui.gap();
       }
     }
