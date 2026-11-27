@@ -9,10 +9,11 @@ npx memro-cli rules        # list them; rules edit <n> <text>, rules delete <n>
 ```
 
 `init` adds hooks to Claude Code, Codex, Cursor, Gemini CLI and OpenCode. They
-save the rules you state in a prompt ("never…", "always…", "from now on…") to
+save the rules you state in a prompt ("never…", "always…", "from now on…",
+"don't use…") to
 `.memro/rules.md`, show them to the agent at every prompt, and warn when an
-edit or command uses something a "never…" rule names in backticks (Claude Code
-and Codex). Commit the file to share the rules.
+edit or command uses something a "never…" rule names, in backticks or as one
+word after "never use" (Claude Code and Codex). Commit the file to share the rules.
 
 For memory and coordination across machines and teammates, connect an account:
 

@@ -32,7 +32,9 @@ to every tool's format is already free (rulesync and others).
   others when it's merged, not at once.
 - Without an account (`memro init`), the hooks still save, show and check
   the file's rules; claims, statuses and memory need `memro connect`.
-- Enforcement, warn only: a "never…" rule naming something in backticks is
+- Enforcement, warn only: a "never…" rule naming something in backticks, or
+  (added 2026-11-27) one bare word right after "never use / don't use /
+  avoid / stop using" followed by punctuation or a preposition, is
   checked against what each edit or command adds (Claude Code edits, Codex
   and OpenCode patches, shell commands), whole-term, and a match adds a note
   with the rule. Every warning is logged to `~/.memro/hooks/log.jsonl`

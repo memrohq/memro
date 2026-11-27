@@ -447,6 +447,8 @@ test("statedRules picks rule sentences with the reason after them, and nothing f
   assert.deepEqual(statedRules("Add itemCount. By the way, never use Intl anywhere. POS devices have no ICU. Do not commit."),
     ["By the way, never use Intl anywhere. POS devices have no ICU."]);
   assert.deepEqual(statedRules("Add hasItem(cart, id). Do not edit test files. Do not commit."), []);
+  assert.deepEqual(statedRules("Add a date picker. Don't use moment, use date-fns."), ["Don't use moment, use date-fns."]);
+  assert.deepEqual(statedRules("Please do not install lodash"), ["Please do not install lodash"]);
 });
 
 test("a rule stated in a prompt goes into .memro/rules.md, and later prompts are shown it", async () => {
@@ -482,6 +484,18 @@ test("brokenRules flags a never-rule's backticked term, as a whole term, and ign
   assert.deepEqual(brokenRules(rules, "const f = new Intl.NumberFormat()").map((b) => b.term), ["Intl"]);
   assert.deepEqual(brokenRules(rules, "const International = 1; const m = Money(1)"), []);
   assert.deepEqual(brokenRules(rules, "git push --force origin main").map((b) => b.term), ["git push --force"]);
+});
+
+test("brokenRules reads one bare word after the ban, and names nothing when the ban is a phrase", () => {
+  const term = (rule, text) => brokenRules([rule], text).map((b) => b.term);
+  assert.deepEqual(term("Never use Intl in cart code. POS has no ICU.", "new Intl.NumberFormat()"), ["Intl"]);
+  assert.deepEqual(term("Don't use moment, use date-fns.", "import moment from 'moment'"), ["moment"]);
+  assert.deepEqual(term("Avoid lodash.", "import _ from 'lodash'"), ["lodash"]);
+  assert.deepEqual(term("never use Intl", "Intl.DateTimeFormat()"), ["Intl"]);
+  assert.deepEqual(term("Never use Intl in cart code.", "const International = 1"), [], "whole term only");
+  assert.deepEqual(term("Never use inline styles.", "inline function f() {}"), [], "a phrase names nothing");
+  assert.deepEqual(term("Never deploy on Fridays.", "deploy()"), [], "no use/import/call verb");
+  assert.deepEqual(term("Never use the old API in checkout.", "the old API"), []);
 });
 
 test("addedText reads what an edit, a patch or a command adds", () => {
